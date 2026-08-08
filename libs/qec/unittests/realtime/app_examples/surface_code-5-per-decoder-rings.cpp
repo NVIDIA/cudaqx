@@ -104,9 +104,8 @@ config::multi_decoder_config make_config() {
     dc.H_sparse = identity;
     dc.O_sparse = identity;
     dc.D_sparse = identity;
+    dc.error_rate_vec = std::vector<double>(kBlockSize, kUniformErrorRate);
     cudaqx::heterogeneous_map pm_args;
-    pm_args.insert("error_rate_vec",
-                   std::vector<double>(kBlockSize, kUniformErrorRate));
     pm_args.insert("merge_strategy", "smallest_weight");
     dc.decoder_custom_args = pm_args;
     multi.decoders.push_back(dc);

@@ -320,11 +320,12 @@ def test_pymatching_decode_to_observable_surface_code_dem():
         'pymatching',
         dem.detector_error_matrix,
         O=dem.observables_flips_matrix,
+        output='observables',
         error_rate_vec=np.array(dem.error_rates),
     )
 
     dr = decoder.decode_batch(syndromes)
-    # With decode_to_observables=True, each row is observable flips
+    # Constructed for observable output, so each row is observable flips
     # (length num_observables), not error predictions.
     obs_per_shot = np.asarray(dr.result, dtype=np.float64)
     data_predictions = np.round(obs_per_shot).astype(np.uint8).T
@@ -669,6 +670,7 @@ def test_pymatching_decodes_stim_surface_code_dem():
             'pymatching',
             H,
             O=O,
+            output='observables',
             error_rate_vec=rates,
             merge_strategy='independent',
         )
@@ -676,7 +678,7 @@ def test_pymatching_decodes_stim_surface_code_dem():
         pytest.skip(f'pymatching decoder unavailable in this build: {e}')
 
     dr = decoder.decode_batch(syndromes)
-    # With O provided, the decoder returns predicted observable flips.
+    # Constructed for observable output, so these are observable flips.
     obs_per_shot = np.asarray(dr.result, dtype=np.float64)
     data_predictions = np.round(obs_per_shot).astype(np.uint8).flatten()
 
@@ -818,6 +820,10 @@ def test_decoder_context_d_sparse_layout():
         else:
             row.append(v)
     assert rebuilt == [list(r) for r in fc_m2d]
+
+
+def test_d_sparse_does_not_require_explicit_measurement_width():
+    assert qec.d_sparse([[2], [], [0, 4]]) == [2, -1, -1, 0, 4, -1]
 
 
 def test_decoder_context_single_type_code_empty_component():

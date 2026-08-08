@@ -67,12 +67,17 @@ Legacy convenience wrappers (delegate to ``cpu::sample_dem``; prefer the
 Decoder Interfaces
 ==================
 
+.. doxygenenum:: cudaq::qec::decode_result_type
+
+.. doxygenenum:: cudaq::qec::decoder_model_source
+
 .. doxygenstruct:: cudaq::qec::decoder_inputs
     :members:
 
-.. doxygenfunction:: cudaq::qec::d_sparse(const cudaq::M2DSparseMatrix &)
+.. doxygenclass:: cudaq::qec::decoder_init
+    :members:
 
-.. doxygentypedef:: cudaq::qec::decoder_init
+.. doxygenfunction:: cudaq::qec::d_sparse(const cudaq::M2DSparseMatrix &)
 
 .. doxygenclass:: cudaq::qec::decoder
     :members:

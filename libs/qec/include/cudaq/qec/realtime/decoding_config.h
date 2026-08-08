@@ -10,6 +10,7 @@
 
 #include "cuda-qx/core/heterogeneous_map.h"
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -70,11 +71,24 @@ struct decoder_config {
   /// GPU-accelerated decoder, hence at this level rather than inside the
   /// per-decoder custom args. Unset = unpinned.
   std::optional<int> cuda_device_id;
+  /// Path to a Stim detector error model, authoritative when set. Resolved
+  /// against the configuration file's directory, or the process working
+  /// directory for a programmatic or raw-string configuration. Mutually
+  /// exclusive with `H_sparse`, `O_sparse` and `error_rate_vec`, which are the
+  /// competing matrix representation of the same model; `block_size` and
+  /// `syndrome_size` remain accepted as checked assertions.
+  std::string stim_dem_path;
+  /// Required for a matrix model; derived from the DEM otherwise. Zero means
+  /// unset.
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
+  /// Maps raw measurements to detectors. Orthogonal to the model source and
+  /// required by both.
   std::vector<std::int64_t> D_sparse;
+  /// Error probability per H column.
+  std::vector<double> error_rate_vec;
   decoder_custom_args_t decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;
@@ -180,6 +194,14 @@ __attribute__((visibility("default"))) std::string decoder_config_json_schema();
 /// @return 0 on success, non-zero on failure.
 __attribute__((visibility("default"))) int
 configure_decoders(multi_decoder_config &config);
+
+/// @brief Configure the decoders, resolving relative model paths (such as
+/// `stim_dem_path`) against @p base_dir. The overload above uses the process
+/// working directory as it stands when resolution starts.
+/// @return 0 on success, non-zero on failure.
+__attribute__((visibility("default"))) int
+configure_decoders(multi_decoder_config &config,
+                   const std::filesystem::path &base_dir);
 
 /// @brief Configure the decoders from a file. This function configures both
 /// local decoders, and if running on remote target hardware, will submit the

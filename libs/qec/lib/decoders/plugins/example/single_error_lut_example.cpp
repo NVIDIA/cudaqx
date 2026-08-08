@@ -22,9 +22,20 @@ private:
   std::map<std::string, std::size_t> single_qubit_err_signatures;
 
 public:
-  single_error_lut_example(const cudaq::qec::sparse_binary_matrix &H,
+  single_error_lut_example(cudaq::qec::decoder_init inputs,
+                           decode_result_type requested_output,
                            const cudaqx::heterogeneous_map &params)
-      : decoder(H) {
+      : decoder(std::move(inputs), requested_output) {
+    // The requested result form is validated here, at construction, so an
+    // unsupported request fails at setup rather than on the first decode. This
+    // example produces an error frame only; a decoder that can also project to
+    // observables would instead call project_errors_to_observables() before
+    // returning.
+    if (requested_output != decode_result_type::errors)
+      throw std::invalid_argument(
+          "single_error_lut_example produces an error frame only; construct it "
+          "for error output");
+    const auto &H = get_inputs().detector_error_matrix();
     // Decoder-specific constructor arguments can be placed in `params`.
 
     // The loop below sets err_sig[r] = '1' (not XOR-toggle), so canonicalize
@@ -41,7 +52,7 @@ public:
     }
   }
 
-  virtual decoder_result decode(const std::vector<float_t> &syndrome) {
+  decoder_result decode(const std::vector<float_t> &syndrome) override {
     // This is a simple decoder that simply results
     decoder_result result{false, std::vector<float_t>(block_size, 0.0)};
 
@@ -77,10 +88,12 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut_example, static std::unique_ptr<decoder> create(
-                                    const cudaq::qec::decoder_init &init,
+                                    cudaq::qec::decoder_init inputs,
+                                    std::optional<decode_result_type> output,
                                     const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<single_error_lut_example>(init,
-                                                                      params);
+        return std::make_unique<single_error_lut_example>(
+            std::move(inputs), output.value_or(decode_result_type::errors),
+            params);
       })
 };
 

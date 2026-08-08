@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 
 using namespace cudaqx;
 
@@ -511,6 +513,32 @@ std::vector<std::int64_t> d_sparse(const cudaq::M2DSparseMatrix &m2d) {
     out.push_back(-1);
   }
   return out;
+}
+
+/// Bridge from CUDA-Q circuit analysis to the QEC-owned sparse matrix a
+/// decoder is constructed from.
+sparse_binary_matrix m2d_to_sparse(const cudaq::M2DSparseMatrix &m2d) {
+  using index_type = sparse_binary_matrix::index_type;
+  if (m2d.rows.size() > std::numeric_limits<index_type>::max() ||
+      m2d.num_measurements > std::numeric_limits<index_type>::max())
+    throw std::overflow_error(
+        "measurement-to-detector map exceeds uint32_t dimensions");
+
+  std::vector<std::vector<index_type>> rows;
+  rows.reserve(m2d.rows.size());
+  for (const auto &source_row : m2d.rows) {
+    auto &row = rows.emplace_back();
+    row.reserve(source_row.size());
+    for (const auto measurement : source_row) {
+      if (measurement > std::numeric_limits<index_type>::max())
+        throw std::overflow_error(
+            "measurement-to-detector index exceeds uint32_t range");
+      row.push_back(static_cast<index_type>(measurement));
+    }
+  }
+  return sparse_binary_matrix::from_nested_csr(
+      static_cast<index_type>(rows.size()),
+      static_cast<index_type>(m2d.num_measurements), rows);
 }
 
 decoder_context decoder_context_from_memory_circuit(const code &code,
