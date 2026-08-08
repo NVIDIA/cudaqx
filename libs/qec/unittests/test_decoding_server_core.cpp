@@ -6,12 +6,11 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  *******************************************************************************/
 
-#include "CqrTransceiver.h"
 #include "DecodingServer.h"
 #include "DecodingSession.h"
-#include "RoundAccumulator.h"
-#include "RpcDispatcher.h"
+#include "RpcSlot.h"
 #include "../lib/hardware_guards.h"
+#include "../lib/realtime/realtime_decoding.h"
 
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
@@ -20,14 +19,11 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <cuda_runtime_api.h>
 #include <memory>
 #include <stdexcept>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -70,210 +66,127 @@ public:
   bool throw_on_decode = false;
 };
 
-class CaptureTransceiver final : public ITransceiver {
-public:
-  RxFrame recv() override { return {}; }
-
-  void send(const PeerId &, const uint8_t *data, std::size_t len) override {
-    response.assign(data, data + len);
-  }
-
-  void shutdown() override {}
-
-  std::vector<uint8_t> response;
-};
-
 std::pair<std::unique_ptr<DecodingSession>, ControlledDecoder *>
 make_session() {
   auto decoder = std::make_unique<ControlledDecoder>();
   auto *raw_decoder = decoder.get();
-  SyndromeMappingTable mappings{{0, {{}}}};
-  return {DecodingSession::create(std::move(decoder), std::move(mappings)),
-          raw_decoder};
+  return {DecodingSession::create(std::move(decoder)), raw_decoder};
 }
 
-WorkItem make_enqueue(CaptureTransceiver &transport, uint64_t counter,
-                      const std::vector<uint8_t> &bits) {
-  WorkItem item{};
-  item.function_id = kEnqueueSyndromesFunctionId;
-  item.request_id = static_cast<uint32_t>(counter + 1);
-  item.response_transport = &transport;
-  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) +
-                        bit_packed_bytes(bits.size()));
+// ---------------------------------------------------------------------------
+// CQR slot builders — the wire format as the CUDAQ dispatcher hands it to
+// the HOST_CALL handlers (RPCHeader + payload in one slot).
+// ---------------------------------------------------------------------------
 
-  auto *request = reinterpret_cast<EnqueueRequestPayload *>(
-      item.frame_buf.data() + sizeof(RPCHeader));
-  request->decoder_id = 0;
-  request->counter = static_cast<int64_t>(counter);
-  request->syndrome_mapping_id = 0;
-  request->num_syndromes = static_cast<int64_t>(bits.size());
+std::vector<uint8_t> make_cqr_slot(uint32_t function_id, uint32_t request_id,
+                                   const std::vector<uint8_t> &payload = {}) {
+  std::vector<uint8_t> slot(sizeof(RPCHeader) + payload.size());
+  RPCHeader header{};
+  header.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+  header.function_id = function_id;
+  header.arg_len = static_cast<uint32_t>(payload.size());
+  header.request_id = request_id;
+  std::memcpy(slot.data(), &header, sizeof(header));
+  if (!payload.empty())
+    std::memcpy(slot.data() + sizeof(header), payload.data(), payload.size());
+  return slot;
+}
 
-  auto *packed =
-      item.frame_buf.data() + sizeof(RPCHeader) + sizeof(EnqueueRequestPayload);
+// CQR enqueue wire payload: [u64 decoder_id][u64 counter][u64 mapping_id]
+// [u64 num_syndromes][bit-packed bytes, LSB-first].
+std::vector<uint8_t> make_enqueue_payload(uint64_t counter,
+                                          const std::vector<uint8_t> &bits,
+                                          uint64_t mapping_id = 0,
+                                          uint64_t decoder_id = 0) {
+  std::vector<uint8_t> payload(4 * sizeof(uint64_t) +
+                               bit_packed_bytes(bits.size()));
+  const std::array<uint64_t, 4> fields = {decoder_id, counter, mapping_id,
+                                          static_cast<uint64_t>(bits.size())};
+  std::memcpy(payload.data(), fields.data(), sizeof(fields));
   for (std::size_t i = 0; i < bits.size(); ++i)
     if (bits[i] & 1u)
-      packed[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
-  return item;
+      payload[sizeof(fields) + i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+  return payload;
 }
 
-WorkItem make_get_corrections(CaptureTransceiver &transport, bool reset) {
-  WorkItem item{};
-  item.function_id = kGetCorrectionsFunctionId;
-  item.request_id = 101;
-  item.response_transport = &transport;
-  item.frame_buf.resize(sizeof(RPCHeader) +
-                        sizeof(GetCorrectionsRequestPayload));
-
-  auto *request = reinterpret_cast<GetCorrectionsRequestPayload *>(
-      item.frame_buf.data() + sizeof(RPCHeader));
-  request->decoder_id = 0;
-  request->return_size = 1;
-  request->reset = reset ? 1 : 0;
-  return item;
+std::vector<uint8_t> make_get_corrections_payload(int64_t return_size,
+                                                  bool reset,
+                                                  int64_t decoder_id = 0) {
+  GetCorrectionsRequestPayload req{};
+  req.decoder_id = decoder_id;
+  req.return_size = return_size;
+  req.reset = reset ? 1 : 0;
+  std::vector<uint8_t> payload(sizeof(req));
+  std::memcpy(payload.data(), &req, sizeof(req));
+  return payload;
 }
 
-WorkItem make_reset(CaptureTransceiver &transport) {
-  WorkItem item{};
-  item.function_id = kResetDecoderFunctionId;
-  item.request_id = 202;
-  item.response_transport = &transport;
-  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(ResetRequestPayload));
-  auto *request = reinterpret_cast<ResetRequestPayload *>(
-      item.frame_buf.data() + sizeof(RPCHeader));
-  request->decoder_id = 0;
-  return item;
+std::vector<uint8_t> make_reset_payload(int64_t decoder_id = 0) {
+  ResetRequestPayload req{};
+  req.decoder_id = decoder_id;
+  std::vector<uint8_t> payload(sizeof(req));
+  std::memcpy(payload.data(), &req, sizeof(req));
+  return payload;
 }
 
-void expect_status(const CaptureTransceiver &transport, RpcStatus status) {
-  ASSERT_GE(transport.response.size(), sizeof(RPCResponse));
-  const auto *response =
-      reinterpret_cast<const RPCResponse *>(transport.response.data());
+void expect_tx_status(const std::vector<uint8_t> &tx, RpcStatus status,
+                      uint32_t request_id) {
+  ASSERT_GE(tx.size(), sizeof(RPCResponse));
+  const auto *response = reinterpret_cast<const RPCResponse *>(tx.data());
   EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
   EXPECT_EQ(response->status, static_cast<int32_t>(status));
+  EXPECT_EQ(response->request_id, request_id);
 }
 
-TEST(DecodingSessionStateTest, RequiresACompletedDecodeForEachResult) {
-  auto [session, decoder] = make_session();
-  CaptureTransceiver transport;
+// ---------------------------------------------------------------------------
+// Slot parsing (RpcSlot.h): the advertised payload must be physically
+// present in the supplied slot.
+// ---------------------------------------------------------------------------
 
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::NOT_READY);
-
-  session->on_enqueue(make_enqueue(transport, 0, {1}));
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::NOT_READY);
-
-  // A completed decode is ready even when the algorithm reports that it did
-  // not converge. Readiness and convergence are different contracts.
-  ASSERT_FALSE(decoder->converged);
-  session->on_enqueue(make_enqueue(transport, 1, {0}));
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::OK);
-  ASSERT_EQ(transport.response.size(), sizeof(RPCResponse) + 1);
-  EXPECT_EQ(transport.response[sizeof(RPCResponse)] & 1u, 1u);
-
-  // Accepting part of the next volume makes the previous result stale.
-  session->on_enqueue(make_enqueue(transport, 2, {0}));
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::NOT_READY);
-
-  session->on_enqueue(make_enqueue(transport, 3, {0}));
-  session->on_get_corrections(make_get_corrections(transport, true));
-  expect_status(transport, RpcStatus::OK);
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::NOT_READY);
+TEST(RpcSlotParse, RejectsPayloadBeyondReportedSlot) {
+  auto rx = make_cqr_slot(kEnqueueSyndromesFunctionId, 17,
+                          make_enqueue_payload(7, {1}, 0, 3));
+  // Keep accessible, valid-looking payload bytes beyond the reported slot.
+  // A parser that trusts arg_len instead of slot_size will incorrectly accept
+  // this request even without a sanitizer detecting the contract violation.
+  slot::EnqueueView view;
+  EXPECT_FALSE(slot::parse_enqueue(rx.data(), sizeof(RPCHeader), view));
 }
 
-TEST(DecodingSessionStateTest, KeepsFailuresStickyUntilReset) {
-  auto [session, decoder] = make_session();
-  CaptureTransceiver transport;
-
-  decoder->throw_on_decode = true;
-  session->on_enqueue(make_enqueue(transport, 0, {1}));
-  session->on_enqueue(make_enqueue(transport, 1, {0}));
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::INTERNAL_ERROR);
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::INTERNAL_ERROR);
-
-  decoder->throw_on_decode = false;
-  session->on_reset(make_reset(transport));
-  expect_status(transport, RpcStatus::OK);
-  session->on_enqueue(make_enqueue(transport, 2, {1}));
-  session->on_enqueue(make_enqueue(transport, 3, {0}));
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::OK);
-
-  session->latch_syndromes_dropped();
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::SYNDROMES_DROPPED);
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::SYNDROMES_DROPPED);
-
-  session->on_reset(make_reset(transport));
-  expect_status(transport, RpcStatus::OK);
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::NOT_READY);
+TEST(RpcSlotParse, AcceptsAnExactlySizedEnqueueRequestPayload) {
+  auto rx = make_cqr_slot(kEnqueueSyndromesFunctionId, 23,
+                          make_enqueue_payload(7, {1}, 0, 3));
+  slot::EnqueueView view;
+  ASSERT_TRUE(slot::parse_enqueue(rx.data(), rx.size(), view));
+  EXPECT_EQ(view.decoder_id, 3u);
+  EXPECT_EQ(view.counter, 7u);
+  EXPECT_EQ(view.syndrome_mapping_id, 0u);
+  EXPECT_EQ(view.num_syndromes, 1u);
+  ASSERT_EQ(view.byte_count, 1u);
+  EXPECT_EQ(view.packed_bits[0], 1u);
 }
 
-TEST(DecodingSessionStateTest, RejectsMeasurementVolumeOverflow) {
-  auto [session, decoder] = make_session();
-  CaptureTransceiver transport;
-  (void)decoder;
-
-  session->on_enqueue(make_enqueue(transport, 0, {1}));
-  session->on_enqueue(make_enqueue(transport, 1, {0, 1}));
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::INTERNAL_ERROR);
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::INTERNAL_ERROR);
-
-  session->on_reset(make_reset(transport));
-  expect_status(transport, RpcStatus::OK);
-  session->on_get_corrections(make_get_corrections(transport, false));
-  expect_status(transport, RpcStatus::NOT_READY);
+TEST(RpcSlotParse, PeeksTheDecoderIdFromEveryRequestKind) {
+  uint64_t id = 0;
+  auto eq = make_cqr_slot(kEnqueueSyndromesFunctionId, 1,
+                          make_enqueue_payload(0, {1}, 0, /*decoder_id=*/5));
+  ASSERT_TRUE(slot::peek_decoder_id(eq.data(), eq.size(), id));
+  EXPECT_EQ(id, 5u);
+  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 2,
+                          make_get_corrections_payload(1, false, 6));
+  ASSERT_TRUE(slot::peek_decoder_id(gc.data(), gc.size(), id));
+  EXPECT_EQ(id, 6u);
+  auto rst = make_cqr_slot(kResetDecoderFunctionId, 3, make_reset_payload(7));
+  ASSERT_TRUE(slot::peek_decoder_id(rst.data(), rst.size(), id));
+  EXPECT_EQ(id, 7u);
+  // Empty payload has no decoder_id to peek.
+  auto bare = make_cqr_slot(kResetDecoderFunctionId, 4);
+  EXPECT_FALSE(slot::peek_decoder_id(bare.data(), bare.size(), id));
 }
 
-TEST(RoundAccumulatorTest, RejectsMultiVpPassThroughMappings) {
-  const RoundKey key{.decoder_id = 0, .counter = 12, .syndrome_mapping_id = 0};
-  const SyndromeMappingTable multi_vp{{0, {{}, {}}}};
-
-  RoundAccumulator unequal_lengths;
-  const uint8_t vp0[] = {1};
-  EXPECT_THROW(unequal_lengths.ingest(key, 0, vp0, 1, multi_vp),
-               std::invalid_argument);
-
-  RoundAccumulator equal_lengths;
-  const uint8_t vp0_equal[] = {1, 0};
-  EXPECT_THROW(equal_lengths.ingest(key, 0, vp0_equal, 2, multi_vp),
-               std::invalid_argument);
-
-  RoundAccumulator single_vp;
-  const SyndromeMappingTable supported{{0, {{}}}};
-  auto completed = single_vp.ingest(key, 0, vp0_equal, 2, supported);
-  ASSERT_TRUE(completed.has_value());
-  EXPECT_EQ(completed->bits, (std::vector<uint8_t>{1, 0}));
-}
-
-TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
-  constexpr uint32_t function_id = 0x12345678;
-  RpcDispatcher dispatcher;
-  dispatcher.register_handler(function_id,
-                              [](RxFrame, ResponseWriter &) -> void {
-                                throw std::runtime_error("handler failure");
-                              });
-
-  RxFrame frame;
-  frame.buf.resize(sizeof(RPCHeader));
-  auto *header = reinterpret_cast<RPCHeader *>(frame.buf.data());
-  header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
-  header->function_id = function_id;
-  header->request_id = 55;
-
-  CaptureTransceiver transport;
-  EXPECT_NO_THROW(dispatcher.dispatch(std::move(frame), transport));
-  expect_status(transport, RpcStatus::INTERNAL_ERROR);
-}
+// ---------------------------------------------------------------------------
+// Device resolution + pin probes
+// ---------------------------------------------------------------------------
 
 TEST(ResolveDecodeDevice, UnpinnedDefaultsToZero) {
   EXPECT_EQ(cudaq::qec::decoding_server::resolve_decode_device(-1), 0);
@@ -290,8 +203,8 @@ TEST(SetCudaDeviceForDecode, UnpinnedIsNoOp) {
 }
 
 TEST(SetCudaDeviceForDecode, ImpossibleDeviceThrows) {
-  // The handshake's failure transport rides on this throw; an id beyond the
-  // device count fails cudaSetDevice on any machine, including GPU-less CI.
+  // An id beyond the device count fails cudaSetDevice on any machine,
+  // including GPU-less CI.
   int count = 0;
   if (cudaGetDeviceCount(&count) != cudaSuccess)
     count = 0;
@@ -302,7 +215,7 @@ TEST(SetCudaDeviceForDecode, ImpossibleDeviceThrows) {
 
 /// cuda_device_id_ is protected: setting an impossible id directly bypasses
 /// decoder::get()'s construction-time range check, the only front door --
-/// which is exactly what makes the handshake's failure path injectable here.
+/// which is exactly what makes create()'s pin-probe failure path injectable.
 class MispinnedDecoder final : public cudaq::qec::decoder {
 public:
   MispinnedDecoder()
@@ -328,278 +241,235 @@ public:
   }
 };
 
-TEST(DecodingSessionPinHandshake, UnhonorablePinFailsStartWorker) {
-  // The contract under test: a worker that cannot pin must never serve, and
-  // the failure must surface on the caller (server-startup) thread. This is
-  // the test that fails if start_worker ever reverts to log-and-continue.
-  SyndromeMappingTable table;
-  table[0] = {{}};
-  auto session = DecodingSession::create(std::make_unique<MispinnedDecoder>(),
-                                         std::move(table));
-  EXPECT_THROW(session->start_worker(), std::runtime_error);
-  // The failed worker was joined inside start_worker; nothing is left to
-  // serve and destruction must not hang.
-  EXPECT_FALSE(session->worker.joinable());
-}
-
-TEST(DecodingSessionPinHandshake, PinnedWorkerStartsAndServes) {
-  // start_worker() must resolve the pin handshake (throwing on failure per
-  // its contract) and leave a live worker serving items.
-  int count = 0;
-  if (cudaGetDeviceCount(&count) != cudaSuccess || count < 1)
-    GTEST_SKIP() << "needs >= 1 CUDA device";
-
-  cudaqx::heterogeneous_map params;
-  params.insert("cuda_device_id", 0);
-  auto dec = cudaq::qec::decoder::get(
-      "single_error_lut",
-      cudaq::qec::decoder_init(
-          /*H=*/cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1}, {0}),
-          /*O=*/
-          cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1}, {0}),
-          /*error_rates=*/{},
-          // One detector is the parity of two incoming measurement
-          // bits, so a decode completes only after two one-bit
-          // enqueue calls.
-          /*D=*/
-          cudaq::qec::sparse_binary_matrix::from_csr(1, 2, {0, 2}, {0, 1})),
-      params);
-
-  SyndromeMappingTable table;
-  table[0] = {{}};
-  auto session = DecodingSession::create(std::move(dec), std::move(table));
-  ASSERT_NO_THROW(session->start_worker());
-
-  CaptureTransceiver transport;
-  ASSERT_TRUE(session->try_enqueue(make_reset(transport)));
-  for (int i = 0; i < 200 && session->reset_count.load() == 0; ++i)
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  EXPECT_EQ(session->reset_count.load(), 1u)
-      << "pinned worker did not serve the queued item";
+TEST(DecodingSessionCreate, UnhonorablePinFailsCreate) {
+  // The contract under test: a session whose decoder cannot pin must fail at
+  // server bring-up (create()), never at the first RPC.  This is the test
+  // that fails if the create()-time probe ever reverts to log-and-continue.
+  EXPECT_THROW(DecodingSession::create(std::make_unique<MispinnedDecoder>()),
+               std::runtime_error);
 }
 
 // ---------------------------------------------------------------------------
-// CqrTransceiver direct dispatch (install_dispatch_sink): the handler runs
-// inline on the inject() caller thread, with no recv-thread handoff.
+// Inline HOST_CALL path (DecodingSession::handle_*): the request is served
+// entirely on the calling thread — rx parsed in place, decoder run inline,
+// response written straight into the tx slot (magic release-stored last).
 // ---------------------------------------------------------------------------
 
-// CQR request slot: RPCHeader (+ optional payload) as the CUDAQ dispatcher
-// hands it to inject().
-std::vector<uint8_t> make_cqr_slot(uint32_t function_id, uint32_t request_id,
-                                   const std::vector<uint8_t> &payload = {}) {
-  std::vector<uint8_t> slot(sizeof(RPCHeader) + payload.size());
-  RPCHeader header{};
-  header.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
-  header.function_id = function_id;
-  header.arg_len = static_cast<uint32_t>(payload.size());
-  header.request_id = request_id;
-  std::memcpy(slot.data(), &header, sizeof(header));
-  if (!payload.empty())
-    std::memcpy(slot.data() + sizeof(header), payload.data(), payload.size());
-  return slot;
-}
+TEST(DecodingSessionInline, ServesAFullShotInPlaceOnTheCallingThread) {
+  auto [session, decoder] = make_session();
+  ASSERT_FALSE(decoder->converged);
 
-TEST(CqrDirectDispatch, RunsBlockingHandlerInlineAndCompletesTxSlot) {
-  CqrTransceiver transceiver;
-  RpcDispatcher dispatcher;
-  std::thread::id handler_tid{};
-  dispatcher.register_handler(kGetCorrectionsFunctionId,
-                              [&](RxFrame, ResponseWriter &writer) {
-                                handler_tid = std::this_thread::get_id();
-                                writer.write_error(RpcStatus::NOT_READY);
-                              });
-  ASSERT_TRUE(transceiver.install_dispatch_sink([&](RxFrame &&frame) {
-    dispatcher.dispatch(std::move(frame), transceiver);
-  }));
+  std::vector<uint8_t> tx(64, 0xEE);
 
-  const auto rx = make_cqr_slot(kGetCorrectionsFunctionId, /*request_id=*/42);
-  std::vector<uint8_t> tx(sizeof(RPCResponse));
-  // Completing this call single-threaded also locks in the invariant that
-  // inject() does not hold its mutex across the sink: the handler's
-  // write_error re-enters send(), which takes the same mutex -- a violation
-  // deadlocks right here.
-  transceiver.inject(rx.data(), tx.data(), rx.size(),
-                     kGetCorrectionsFunctionId);
+  // Not ready before any decode.
+  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 7,
+                          make_get_corrections_payload(1, false));
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::NOT_READY, 7);
 
-  EXPECT_EQ(handler_tid, std::this_thread::get_id())
-      << "handler did not run inline on the inject() caller thread";
+  // Two one-bit rounds complete the volume; each enqueue completes its slot.
+  auto eq0 = make_cqr_slot(kEnqueueSyndromesFunctionId, 8,
+                           make_enqueue_payload(0, {1}));
+  session->handle_enqueue(eq0.data(), tx.data(), eq0.size());
+  expect_tx_status(tx, RpcStatus::OK, 8);
+
+  auto eq1 = make_cqr_slot(kEnqueueSyndromesFunctionId, 9,
+                           make_enqueue_payload(1, {0}));
+  session->handle_enqueue(eq1.data(), tx.data(), eq1.size());
+  expect_tx_status(tx, RpcStatus::OK, 9);
+
+  // A completed decode is ready even when the algorithm reports that it did
+  // not converge. Readiness and convergence are different contracts.
+  // Corrections are packed directly into the tx slot payload area.
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::OK, 7);
   const auto *response = reinterpret_cast<const RPCResponse *>(tx.data());
-  EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
-  EXPECT_EQ(response->status, static_cast<int32_t>(RpcStatus::NOT_READY));
-  EXPECT_EQ(response->request_id, 42u);
+  ASSERT_EQ(response->result_len, 1u);
+  EXPECT_EQ(tx[sizeof(RPCResponse)] & 1u, 1u);
+  EXPECT_EQ(session->decode_count.load(), 1u);
+
+  // Accepting part of the next volume makes the previous result stale.
+  auto eq2 = make_cqr_slot(kEnqueueSyndromesFunctionId, 10,
+                           make_enqueue_payload(2, {0}));
+  session->handle_enqueue(eq2.data(), tx.data(), eq2.size());
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::NOT_READY, 7);
+
+  // get_corrections(reset=true) clears the result for the next volume.
+  auto eq3 = make_cqr_slot(kEnqueueSyndromesFunctionId, 11,
+                           make_enqueue_payload(3, {0}));
+  session->handle_enqueue(eq3.data(), tx.data(), eq3.size());
+  auto gc_reset = make_cqr_slot(kGetCorrectionsFunctionId, 12,
+                                make_get_corrections_payload(1, true));
+  session->handle_get_corrections(gc_reset.data(), tx.data(), gc_reset.size());
+  expect_tx_status(tx, RpcStatus::OK, 12);
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::NOT_READY, 7);
 }
 
-TEST(CqrDirectDispatch, EnqueueAcksImmediatelyAndDispatchesInline) {
-  CqrTransceiver transceiver;
-  RpcDispatcher dispatcher;
-  std::thread::id handler_tid{};
-  int32_t status_at_handler_time = -1;
-  std::vector<uint8_t> handler_frame;
-  std::vector<uint8_t> tx(sizeof(RPCResponse));
-  dispatcher.register_handler(
-      kEnqueueSyndromesFunctionId, [&](RxFrame frame, ResponseWriter &) {
-        handler_tid = std::this_thread::get_id();
-        // The fire-and-forget ACK must be complete BEFORE the handler runs:
-        // an exception after a deferred ACK would stall the CUDAQ transport
-        // on an unwritten tx slot.
-        status_at_handler_time =
-            reinterpret_cast<const RPCResponse *>(tx.data())->status;
-        handler_frame = frame.buf;
-      });
-  ASSERT_TRUE(transceiver.install_dispatch_sink([&](RxFrame &&frame) {
-    dispatcher.dispatch(std::move(frame), transceiver);
-  }));
+TEST(DecodingSessionInline, EnqueueRespondsOkAndDefersDecodeErrors) {
+  auto [session, decoder] = make_session();
+  decoder->throw_on_decode = true;
+  std::vector<uint8_t> tx(64, 0);
 
-  // 4-arg CUDAQ enqueue wire format: [u64 decoder_id][u64 counter]
-  // [u64 mapping_id][u64 num_syndromes][bit-packed bytes].
-  std::vector<uint8_t> payload(4 * sizeof(uint64_t) + 1);
-  const std::array<uint64_t, 4> fields = {/*decoder_id=*/3, /*counter=*/7,
-                                          /*mapping_id=*/0,
-                                          /*num_syndromes=*/1};
-  std::memcpy(payload.data(), fields.data(), sizeof(fields));
-  payload.back() = 1;
-  const auto rx =
-      make_cqr_slot(kEnqueueSyndromesFunctionId, /*request_id=*/23, payload);
+  // Fire-and-forget contract: the decode failure does NOT fail the enqueue
+  // response; it latches and surfaces at the next get_corrections.
+  auto eq0 = make_cqr_slot(kEnqueueSyndromesFunctionId, 1,
+                           make_enqueue_payload(0, {1}));
+  session->handle_enqueue(eq0.data(), tx.data(), eq0.size());
+  expect_tx_status(tx, RpcStatus::OK, 1);
+  auto eq1 = make_cqr_slot(kEnqueueSyndromesFunctionId, 2,
+                           make_enqueue_payload(1, {0}));
+  session->handle_enqueue(eq1.data(), tx.data(), eq1.size());
+  expect_tx_status(tx, RpcStatus::OK, 2);
 
-  transceiver.inject(rx.data(), tx.data(), rx.size(),
-                     kEnqueueSyndromesFunctionId);
+  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 3,
+                          make_get_corrections_payload(1, false));
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::INTERNAL_ERROR, 3);
+  // Sticky until reset.
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::INTERNAL_ERROR, 3);
 
-  EXPECT_EQ(handler_tid, std::this_thread::get_id());
-  EXPECT_EQ(status_at_handler_time, 0) << "enqueue ACK not written before "
-                                          "the handler ran";
-  ASSERT_EQ(handler_frame.size(),
-            sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) + 1);
-  const auto *request = reinterpret_cast<const EnqueueRequestPayload *>(
-      handler_frame.data() + sizeof(RPCHeader));
-  EXPECT_EQ(request->decoder_id, 3);
-  EXPECT_EQ(request->counter, 7);
-  EXPECT_EQ(request->num_syndromes, 1);
-  EXPECT_EQ(handler_frame.back(), 1);
+  decoder->throw_on_decode = false;
+  auto rst = make_cqr_slot(kResetDecoderFunctionId, 4, make_reset_payload());
+  session->handle_reset(rst.data(), tx.data(), rst.size());
+  expect_tx_status(tx, RpcStatus::OK, 4);
+
+  session->handle_enqueue(eq0.data(), tx.data(), eq0.size());
+  session->handle_enqueue(eq1.data(), tx.data(), eq1.size());
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::OK, 3);
 }
 
-TEST(CqrDirectDispatch, ShutdownReleasesBlockedInjectWaiter) {
-  CqrTransceiver transceiver;
-  RpcDispatcher dispatcher;
-  // Handler intentionally produces no response: inject() parks on its
-  // pending promise exactly as it does while a session worker decodes.
-  dispatcher.register_handler(kGetCorrectionsFunctionId,
-                              [](RxFrame, ResponseWriter &) {});
-  ASSERT_TRUE(transceiver.install_dispatch_sink([&](RxFrame &&frame) {
-    dispatcher.dispatch(std::move(frame), transceiver);
-  }));
-
-  const auto rx = make_cqr_slot(kGetCorrectionsFunctionId, /*request_id=*/7);
-  std::vector<uint8_t> tx(sizeof(RPCResponse));
-  std::thread waiter([&] {
-    transceiver.inject(rx.data(), tx.data(), rx.size(),
-                       kGetCorrectionsFunctionId);
-  });
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  transceiver.shutdown(); // drain must complete the slot and release waiter
-  waiter.join();          // hangs here (test timeout) if the drain is broken
-
-  const auto *response = reinterpret_cast<const RPCResponse *>(tx.data());
-  EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
-  EXPECT_EQ(response->status, static_cast<int32_t>(RpcStatus::BAD_REQUEST));
-  EXPECT_EQ(response->request_id, 7u);
-}
-
-TEST(CqrDirectDispatch, ConcurrentCollidingClientRidsCompleteTheirOwnSlots) {
-  // Per-decoder rings mean one dispatcher thread per ring calls inject()
-  // concurrently, and each ring's caller session numbers its requests
-  // independently -- so distinct in-flight blocking calls legitimately carry
-  // the SAME client request_id.  Every caller must still receive ITS OWN
-  // response in ITS tx_slot (correlation is by the transceiver's unique
-  // token), discriminated here by the echoed ptp_timestamp.  Under
-  // client-rid keying this deadlocks or cross-completes slots.
-  constexpr int kThreads = 4;
-  CqrTransceiver transceiver;
-  RpcDispatcher dispatcher;
-  std::atomic<int> arrived{0};
-  dispatcher.register_handler(
-      kGetCorrectionsFunctionId, [&](RxFrame, ResponseWriter &writer) {
-        // Hold every handler until all callers hold a live pending entry, so
-        // the colliding-rid window genuinely overlaps.
-        arrived.fetch_add(1, std::memory_order_acq_rel);
-        while (arrived.load(std::memory_order_acquire) < kThreads)
-          std::this_thread::yield();
-        writer.write_error(RpcStatus::NOT_READY);
-      });
-  ASSERT_TRUE(transceiver.install_dispatch_sink([&](RxFrame &&frame) {
-    dispatcher.dispatch(std::move(frame), transceiver);
-  }));
-
-  constexpr uint32_t kSharedClientRid = 42; // collides across all "rings"
-  std::vector<std::vector<uint8_t>> rx(kThreads);
-  std::vector<std::vector<uint8_t>> tx(kThreads);
-  for (int t = 0; t < kThreads; ++t) {
-    rx[t] = make_cqr_slot(kGetCorrectionsFunctionId, kSharedClientRid);
-    reinterpret_cast<RPCHeader *>(rx[t].data())->ptp_timestamp = 1000 + t;
-    tx[t].assign(sizeof(RPCResponse), 0);
-  }
-
-  std::vector<std::thread> callers;
-  for (int t = 0; t < kThreads; ++t)
-    callers.emplace_back([&, t] {
-      transceiver.inject(rx[t].data(), tx[t].data(), rx[t].size(),
-                         kGetCorrectionsFunctionId);
-    });
-  for (auto &caller : callers)
-    caller.join();
-
-  for (int t = 0; t < kThreads; ++t) {
-    const auto *response = reinterpret_cast<const RPCResponse *>(tx[t].data());
-    EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE) << t;
-    EXPECT_EQ(response->status, static_cast<int32_t>(RpcStatus::NOT_READY))
-        << t;
-    EXPECT_EQ(response->request_id, kSharedClientRid)
-        << "client rid not restored for caller " << t;
-    EXPECT_EQ(response->ptp_timestamp, 1000u + t)
-        << "response landed in the wrong caller's tx_slot";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Spin-then-block worker wait (SpinPolicy.h): both arrival modes must be
-// served regardless of the configured budget (the env knob is parsed once
-// per process, so this test is deliberately budget-agnostic).
-// ---------------------------------------------------------------------------
-
-TEST(DecodingSessionSpin, ProcessesBurstAndIdleArrivals) {
+TEST(DecodingSessionInline, RejectsMeasurementVolumeOverflow) {
   auto [session, decoder] = make_session();
   (void)decoder;
-  // ControlledDecoder is unpinned, so start_worker's CUDA pin is a no-op and
-  // this test runs on driverless boxes too.
-  ASSERT_NO_THROW(session->start_worker());
+  std::vector<uint8_t> tx(64, 0);
 
-  CaptureTransceiver transport;
-  // Burst: back-to-back arrivals land inside the worker's spin window when
-  // spinning is enabled.
-  constexpr uint64_t kBurst = 8;
-  for (uint64_t i = 0; i < kBurst; ++i)
-    ASSERT_TRUE(session->try_enqueue(make_reset(transport)));
-  for (int i = 0; i < 400 && session->reset_count.load() < kBurst; ++i)
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  EXPECT_EQ(session->reset_count.load(), kBurst);
+  // {1} then {0,1}: 3 bits into a 2-bit volume — deferred INTERNAL_ERROR.
+  auto eq0 = make_cqr_slot(kEnqueueSyndromesFunctionId, 1,
+                           make_enqueue_payload(0, {1}));
+  session->handle_enqueue(eq0.data(), tx.data(), eq0.size());
+  expect_tx_status(tx, RpcStatus::OK, 1);
+  auto eq1 = make_cqr_slot(kEnqueueSyndromesFunctionId, 2,
+                           make_enqueue_payload(1, {0, 1}));
+  session->handle_enqueue(eq1.data(), tx.data(), eq1.size());
+  expect_tx_status(tx, RpcStatus::OK, 2);
 
-  // Idle arrival: the worker is far past any finite spin budget and parked
-  // in its condvar wait; the push must still wake it (the blocking fallback
-  // stays armed).
-  std::this_thread::sleep_for(std::chrono::milliseconds(300));
-  ASSERT_TRUE(session->try_enqueue(make_reset(transport)));
-  for (int i = 0; i < 400 && session->reset_count.load() < kBurst + 1; ++i)
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  EXPECT_EQ(session->reset_count.load(), kBurst + 1);
+  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 3,
+                          make_get_corrections_payload(1, false));
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::INTERNAL_ERROR, 3);
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::INTERNAL_ERROR, 3);
 
-  // stop_worker() must return promptly from an idle worker whether it is
-  // mid-spin or parked (the spin predicate observes the shutdown flag).
-  const auto t0 = std::chrono::steady_clock::now();
-  session->stop_worker();
-  const auto stop_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::steady_clock::now() - t0)
-                           .count();
-  EXPECT_LT(stop_ms, 1000) << "stop_worker did not interrupt the wait";
+  auto rst = make_cqr_slot(kResetDecoderFunctionId, 4, make_reset_payload());
+  session->handle_reset(rst.data(), tx.data(), rst.size());
+  expect_tx_status(tx, RpcStatus::OK, 4);
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::NOT_READY, 3);
+}
+
+TEST(DecodingSessionInline, MalformedRequestsRespondBadRequest) {
+  auto [session, decoder] = make_session();
+  (void)decoder;
+  std::vector<uint8_t> tx(64, 0);
+
+  // Enqueue whose advertised bits are not physically present.
+  auto eq = make_cqr_slot(kEnqueueSyndromesFunctionId, 5,
+                          make_enqueue_payload(0, {1}));
+  reinterpret_cast<RPCHeader *>(eq.data())->arg_len = 4 * sizeof(uint64_t);
+  session->handle_enqueue(eq.data(), tx.data(), eq.size());
+  expect_tx_status(tx, RpcStatus::BAD_REQUEST, 5);
+
+  // get_corrections with a short payload.
+  auto gc =
+      make_cqr_slot(kGetCorrectionsFunctionId, 6, std::vector<uint8_t>(4, 0));
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::BAD_REQUEST, 6);
+
+  // reset with a short payload.
+  auto rst =
+      make_cqr_slot(kResetDecoderFunctionId, 7, std::vector<uint8_t>(4, 0));
+  session->handle_reset(rst.data(), tx.data(), rst.size());
+  expect_tx_status(tx, RpcStatus::BAD_REQUEST, 7);
+}
+
+TEST(DecodingSessionInline, RejectsNonIdentitySyndromeMappings) {
+  auto [session, decoder] = make_session();
+  (void)decoder;
+  std::vector<uint8_t> tx(64, 0);
+
+  // The wire carries syndrome_mapping_id, but only the identity mapping
+  // (id 0) has ever been honorable; anything else is rejected rather than
+  // silently decoded as identity, and the shot is poisoned until reset.
+  auto eq = make_cqr_slot(kEnqueueSyndromesFunctionId, 1,
+                          make_enqueue_payload(0, {1}, /*mapping_id=*/5));
+  session->handle_enqueue(eq.data(), tx.data(), eq.size());
+  expect_tx_status(tx, RpcStatus::BAD_REQUEST, 1);
+
+  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 2,
+                          make_get_corrections_payload(1, false));
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::INTERNAL_ERROR, 2);
+
+  auto rst = make_cqr_slot(kResetDecoderFunctionId, 3, make_reset_payload());
+  session->handle_reset(rst.data(), tx.data(), rst.size());
+  expect_tx_status(tx, RpcStatus::OK, 3);
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::NOT_READY, 2);
+}
+
+TEST(DecodingSessionInline, CorrectionsLargerThanTheCapacityFailExplicitly) {
+  auto [session, decoder] = make_session();
+  (void)decoder;
+  std::vector<uint8_t> tx(64, 0);
+  auto eq0 = make_cqr_slot(kEnqueueSyndromesFunctionId, 1,
+                           make_enqueue_payload(0, {1}));
+  auto eq1 = make_cqr_slot(kEnqueueSyndromesFunctionId, 2,
+                           make_enqueue_payload(1, {0}));
+  session->handle_enqueue(eq0.data(), tx.data(), eq0.size());
+  session->handle_enqueue(eq1.data(), tx.data(), eq1.size());
+
+  // A result that does not fit the caller's capacity must fail the RPC
+  // explicitly (truncation would advertise bytes that were never written) —
+  // and must NOT consume the pending result.
+  std::size_t out_len = 0;
+  EXPECT_EQ(session->get_corrections_core(/*return_size=*/1, /*reset=*/true,
+                                          /*out=*/nullptr, /*out_capacity=*/0,
+                                          out_len),
+            RpcStatus::INTERNAL_ERROR);
+  EXPECT_EQ(out_len, 0u);
+
+  // The result is still there for a correctly sized caller.
+  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 3,
+                          make_get_corrections_payload(1, false));
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::OK, 3);
+}
+
+std::vector<uint8_t> g_captured_syndrome_bytes;
+void record_captured_syndromes(const uint8_t *data, size_t len) {
+  g_captured_syndrome_bytes.assign(data, data + len);
+}
+
+TEST(DecodingSessionInline, SaveSyndromeCaptureMatchesTheLegacyFormat) {
+  auto [session, decoder] = make_session();
+  (void)decoder;
+  std::vector<uint8_t> tx(64, 0);
+
+  g_captured_syndrome_bytes.clear();
+  cudaq::qec::decoding::host::_set_syndrome_capture_callback(
+      record_captured_syndromes);
+  // Wire bits are LSB-first; the legacy saved-syndrome format is MSB-first.
+  auto eq = make_cqr_slot(kEnqueueSyndromesFunctionId, 1,
+                          make_enqueue_payload(0, {1}));
+  session->handle_enqueue(eq.data(), tx.data(), eq.size());
+  cudaq::qec::decoding::host::_set_syndrome_capture_callback(nullptr);
+
+  ASSERT_EQ(g_captured_syndrome_bytes.size(), 1u);
+  EXPECT_EQ(g_captured_syndrome_bytes[0], 0x80u); // bit 0, MSB-first
 }
 
 } // namespace

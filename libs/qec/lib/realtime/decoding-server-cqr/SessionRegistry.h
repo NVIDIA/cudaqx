@@ -49,6 +49,14 @@ public:
   DecodingSession &get(uint64_t decoder_id);
   const DecodingSession &get(uint64_t decoder_id) const;
 
+  /// Hot-path lookup: nullptr when the id is unknown (no exception).
+  /// The map is read-only after load_from_config(), so this is safe for
+  /// concurrent dispatcher threads.
+  DecodingSession *find(uint64_t decoder_id) noexcept {
+    auto it = sessions_.find(decoder_id);
+    return it == sessions_.end() ? nullptr : it->second.get();
+  }
+
   /// Dispatch shape shared by ALL sessions.  Valid after load_from_config();
   /// throws when the config mixes shapes (mixed configs are composed by the
   /// decoding_server process, which binds a consumer per decoder -- the
@@ -72,15 +80,6 @@ public:
   const std::unordered_map<uint64_t, std::unique_ptr<DecodingSession>> &
   sessions() const {
     return sessions_;
-  }
-
-  /// Stop and join every session's worker thread (each drains its queued
-  /// items first).  Must run while the transports the queued items reply
-  /// through are still alive; the sessions themselves stay registered so
-  /// decoder/graph resources can be torn down later in the required order.
-  void stop_workers() {
-    for (auto &[id, session] : sessions_)
-      session->stop_worker();
   }
 
 private:

@@ -20,20 +20,6 @@ namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::multi_decoder_config;
 
-/// Build the default single-VP pass-through syndrome mapping table.
-/// mapping_id=0 → VP 0 → empty index list (pass-through)
-///
-/// An empty index list signals RoundAccumulator to copy bits directly without
-/// scatter.  This is correct for the nominal per-round enqueue pattern where
-/// the caller sends exactly the syndromes for one round and does not need
-/// index remapping.  An identity-sized index list would force every enqueue
-/// to provide exactly syndrome_size bits, which breaks per-round batching.
-static SyndromeMappingTable make_default_mapping_table() {
-  SyndromeMappingTable table;
-  table[0] = {{}}; // syndrome_mapping_id=0, VP 0, pass-through
-  return table;
-}
-
 // ---------------------------------------------------------------------------
 // SessionRegistry
 // ---------------------------------------------------------------------------
@@ -79,15 +65,11 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
 
     auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
         dc, cudaq::qec::decoding::host::resolve_decoder_init(dc, base_dir));
-    auto session = DecodingSession::create(std::move(decoder),
-                                           make_default_mapping_table());
-
-    // dc.dispatch (host / device_graph) is not consulted here: the mixed
-    // decoding_server binds each session to its ring consumer via
-    // dispatch_for(), and the split-transport DecodingServer constructor
-    // consumes the resulting dispatch map.
-    session->start_worker();
-    sessions_.emplace(id, std::move(session));
+    // dc.dispatch (host / device_graph) is not consulted here: host sessions
+    // are served inline by the CQR HOST_CALL plugin on the dispatcher
+    // thread; the decoding_server process binds device_graph sessions to
+    // their ring consumers via dispatch_for().
+    sessions_.emplace(id, DecodingSession::create(std::move(decoder)));
   }
 
   CUDA_QEC_INFO("SessionRegistry: loaded {} decoder session(s)",
