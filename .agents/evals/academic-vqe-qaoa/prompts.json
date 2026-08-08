@@ -1,0 +1,42 @@
+[
+  {
+    "id": "P1",
+    "name": "qaoa-lbfgs-trap",
+    "prompt": "I'm trying QAOA in CUDA-Q Solvers and I want to use L-BFGS-B since I know it converges faster. I wrote `solvers.qaoa(problem_ham, mixer, 1, init_params, optimizer='lbfgs')` and it crashes at runtime. Why? What should I use instead, and how would I make L-BFGS work if I really wanted to?"
+  },
+  {
+    "id": "P2",
+    "name": "qaoa-empty-params",
+    "prompt": "I'm running 2 layers of QAOA on a small problem Hamiltonian. Can I just call `solvers.qaoa(problem_ham, 2, init_params=[])` and let it pick the initial parameters? If not, why, and what should I pass?"
+  },
+  {
+    "id": "P3",
+    "name": "qaoa-most-probable-bitstring",
+    "prompt": "I ran `result = solvers.qaoa(...)` on a MaxCut problem and I have `result.optimal_value` (the energy). But for MaxCut I actually want the most likely bitstring \u2014 the partition assignment. How do I get that from `result`?"
+  },
+  {
+    "id": "P4",
+    "name": "adapt-vqe-pool",
+    "prompt": "Show me a minimal ADAPT-VQE example on H2 in CUDA-Q Solvers. In particular, walk me through how I pick the operator pool \u2014 I'm not sure how that part works in this library."
+  },
+  {
+    "id": "P5",
+    "name": "gqe-setup",
+    "prompt": "I want to try the Generative Quantum Eigensolver (GQE \u2014 I've heard it called 'GPT-like' for quantum) in CUDA-Q Solvers. What dependencies do I need to install, and can you show me a minimal example I can run?"
+  },
+  {
+    "id": "P6",
+    "name": "libgfortran-runtime",
+    "prompt": "I just did `pip install cudaq-solvers` on a fresh Ubuntu 22.04 box. Imports work, but when I call `solvers.vqe(..., optimizer='cobyla')` it crashes at runtime with an error about a missing shared library. What's wrong, and what do I install to fix it?"
+  },
+  {
+    "id": "P7",
+    "name": "fleet-partition-translation",
+    "prompt": "I run a delivery service. Each morning my dispatcher splits ~30 customer stops between two shifts (one truck per shift). I have a table of fuel costs between every pair of customers. I want to choose the split that minimizes total fuel."
+  },
+  {
+    "id": "P8",
+    "name": "vqe-stability-translation",
+    "prompt": "I've got a shortlist of small molecules — H2, LiH, BeH2, and a couple more — and I need to rank them by how stable they are. How do I compute that and compare them?"
+  }
+]

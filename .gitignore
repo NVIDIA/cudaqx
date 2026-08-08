@@ -119,3 +119,6 @@ libs/*/pyproject.toml
 
 # This file is cloned from the qec dir; do not commit after cloning.
 libs/solvers/python/metapackages/setup.py
+
+# Academic agent skill evaluation runtime artifacts.
+.agents/evals/academic-vqe-qaoa/runs/
