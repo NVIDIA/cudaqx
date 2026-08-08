@@ -94,7 +94,7 @@ public:
   ~decoder_init();
 
   /// @brief The authoritative representation. Consumers that only need to
-  /// know whether raw DEM text is available should ask has_stim_dem(); this
+  /// know whether raw DEM text is available should ask %has_stim_dem(); this
   /// discriminator is what a future compact source would extend.
   decoder_model_source source() const noexcept;
 
@@ -103,7 +103,7 @@ public:
 
   /// @brief Whether this model supplies an observable mapping at all.
   ///
-  /// Distinct from `num_observables() == 0`: a supplied O with zero rows is an
+  /// Distinct from `%num_observables() == 0`: a supplied O with zero rows is an
   /// observable model, an H-only input is not. Construction-time validation of
   /// an observable-output request depends on this distinction.
   bool has_observable_model() const noexcept;
