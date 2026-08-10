@@ -34,6 +34,9 @@
 //   dem_chunks_to_o_sparse         — observable-flip map
 //   dem_chunks_to_pcm              — parity-check matrix
 //
+// The matching D_sparse map is memory-circuit-specific, so it lives in
+// dem_chunks_memory.h (dem_chunks_to_d_sparse) rather than here.
+//
 // Each chunk holds a single H matrix (all detector rows) plus a list of named
 // seam descriptors that identify which row bands participate in stitching.
 // Interior rows are the complement — rows of H not covered by any seam.

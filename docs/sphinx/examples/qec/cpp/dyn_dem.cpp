@@ -13,6 +13,7 @@
 // ./a.out
 
 #include "cudaq/qec/code_matrices.h"
+#include "cudaq/qec/dem_chunks_memory.h"
 #include "cudaq/qec/dem_construction.h"
 #include "cudaq/qec/extended_dem.h"
 
