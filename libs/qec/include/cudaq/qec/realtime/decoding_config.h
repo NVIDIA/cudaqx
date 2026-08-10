@@ -75,6 +75,12 @@ struct decoder_config {
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
+  /// Total measurements enqueued per shot, including any trailing measurements
+  /// not referenced by any detector in D_sparse. When unset (zero), the
+  /// realtime decoder factory defaults this to num_msyn_per_decode, giving no
+  /// trailing budget. Set above num_msyn_per_decode to silently absorb that
+  /// many trailing bits before the session goes stale for the next volume.
+  uint64_t total_circuit_measurements = 0;
   decoder_custom_args_t decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;

@@ -439,6 +439,39 @@ void record_captured_syndromes(const uint8_t *data, size_t len) {
   g_captured_syndrome_bytes.assign(data, data + len);
 }
 
+// With total_circuit_measurements set, trailing bits (not referenced by any
+// detector) are absorbed silently after a decode fires, preserving the result.
+// Once the trailing budget is exhausted, the next enqueue marks it stale.
+TEST(DecodingSessionInline, TrailingMeasurementsPreserveResult) {
+  // ControlledDecoder: D_sparse = {{0,1}}, num_msyn_per_decode = 2.
+  // Circuit has 3 measurements total: 2 syndrome + 1 trailing data-qubit.
+  auto dec = std::make_unique<ControlledDecoder>();
+  dec->set_total_circuit_measurements(3); // 2 syndrome + 1 trailing data-qubit
+  auto session = DecodingSession::create(std::move(dec));
+
+  std::vector<uint8_t> tx(64, 0);
+  auto enq = [&](int ctr, uint8_t bit, uint32_t rid) {
+    auto eq = make_cqr_slot(kEnqueueSyndromesFunctionId, rid,
+                            make_enqueue_payload(ctr, {bit}));
+    session->handle_enqueue(eq.data(), tx.data(), eq.size());
+  };
+  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 9,
+                          make_get_corrections_payload(1, false));
+
+  enq(0, 1, 1); // bit 0 (syndrome)
+  enq(1, 0, 2); // bit 1 (syndrome) → decode fires → result_ready
+  enq(2, 0, 3); // bit 2 (trailing): absorbed without clearing result_ready
+  // Result is still available.
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::OK, 9);
+
+  // The trailing budget (1 bit) is now exhausted. The next enqueue belongs
+  // to a new volume and must mark the result stale.
+  enq(3, 1, 4);
+  session->handle_get_corrections(gc.data(), tx.data(), gc.size());
+  expect_tx_status(tx, RpcStatus::NOT_READY, 9);
+}
+
 TEST(DecodingSessionInline, SaveSyndromeCaptureMatchesTheLegacyFormat) {
   auto [session, decoder] = make_session();
   (void)decoder;

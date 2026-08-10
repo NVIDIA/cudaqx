@@ -246,6 +246,11 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
   decoder->set_decoder_id(decoder_config.id);
   decoder->set_O_sparse(decoder_config.O_sparse);
   decoder->set_D_sparse(decoder_config.D_sparse);
+  // Default to num_msyn_per_decode when not explicitly set: no trailing budget
+  decoder->set_total_circuit_measurements(
+      decoder_config.total_circuit_measurements > 0
+          ? decoder_config.total_circuit_measurements
+          : static_cast<uint64_t>(decoder->get_num_msyn_per_decode()));
 
   // Force plugin initialization before the caller publishes the decoder for
   // realtime work. This preserves configure_decoders()'s existing behavior.

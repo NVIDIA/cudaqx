@@ -263,7 +263,7 @@ void get_corrections_host(const void *rx_slot, void *tx_slot,
         out[i >> 3] |= static_cast<std::uint8_t>(1u << (i & 7));
     }
     if (body->reset != 0)
-      decoder->clear_corrections();
+      decoder->reset_decoder();
     write_response(tx_slot, rx_slot, rpc::RpcStatus::OK,
                    static_cast<std::uint32_t>(result_len));
   } catch (const std::out_of_range &) {

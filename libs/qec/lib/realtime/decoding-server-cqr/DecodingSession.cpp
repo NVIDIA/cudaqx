@@ -147,9 +147,19 @@ void DecodingSession::enqueue_core(const slot::EnqueueView &req) {
     unpack_scratch_[i] = (req.packed_bits[i / 8] >> (i % 8)) & 1u;
 
   try {
-    // Any accepted input after a completed decode starts a new volume; the old
-    // correction vector must not be reported as the result of that volume.
-    shot_state = ShotState::collecting;
+    if (shot_state == ShotState::result_ready) {
+      // accepted_syndromes holds the total measurements absorbed this shot.
+      // Trailing measurements keep incrementing it up to
+      // total_circuit_measurements; once exhausted, the bits belong to the
+      // next volume and the result goes stale.
+      if (accepted_syndromes + req.num_syndromes <=
+          dec->get_total_circuit_measurements()) {
+        accepted_syndromes += req.num_syndromes;
+        return;
+      }
+      accepted_syndromes = 0;
+      shot_state = ShotState::collecting;
+    }
 
     const size_t expected_syndromes = dec->get_num_msyn_per_decode();
     if (accepted_syndromes > expected_syndromes ||
@@ -167,7 +177,6 @@ void DecodingSession::enqueue_core(const slot::EnqueueView &req) {
 
     if (did_decode) {
       ++decode_count;
-      accepted_syndromes = 0;
       shot_state = ShotState::result_ready;
     }
   } catch (const std::exception &e) {
@@ -232,6 +241,7 @@ RpcStatus DecodingSession::get_corrections_core(int64_t return_size_arg,
       // throw here must produce the single INTERNAL_ERROR status below, not
       // a second response after an already-delivered OK.
       dec->clear_corrections();
+      accepted_syndromes = 0;
       shot_state = ShotState::collecting;
     }
     out_len = result_len;

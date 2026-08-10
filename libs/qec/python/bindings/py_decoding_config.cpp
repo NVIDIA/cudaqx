@@ -192,6 +192,8 @@ void bindDecodingConfig(nb::module_ &mod) {
       .def_rw("H_sparse", &decoder_config::H_sparse)
       .def_rw("O_sparse", &decoder_config::O_sparse)
       .def_rw("D_sparse", &decoder_config::D_sparse)
+      .def_rw("total_circuit_measurements",
+              &decoder_config::total_circuit_measurements)
       .def_prop_rw(
           "decoder_custom_args",
           [](const decoder_config &self) -> nb::object {
