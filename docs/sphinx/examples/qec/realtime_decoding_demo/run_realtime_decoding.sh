@@ -128,6 +128,12 @@ IB_DEVICE=""                 # auto-detect first Up ConnectX
 BRIDGE_IP="192.168.0.1"
 FPGA_IP="192.168.0.2"
 MTU=4096
+# RDMA ring slot size in bytes (--page-size).  Feeds the cpu_roce wire's
+# --slot-size, the device_graph ring's QEC_DEVICE_GRAPH_FRAME_SIZE, and
+# playback --page-size.  device_graph requires the ring (64 slots x this) to
+# be a multiple of the host page size, so 64 KiB-page hosts (e.g. GB200
+# -64k kernels) reject the default; the run_fpga geometry check suggests a
+# working value.
 PAGE_SIZE=384
 # RX ring depth for both FPGA paths, bounded by the HSB QP's 64 receive WQEs
 # (the FPGA writes frame rid to slot rid % NUM_SLOTS; more slots than WQEs drops
@@ -221,6 +227,13 @@ FPGA-only:
                           fires once per FRAME (one BRAM window), so a shot
                           spans frames-per-shot x spacing; keeps the RX ring
                           from overrunning
+  --page-size N           RDMA ring slot size in bytes (default 384); feeds
+                          the cpu_roce wire's --slot-size, the device_graph
+                          ring's QEC_DEVICE_GRAPH_FRAME_SIZE, and playback
+                          --page-size.  device_graph requires the ring
+                          (64 slots x N) to be a multiple of the host page
+                          size; on non-4K-page hosts the geometry check
+                          computes a compliant value
   --no-verify             Skip playback correction verification
 
   --help, -h              Show this help
@@ -254,6 +267,7 @@ while [[ $# -gt 0 ]]; do
         --fpga-ip)          FPGA_IP="$2"; shift ;;
         --mtu)              MTU="$2"; shift ;;
         --spacing)          SPACING="$2"; SPACING_EXPLICIT=true; shift ;;
+        --page-size)        PAGE_SIZE="$2"; shift ;;
         --wire)             WIRE="$2"; shift ;;
         --dispatch)         DISPATCH="$2"; shift ;;
         --no-verify)        VERIFY=false ;;
@@ -1003,9 +1017,12 @@ run_fpga() {
         # with the constraint spelled out.
         local host_page; host_page=$(getconf PAGESIZE)
         if (( (DEVICE_GRAPH_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
+            local stride=$(( host_page / HSB_WQE_DEPTH ))
+            local suggest=$(( (PAGE_SIZE + stride - 1) / stride * stride ))
             _err "device_graph ring ($DEVICE_GRAPH_NUM_PAGES slots x $PAGE_SIZE B) is not a multiple of this host's page size ($host_page B)."
-            _err "The HSB frame stride must be a multiple of $(( host_page / HSB_WQE_DEPTH )) B on this host; see the unittests"
-            _err "hsb_fpga_decoding_server_test.sh (--page-size) for a tunable-geometry run."
+            _err "Pass --page-size as a multiple of $stride B on this host (smallest >= $PAGE_SIZE: $suggest)."
+            _err "For reference, on 64 KiB-page GB200 hosts, host dispatch runs at --page-size 512 and"
+            _err "device_graph at the rounded-up value (1024)."
             exit 1
         fi
     fi
@@ -1023,7 +1040,7 @@ run_fpga() {
     # device_graph ring is DEVICE_GRAPH_NUM_PAGES.
     local pb_pages="$NUM_SLOTS"
     if [[ "$DISPATCH" == "device_graph" ]]; then pb_pages="$DEVICE_GRAPH_NUM_PAGES"; fi
-    local args=( --hololink "$FPGA_IP" --per-round --config "$CONFIG_FILE"
+    local args=( --hsb-ip "$FPGA_IP" --per-round --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE" --qp-number "$SERVER_QP" --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR" --page-size "$PAGE_SIZE" --num-pages "$pb_pages" )
     $VERIFY && args+=(--verify)
