@@ -286,6 +286,8 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapRequired("H_sparse", config.H_sparse);
     io.mapRequired("O_sparse", config.O_sparse);
     io.mapRequired("D_sparse", config.D_sparse);
+    io.mapOptional("total_circuit_measurements",
+                   config.total_circuit_measurements, uint64_t{0});
 
     // Validate that the number of rows in the H_sparse vector is equal to
     // syndrome_size.
@@ -611,6 +613,8 @@ std::string decoder_config_json_schema() {
       {"H_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"O_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"D_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
+      {"total_circuit_measurements",
+       llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
       {"decoder_custom_args", llvm::json::Object{{"type", "object"}}},
   };
 

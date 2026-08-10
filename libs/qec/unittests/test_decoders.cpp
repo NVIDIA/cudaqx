@@ -1112,6 +1112,30 @@ TEST(EnqueueSyndrome, ObsFrameDecoderUsesResultDirectly) {
   EXPECT_EQ(corr[1], 0u);
 }
 
+// Trailing measurements (data-qubit readouts enqueued after the syndrome
+// window) must not trigger a second decode or discard the pending correction.
+TEST(EnqueueSyndrome, TrailingMeasurementPreservesCorrection) {
+  cudaqx::tensor<uint8_t> H_tensor({2, 4});
+  H_tensor.at({0, 0}) = 1;
+  H_tensor.at({1, 1}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("decode_to_obs", true);
+  auto dec = cudaq::qec::decoder::get("sample_decoder", H_tensor, params);
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+  dec->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+  // 2 syndrome bits + 1 trailing data-qubit readout
+  dec->set_total_circuit_measurements(3);
+
+  EXPECT_TRUE(
+      dec->enqueue_syndrome(std::vector<uint8_t>{1, 0})); // decode fires
+  EXPECT_FALSE(
+      dec->enqueue_syndrome(std::vector<uint8_t>{0})); // trailing, absorbed
+
+  const uint8_t *corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 1u); // correction from the decode is intact
+  EXPECT_EQ(corr[1], 0u);
+}
+
 // Verify that corrections XOR-accumulate correctly across multiple shots and
 // that clear_corrections() resets them between shots.
 TEST(EnqueueSyndrome, ObsFrameMultiShotAccumulation) {

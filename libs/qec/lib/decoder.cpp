@@ -56,6 +56,11 @@ struct decoder::rt_impl {
   /// The id of the decoder (for instrumentation)
   uint32_t decoder_id = 0;
 
+  /// Total measurements per shot set by set_total_circuit_measurements().
+  /// Initialized to 0; the realtime decoder factory sets it to at least
+  /// num_msyn_per_decode before the session goes live.
+  uint64_t total_circuit_measurements = 0;
+
   bool is_sliding_window = false;
 
   /// The number of syndromes per round.  Only used for sliding window decoder.
@@ -311,6 +316,14 @@ void decoder::set_decoder_id(uint32_t decoder_id) {
 
 uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 
+void decoder::set_total_circuit_measurements(uint64_t n) {
+  pimpl->total_circuit_measurements = n;
+}
+
+uint64_t decoder::get_total_circuit_measurements() const {
+  return pimpl->total_circuit_measurements;
+}
+
 template <typename PimplType>
 void set_D_sparse_common(decoder *decoder,
                          const std::vector<std::vector<uint32_t>> &D_sparse,
@@ -365,9 +378,24 @@ void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
 
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                                std::size_t syndrome_length) {
-  if (pimpl->msyn_buffer_index + syndrome_length > pimpl->msyn_buffer.size()) {
+  // Effective total window: syndrome bits plus any trailing measurements.
+  // Falls back to num_msyn_per_decode when not set by the caller.
+  const auto total = pimpl->total_circuit_measurements > 0
+                         ? pimpl->total_circuit_measurements
+                         : static_cast<uint64_t>(pimpl->num_msyn_per_decode);
+
+  if (pimpl->msyn_buffer_index + syndrome_length > total) {
     // CUDA_QEC_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
     printf("Syndrome buffer overflow. Syndrome will be ignored.\n");
+    return false;
+  }
+
+  // Trailing measurements (after decode fired, before the window resets) are
+  // absorbed without being buffered or triggering another decode.
+  if (pimpl->msyn_buffer_index >= pimpl->num_msyn_per_decode) {
+    pimpl->msyn_buffer_index += syndrome_length;
+    if (pimpl->msyn_buffer_index >= total)
+      pimpl->msyn_buffer_index = 0;
     return false;
   }
 
@@ -555,10 +583,14 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
         printf("%s\n", s.c_str());
     }
     did_decode = true;
-    // Prepare for more data.
-    pimpl->msyn_buffer_index = 0;
     pimpl->current_round = 0;
     pimpl->detector_layer_index = 0;
+    // Leave msyn_buffer_index at num_msyn_per_decode so trailing measurements
+    // are absorbed by the early-return path above up to
+    // total_circuit_measurements, at which point the index resets for the next
+    // shot.
+    if (pimpl->msyn_buffer_index >= total)
+      pimpl->msyn_buffer_index = 0;
   }
   return did_decode;
 }

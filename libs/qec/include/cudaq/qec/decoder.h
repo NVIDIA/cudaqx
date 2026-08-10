@@ -245,6 +245,14 @@ public:
   std::size_t get_block_size() { return block_size; }
   std::size_t get_syndrome_size() { return syndrome_size; }
 
+  /// Total measurements enqueued per shot, including any trailing measurements
+  /// not referenced by any detector in D_sparse. The realtime decoder factory
+  /// sets this from decoder_config, defaulting to num_msyn_per_decode (no
+  /// trailing budget). Values above num_msyn_per_decode absorb that many
+  /// trailing bits before the session goes stale for the next volume.
+  void set_total_circuit_measurements(uint64_t n);
+  uint64_t get_total_circuit_measurements() const;
+
   // -- Begin realtime decoding API --
 
   // Note: all of the current realtime decoding API is designed to be used with
