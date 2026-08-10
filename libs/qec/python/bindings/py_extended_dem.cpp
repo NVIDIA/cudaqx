@@ -10,6 +10,7 @@
 // DEM chunk-to-streaming-decoder utility functions.
 
 #include "py_extended_dem.h"
+#include "sparse_matrix_casters.h"
 #include "type_casters.h"
 #include "cudaq/qec/code_matrices.h"
 #include "cudaq/qec/dem_chunks_memory.h"
@@ -96,11 +97,21 @@ void bindExtendedDem(nb::module_ &mod) {
       .def("get_seam",
            nb::overload_cast<seam_id>(&extended_dem::get_seam, nb::const_),
            nb::arg("id"), "Return the seam descriptor for the given SeamId.")
+      // The returned array owns its buffer, so the reference_internal policy
+      // that properties default to does not apply.
       .def_prop_ro(
-          "H", [](const extended_dem &self) { return self.H.to_dense(); },
+          "H",
+          [](const extended_dem &self) {
+            return sparse_binary_matrix_to_numpy(self.H);
+          },
+          nb::rv_policy::move,
           "All detector rows as a dense uint8 NumPy array [n_rows × n_faults].")
       .def_prop_ro(
-          "O", [](const extended_dem &self) { return self.O.to_dense(); },
+          "O",
+          [](const extended_dem &self) {
+            return sparse_binary_matrix_to_numpy(self.O);
+          },
+          nb::rv_policy::move,
           "Observable rows as a dense uint8 NumPy array [k × n_faults].")
       .def_rw("error_rates", &extended_dem::error_rates,
               "Error rates, one per fault column.")
@@ -318,14 +329,18 @@ void bindExtendedDem(nb::module_ &mod) {
   // -------------------------------------------------------------------------
   // dem_close / dem_close_all
   // -------------------------------------------------------------------------
-  mod.def("dem_close", &dem_close, nb::arg("dem"),
-          nb::arg("to_seam") = seam_name::prev_round,
-          "Collapse an ExtendedDem into a flat detector_error_model.\n\n"
-          "to_seam rows appear first in the output (detector[0] = syndrome[0]\n"
-          "vs. zero initial state). The from_seam rows are dropped.\n\n"
-          "Args:\n"
-          "    dem:     ExtendedDem to close.\n"
-          "    to_seam: SeamId whose rows appear first (default: prev_round).");
+  mod.def(
+      "dem_close", &dem_close, nb::arg("dem"),
+      nb::arg("to_seam") = seam_name::prev_round,
+      nb::arg("from_seam") = seam_name::next_round,
+      "Collapse an ExtendedDem into a flat detector_error_model.\n\n"
+      "to_seam rows appear first in the output (detector[0] = syndrome[0]\n"
+      "vs. zero initial state). The from_seam rows are dropped. A chunk\n"
+      "carrying any other non-empty seam is rejected.\n\n"
+      "Args:\n"
+      "    dem:       ExtendedDem to close.\n"
+      "    to_seam:   SeamId whose rows appear first (default: prev_round).\n"
+      "    from_seam: SeamId whose rows are dropped (default: next_round).");
 
   mod.def("dem_close_all", &dem_close_all, nb::arg("dem_chunks"),
           nb::arg("from_seam") = seam_name::next_round,
@@ -369,10 +384,19 @@ void bindExtendedDem(nb::module_ &mod) {
           "o_sparse[obs_id] lists global fault column indices that flip\n"
           "observable obs_id.");
 
-  mod.def("dem_chunks_to_pcm", &dem_chunks_to_pcm, nb::arg("dem_chunks"),
-          nb::arg("from_seam") = seam_name::next_round,
-          nb::arg("to_seam") = seam_name::prev_round,
-          "Build a canonicalized CSC parity-check matrix from T DEM chunks.");
+  // sparse_binary_matrix has no Python class, so hand back a scipy CSC
+  // matrix rather than an unconvertible C++ object.
+  mod.def(
+      "dem_chunks_to_pcm",
+      [](const std::vector<extended_dem> &dem_chunks, seam_id from_seam,
+         seam_id to_seam) {
+        return sparse_binary_matrix_to_scipy_csc(
+            dem_chunks_to_pcm(dem_chunks, from_seam, to_seam));
+      },
+      nb::arg("dem_chunks"), nb::arg("from_seam") = seam_name::next_round,
+      nb::arg("to_seam") = seam_name::prev_round,
+      "Build a canonicalized parity-check matrix from T DEM chunks.\n\n"
+      "Returns a scipy.sparse.csc_matrix, so scipy must be installed.");
 }
 
 } // namespace cudaq::qec

@@ -201,10 +201,11 @@ struct extended_dem {
   ///   - H.num_cols() == error_rates.size()
   ///   - O.num_cols() == error_rates.size() (or O is empty)
   ///   - Each seam's row_begin <= row_end and row_end <= H.num_rows()
+  ///   - No two non-empty seam row bands overlap
   ///   - tags.size() == sum of seam row counts
   ///
-  /// Note: seam range overlap is not checked (caller is responsible for
-  /// non-overlapping placement).
+  /// O is exempt from the column check only when it is default-constructed
+  /// (0 x 0), which is the "no observables" convention.
   ///
   /// @param context Prefix for the error message.
   void validate(const char *context) const;
@@ -378,7 +379,9 @@ struct dem_chunks_spec {
   /// and num_rounds is not consulted.
   ///
   /// @throws std::invalid_argument if a self-loop is present and num_rounds
-  ///         is absent, or if the connection graph is not a valid linear chain.
+  ///         is absent, or if the connection graph is not a valid linear
+  ///         chain: a phase with more than one non-self outgoing edge, or a
+  ///         cycle among the non-self edges, is rejected.
   std::vector<phase_id> phase_sequence() const;
 
   /// Return the spec for the phase with the given id.
@@ -415,15 +418,17 @@ std::vector<extended_dem> dem_chunks_from_spec(const dem_chunks_spec &spec);
 ///   b interior rows                (only B fault columns)
 ///   b.seams[from_seam] rows        (only B fault columns)
 ///
-/// All other seams (non-contracted) are carried through with fault-column
-/// padding.
+/// Only from_seam and to_seam may carry rows. A chunk holding any other
+/// non-empty named seam is rejected, because such a seam has no counterpart
+/// on either side and no defined position in the result.
 ///
 /// @param a         Left DEM chunk.
 /// @param b         Right DEM chunk.
 /// @param from_seam Seam in A contracting forward.
 /// @param to_seam   Seam in B contracting backward.
 /// @return          Stitched extended_dem.
-/// @throws std::invalid_argument on seam width, tag, or observable mismatch.
+/// @throws std::invalid_argument on seam width, tag, or observable mismatch,
+///         or if either chunk carries an additional non-empty seam.
 extended_dem dem_stitch(const extended_dem &a, const extended_dem &b,
                         seam_id from_seam, seam_id to_seam);
 
@@ -480,20 +485,29 @@ dem_stitch_merged(const std::vector<extended_dem> &chunks,
 ///   - interior rows next
 ///   - O as observables_flips_matrix
 ///
-/// seams[from_seam] rows are dropped (no next round to compare against).
-/// to_seam defaults to prev_round for the memory-experiment common case.
+/// seams[from_seam] rows are dropped: the final round has no next round to
+/// compare against. A chunk carrying a non-empty seam that is neither
+/// to_seam nor from_seam is rejected instead, since dropping it would
+/// silently discard detector rows. Both seam names default to the
+/// memory-experiment common case.
 ///
-/// @param dem     Chunk to close.
-/// @param to_seam Seam whose rows appear first in the output detectors.
-/// @return        detector_error_model ready for any decoder.
+/// @param dem       Chunk to close.
+/// @param to_seam   Seam whose rows appear first in the output detectors.
+/// @param from_seam Seam whose rows are intentionally dropped.
+/// @return          detector_error_model ready for any decoder.
+/// @throws std::invalid_argument if dem carries an additional non-empty seam.
 detector_error_model dem_close(const extended_dem &dem,
-                               seam_id to_seam = seam_name::prev_round);
+                               seam_id to_seam = seam_name::prev_round,
+                               seam_id from_seam = seam_name::next_round);
 
 /// @brief Build a flat detector_error_model from T DEM chunks in O(T) time.
 ///
 /// Equivalent to dem_close(dem_stitch_all(chunks, from, to), to) but avoids
 /// the O(T²) left-fold accumulation. Detector rows are always emitted in the
 /// same order as a stitched result.
+///
+/// As with dem_stitch, a chunk carrying a non-empty seam other than from_seam
+/// or to_seam is rejected rather than having those rows silently dropped.
 detector_error_model dem_close_all(const std::vector<extended_dem> &chunks,
                                    seam_id from_seam = seam_name::next_round,
                                    seam_id to_seam = seam_name::prev_round);

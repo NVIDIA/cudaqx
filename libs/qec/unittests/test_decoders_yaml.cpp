@@ -1395,8 +1395,9 @@ TEST(DecoderDemChunksYAMLTest, ParsedPhasesExpandAndClose) {
   ASSERT_EQ(expanded.size(), 4u);
 
   const auto flat = cudaq::qec::dem_close_all(expanded);
-  // (rounds-1) seam contractions = 3 detectors; 4 rounds × 2 faults = 8
-  EXPECT_EQ(flat.detector_error_matrix.shape()[0], 3u);
+  // init's prev_round band + 3 inter-chunk boundaries = 4 detectors;
+  // 4 rounds × 2 faults = 8 fault columns.
+  EXPECT_EQ(flat.detector_error_matrix.shape()[0], 4u);
   EXPECT_EQ(flat.detector_error_matrix.shape()[1], 8u);
   EXPECT_EQ(flat.observables_flips_matrix.shape()[0], 1u);
 }
@@ -1447,8 +1448,8 @@ TEST(DecoderChunkFormTest, ExpandsToASelfConsistentFlatConfig) {
 
   // 5 rounds × 2 faults = 10 fault columns
   EXPECT_EQ(config.block_size, 10u);
-  // (5-1) seam contractions = 4 detectors; 5 rounds × 2 faults = 10
-  EXPECT_EQ(config.syndrome_size, 4u);
+  // init's prev_round band + 4 inter-chunk boundaries = 5 detectors
+  EXPECT_EQ(config.syndrome_size, 5u);
 
   // Expanded config is flat, so re-expanding is a no-op.
   EXPECT_FALSE(

@@ -992,8 +992,7 @@ std::string decoder_config_json_schema() {
        llvm::json::Object{
            {"type", "object"},
            {"properties", std::move(dem_chunk_properties)},
-           {"required",
-            llvm::json::Array{"num_faults", "O_sparse", "error_rates"}},
+           {"required", llvm::json::Array{"num_faults", "error_rates"}},
            {"additionalProperties", false}}},
       {"dem_chunks",
        llvm::json::Object{

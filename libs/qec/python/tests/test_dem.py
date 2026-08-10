@@ -1051,24 +1051,23 @@ def test_dem_chunks_from_spec_expands_to_round_count():
         spec = _rep5_spec(rounds)
         chunks = qec.dem_chunks_from_spec(spec)
         assert len(chunks) == rounds
-        # init has no incoming seam; final has no outgoing seam.
-        assert not chunks[0].has_seam(qec.seam_name.prev_round)
+        # init has a prev_round seam (initial-state detector band).
+        assert chunks[0].has_seam(qec.seam_name.prev_round)
+        assert chunks[0].get_seam(qec.seam_name.prev_round).num_rows() > 0
+        # final has no outgoing seam.
         assert not chunks[-1].has_seam(qec.seam_name.next_round)
-        # dem_chunks_to_rounds counts seam-difference boundaries: init
-        # contributes 0 (no prev_round seam), bulk/final each contribute 1.
-        assert qec.dem_chunks_to_rounds(chunks) == rounds - 1
+        assert qec.dem_chunks_to_rounds(chunks) == rounds
 
 
 def test_dem_chunks_from_spec_closes_to_one_detector_band_per_round():
-    # Spec-built chunks have no interior rows; detectors come from seam
-    # contractions only: (rounds - 1) boundaries × REP5_CHECKS rows each.
+    # init's prev_round seam gives the initial-state detector band (round 0 vs
+    # zero), and each inter-chunk boundary gives one more band: rounds total.
     for rounds in range(3, 8):
         spec = _rep5_spec(rounds)
         chunks = qec.dem_chunks_from_spec(spec)
         dem = qec.dem_close_all(chunks)
-        assert dem.detector_error_matrix.shape[0] == (rounds - 1) * REP5_CHECKS
-        assert len(qec.dem_chunks_to_d_sparse(chunks)) == \
-            (rounds - 1) * REP5_CHECKS
+        assert dem.detector_error_matrix.shape[0] == rounds * REP5_CHECKS
+        assert len(qec.dem_chunks_to_d_sparse(chunks)) == rounds * REP5_CHECKS
 
 
 def test_dem_chunk_from_spec_matches_the_phase_it_describes():
@@ -1079,8 +1078,9 @@ def test_dem_chunk_from_spec_matches_the_phase_it_describes():
     assert not init.has_seam(qec.seam_name.prev_round)
     assert init.has_seam(qec.seam_name.next_round)
     assert init.get_seam(qec.seam_name.next_round).num_rows() == REP5_CHECKS
-    # init has no prev_round seam so contributes 0 detector rounds on its own;
-    # its outgoing seam is the first syndrome, XOR'd against the next chunk.
+    # Called directly with only next_round: no prev_round seam → 0 rounds.
+    # (dem_chunks_from_spec always adds prev_round; this test calls
+    # dem_chunk_from_spec directly with an explicit seam list.)
     assert qec.dem_chunk_rounds(init) == 0
 
 
@@ -1118,6 +1118,100 @@ def test_dem_chunks_from_spec_linear_chain_needs_no_num_rounds():
     # num_rounds absent — valid for a linear chain with no self-loop
     chunks = qec.dem_chunks_from_spec(spec)
     assert len(chunks) == 2
+
+
+def test_dem_chunks_from_spec_rejects_a_cyclic_connection_graph():
+    # A -> B and B -> A has no terminal phase; walking it used to grow the
+    # phase sequence until the process ran out of memory.
+    seam = qec.SeamConnection()
+    seam.from_seam = qec.seam_name.next_round
+    seam.to_seam = qec.seam_name.prev_round
+
+    spec = qec.DemChunksSpec()
+    spec.phases = [
+        _make_phase_entry("A", 5, [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1],
+                          [0, -1], [0.02] * 5),
+        _make_phase_entry("B", 5, [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1],
+                          [0, -1], [0.02] * 5),
+    ]
+    spec.connections = [_make_connection("A", "B"), _make_connection("B", "A")]
+    spec.seam = seam
+
+    with pytest.raises(Exception):
+        spec.phase_sequence()
+    with pytest.raises(Exception):
+        qec.dem_chunks_from_spec(spec)
+
+
+# ---------------------------------------------------------------------------
+# Matrix interop: sparse_binary_matrix has no Python class, so the bindings
+# accept/return NumPy and scipy matrices on its behalf.
+# ---------------------------------------------------------------------------
+
+
+def test_extended_dem_matrices_are_numpy_arrays():
+    c = _rep3_dem_chunk()
+    H, O = c.H, c.O
+
+    assert isinstance(H, np.ndarray)
+    assert isinstance(O, np.ndarray)
+    assert H.dtype == np.uint8
+    assert H.shape == (c.num_rows(), c.num_faults())
+    assert O.shape == (c.num_observables(), c.num_faults())
+
+    # Each access returns an independent copy, so mutating one cannot corrupt
+    # the chunk it came from.
+    H[0, 0] ^= 1
+    assert not np.array_equal(H, c.H)
+
+
+def test_css_codes_matrices_accept_numpy_arrays():
+    hz = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    lz = np.array([[1, 0, 0]], dtype=np.uint8)
+
+    codes = qec.CssCodes()
+    codes.hz = hz
+    codes.lz = lz
+
+    assert np.array_equal(codes.hz, hz)
+    assert np.array_equal(codes.lz, lz)
+
+    # A hand-built CssCodes has to drive DEM construction, not just read back.
+    noise = qec.CssNoise()
+    noise.px_per_qubit = [0.01, 0.01, 0.01]
+    chunk = qec.extended_dem_from_css_matrices(codes, noise)
+    assert chunk.num_faults() == 3
+    assert chunk.num_observables() == 1
+
+
+def test_css_codes_matrices_accept_scipy_sparse():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    hz = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+
+    codes = qec.CssCodes()
+    codes.hz = scipy_sparse.csr_matrix(hz)
+    assert np.array_equal(codes.hz, hz)
+
+
+def test_css_codes_matrices_accept_non_uint8_dtype():
+    hz = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.int32)
+    codes = qec.CssCodes()
+    codes.hz = hz
+    assert np.array_equal(codes.hz, hz.astype(np.uint8))
+
+
+def test_dem_chunks_to_pcm_returns_a_scipy_matrix():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    c = _rep3_dem_chunk()
+    pcm = qec.dem_chunks_to_pcm([c, c])
+
+    assert scipy_sparse.issparse(pcm)
+    assert scipy_sparse.isspmatrix_csc(pcm)
+    # Same detector geometry as the closed DEM it is built from.
+    dem = qec.dem_close_all([c, c])
+    assert pcm.shape == dem.detector_error_matrix.shape
+    assert np.array_equal(pcm.toarray().astype(np.uint8),
+                          dem.detector_error_matrix)
 
 
 if __name__ == "__main__":

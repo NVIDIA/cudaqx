@@ -328,9 +328,9 @@ dem_chunks:
 
 
 def expected_syndrome_size(num_rounds):
-    """Spec-built chunks carry seam rows only, so detectors come from the
-    (num_rounds - 1) seam contractions, REP5_CHECKS rows each."""
-    return (num_rounds - 1) * REP5_CHECKS
+    """init's prev_round seam gives the initial-state detector band, and each
+    inter-chunk boundary gives one more: num_rounds bands total."""
+    return num_rounds * REP5_CHECKS
 
 
 def expected_block_size(num_rounds):

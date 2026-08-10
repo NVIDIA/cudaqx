@@ -13,6 +13,7 @@
 // code object directly.
 
 #include "py_dem_construction.h"
+#include "sparse_matrix_casters.h"
 #include "type_casters.h"
 #include "cudaq/qec/code_matrices.h"
 #include "cudaq/qec/dem_construction.h"
@@ -32,20 +33,34 @@ void bindDemConstruction(nb::module_ &mod) {
   // -------------------------------------------------------------------------
   // css_code_matrices
   // -------------------------------------------------------------------------
+  // sparse_binary_matrix is not a Python type, so each matrix field is a
+  // property that reads back as a dense NumPy array and accepts either a
+  // dense array or any scipy sparse format on assignment.
+#define CSS_MATRIX_PROPERTY(name, doc)                                         \
+  def_prop_rw(                                                                 \
+      #name,                                                                   \
+      [](const css_code_matrices &self) {                                      \
+        return sparse_binary_matrix_to_numpy(self.name);                       \
+      },                                                                       \
+      [](css_code_matrices &self, nb::object value) {                          \
+        self.name = sparse_binary_matrix_from_python(std::move(value));        \
+      },                                                                       \
+      nb::rv_policy::move, doc)
+
   nb::class_<css_code_matrices>(
       mod, "CssCodes",
       "CSS code generator matrices: parity-check and logical operators.\n\n"
-      "Each matrix column corresponds to one data qubit. Construct from\n"
-      "sparse_binary_matrix fields or use css_matrices_from_code().")
+      "Each matrix column corresponds to one data qubit. Assign each matrix\n"
+      "from a dense NumPy array or a scipy sparse matrix, or build the whole\n"
+      "set with css_matrices_from_code(). Reading a matrix back returns a\n"
+      "dense uint8 NumPy array.")
       .def(nb::init<>())
-      .def_rw("hz", &css_code_matrices::hz,
-              "Z stabilizers [n_z_checks x n_qubits]")
-      .def_rw("hx", &css_code_matrices::hx,
-              "X stabilizers [n_x_checks x n_qubits]")
-      .def_rw("lz", &css_code_matrices::lz,
-              "Z logical operators [k x n_qubits]")
-      .def_rw("lx", &css_code_matrices::lx,
-              "X logical operators [k x n_qubits]");
+      .CSS_MATRIX_PROPERTY(hz, "Z stabilizers [n_z_checks x n_qubits]")
+      .CSS_MATRIX_PROPERTY(hx, "X stabilizers [n_x_checks x n_qubits]")
+      .CSS_MATRIX_PROPERTY(lz, "Z logical operators [k x n_qubits]")
+      .CSS_MATRIX_PROPERTY(lx, "X logical operators [k x n_qubits]");
+
+#undef CSS_MATRIX_PROPERTY
 
   // -------------------------------------------------------------------------
   // css_noise_params

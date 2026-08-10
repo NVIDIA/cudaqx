@@ -32,6 +32,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace cudaq::qec {
@@ -135,7 +136,10 @@ void extended_dem::validate(const char *context) const {
                                   " faults");
   };
   chk(H, "H");
-  if (O.num_rows() > 0)
+  // A default-constructed O (0 x 0) is the "no observables" convention. Any
+  // other O has to be column-aligned with H, because the merge and o_sparse
+  // helpers read it one fault column at a time.
+  if (O.num_rows() > 0 || O.num_cols() > 0)
     chk(O, "O");
   const uint32_t n_rows = H.num_rows();
   for (const auto &s : seams) {
@@ -147,6 +151,23 @@ void extended_dem::validate(const char *context) const {
       throw std::invalid_argument(std::string(context) +
                                   ": seam has row_begin > row_end");
   }
+  // Overlapping bands would make num_interior_rows(), which subtracts the
+  // summed seam widths, disagree with the row-membership test that actually
+  // materializes interior rows, so row counts and row contents would diverge.
+  std::vector<std::pair<uint32_t, uint32_t>> bands;
+  bands.reserve(seams.size());
+  for (const auto &s : seams)
+    if (s.num_rows() > 0)
+      bands.emplace_back(s.row_begin, s.row_end);
+  std::sort(bands.begin(), bands.end());
+  for (std::size_t i = 1; i < bands.size(); ++i)
+    if (bands[i].first < bands[i - 1].second)
+      throw std::invalid_argument(std::string(context) + ": seam row bands [" +
+                                  std::to_string(bands[i - 1].first) + "," +
+                                  std::to_string(bands[i - 1].second) +
+                                  ") and [" + std::to_string(bands[i].first) +
+                                  "," + std::to_string(bands[i].second) +
+                                  ") overlap");
   uint32_t tag_count = 0;
   for (const auto &s : seams)
     tag_count += s.num_rows();
@@ -273,6 +294,49 @@ static uint32_t seam_tag_offset(const extended_dem &dem, seam_id id) {
   throw std::out_of_range("seam_tag_offset: seam " + id.name() + " not found");
 }
 
+// Validate that the outgoing seam of 'a' and the incoming seam of 'b' have
+// the same width and identical per-row tags. An absent seam is treated as
+// width 0; the check is skipped only when both sides are absent/empty.
+static void check_seam_boundary(const extended_dem &a, const extended_dem &b,
+                                seam_id from_seam, seam_id to_seam,
+                                const std::string &context) {
+  const uint32_t from_w =
+      a.has_seam(from_seam) ? a.get_seam(from_seam).num_rows() : 0u;
+  const uint32_t to_w =
+      b.has_seam(to_seam) ? b.get_seam(to_seam).num_rows() : 0u;
+  if (from_w == 0 && to_w == 0)
+    return;
+  if (from_w != to_w)
+    throw std::invalid_argument(context + ": seam width mismatch (" +
+                                std::to_string(from_w) + " vs " +
+                                std::to_string(to_w) + ")");
+  const uint32_t off_a = seam_tag_offset(a, from_seam);
+  const uint32_t off_b = seam_tag_offset(b, to_seam);
+  for (uint32_t k = 0; k < from_w; ++k)
+    if (a.tags[off_a + k] != b.tags[off_b + k])
+      throw std::invalid_argument(context + ": tag mismatch at seam row " +
+                                  std::to_string(k));
+}
+
+// Composition only has defined semantics for the two seams named in the
+// connection: their rows either pair up across a boundary or become the
+// leading detector band. A third named seam has no counterpart on either
+// side, and the row bands it owns are excluded from the interior, so it
+// would be dropped from the result without this check.
+static void reject_extra_seams(const extended_dem &dem, seam_id from_seam,
+                               seam_id to_seam, const std::string &context) {
+  for (const auto &s : dem.seams) {
+    if (s.id == from_seam || s.id == to_seam || s.num_rows() == 0)
+      continue;
+    throw std::invalid_argument(
+        context + ": seam " + s.id.name() + " carries " +
+        std::to_string(s.num_rows()) + " rows but is neither from_seam (" +
+        from_seam.name() + ") nor to_seam (" + to_seam.name() +
+        "); composing chunks that carry additional named seams is not "
+        "supported");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // sparse_from_terminated_rows and validate_index_list
 // ---------------------------------------------------------------------------
@@ -335,8 +399,25 @@ extended_dem extended_dem_from_css_matrices(const css_code_matrices &code,
   validate_noise_rates(noise);
   extended_dem result;
   const std::size_t n = resolve_num_qubits(code);
-  if (n == 0)
+  if (n == 0) {
+    auto check_zero_rows = [](const sparse_binary_matrix &m, const char *name) {
+      if (m.num_rows() > 0)
+        throw std::invalid_argument(
+            std::string(name) + " has " + std::to_string(m.num_rows()) +
+            " rows but zero columns; all matrices must be empty when "
+            "num_qubits cannot be determined");
+    };
+    check_zero_rows(code.hz, "hz");
+    check_zero_rows(code.hx, "hx");
+    check_zero_rows(code.lz, "lz");
+    check_zero_rows(code.lx, "lx");
+    if (!noise.px_per_qubit.empty() || !noise.py_per_qubit.empty() ||
+        !noise.pz_per_qubit.empty())
+      throw std::invalid_argument(
+          "per-qubit noise vectors are non-empty but all code matrices have "
+          "zero columns");
     return result;
+  }
 
   check_num_cols(code.hz, n, "hz");
   check_num_cols(code.hx, n, "hx");
@@ -496,6 +577,12 @@ extended_dem dem_chunk_from_spec(const dem_chunk_spec &spec,
   working.validate(context);
   working.expand(seam_names);
 
+  for (const auto &e : working.seam_specs)
+    if (!e.spec.O_sparse.empty())
+      throw std::invalid_argument(
+          context + ": per-seam O_sparse in seam '" + e.id.name() +
+          "' is not yet supported; use chunk-level O_sparse instead");
+
   extended_dem result;
   result.error_rates = working.error_rates;
 
@@ -621,21 +708,39 @@ std::vector<phase_id> dem_chunks_spec::phase_sequence() const {
                                 " non-repeating phases");
   const std::size_t rep_count = has_rep ? rounds - non_repeating : 0;
 
+  // Build a successor map so that connection order does not matter.
+  std::map<uint32_t, phase_id> successor;
+  for (const auto &[f, t] : chain) {
+    if (!successor.emplace(f.value, t).second)
+      throw std::invalid_argument("dem_chunks_spec::phase_sequence: phase " +
+                                  f.name() +
+                                  " has multiple non-self outgoing edges");
+  }
+
   std::vector<phase_id> seq;
   seq.reserve(rounds);
-
+  // Each phase is visited at most once; the repeating phase is expanded in
+  // place rather than by walking its self-loop. Without this guard a cyclic
+  // connection graph (A->B, B->A) never reaches a phase without a successor
+  // and the walk grows the sequence until memory runs out.
+  std::set<uint32_t> visited;
   phase_id current = entry;
-  for (const auto &[f, t] : chain) {
-    if (current == f) {
-      seq.push_back(current);
-      if (has_rep && t == rep_phase) {
-        for (std::size_t r = 0; r < rep_count; ++r)
-          seq.push_back(rep_phase);
-      }
-      current = t;
+  while (true) {
+    if (!visited.insert(current.value).second)
+      throw std::invalid_argument(
+          "dem_chunks_spec::phase_sequence: connection graph is cyclic; "
+          "phase " +
+          current.name() + " is reachable twice");
+    seq.push_back(current);
+    if (has_rep && current == rep_phase) {
+      for (std::size_t r = 0; r < rep_count; ++r)
+        seq.push_back(rep_phase);
     }
+    auto it = successor.find(current.value);
+    if (it == successor.end())
+      break;
+    current = it->second;
   }
-  seq.push_back(current);
 
   if (seq.size() != rounds)
     throw std::invalid_argument("dem_chunks_spec::phase_sequence: computed " +
@@ -679,8 +784,10 @@ std::vector<extended_dem> dem_chunks_from_spec(const dem_chunks_spec &spec) {
   for (std::size_t i = 0; i < seq.size(); ++i) {
     const auto &phase_spec = spec.get_phase(seq[i]);
     std::vector<seam_id> ids;
-    if (i > 0)
-      ids.push_back(spec.seam.to_seam);
+    // Every phase gets the incoming seam (to_seam / prev_round). For the first
+    // phase this becomes the initial-state detector band: dem_close_all emits
+    // those rows first, compared against the zero initial syndrome.
+    ids.push_back(spec.seam.to_seam);
     if (i + 1 < seq.size())
       ids.push_back(spec.seam.from_seam);
     result.push_back(dem_chunk_from_spec(
@@ -711,20 +818,13 @@ extended_dem dem_stitch(const extended_dem &a, const extended_dem &b,
                                 std::to_string(to_seam.value) +
                                 " (to_seam); cannot contract");
 
+  reject_extra_seams(a, from_seam, to_seam, "dem_stitch: left");
+  reject_extra_seams(b, from_seam, to_seam, "dem_stitch: right");
+
+  check_seam_boundary(a, b, from_seam, to_seam, "dem_stitch");
   const auto &a_from = a.get_seam(from_seam);
   const auto &b_to = b.get_seam(to_seam);
-  if (a_from.num_rows() != b_to.num_rows())
-    throw std::invalid_argument("dem_stitch: contracted seam width mismatch (" +
-                                std::to_string(a_from.num_rows()) + " vs " +
-                                std::to_string(b_to.num_rows()) + ")");
-
   const uint32_t seam_d = a_from.num_rows();
-  const uint32_t a_from_off = seam_tag_offset(a, from_seam);
-  const uint32_t b_to_off = seam_tag_offset(b, to_seam);
-  for (uint32_t k = 0; k < seam_d; ++k)
-    if (a.tags[a_from_off + k] != b.tags[b_to_off + k])
-      throw std::invalid_argument("dem_stitch: tag mismatch at seam row " +
-                                  std::to_string(k));
 
   const auto n_A_sz = static_cast<std::size_t>(a.num_faults());
   const auto n_total_sz = n_A_sz + b.num_faults();
@@ -829,8 +929,10 @@ extended_dem dem_stitch_all(const std::vector<extended_dem> &chunks,
 // dem_close
 // ---------------------------------------------------------------------------
 
-detector_error_model dem_close(const extended_dem &dem, seam_id to_seam) {
+detector_error_model dem_close(const extended_dem &dem, seam_id to_seam,
+                               seam_id from_seam) {
   dem.validate("dem_close");
+  reject_extra_seams(dem, from_seam, to_seam, "dem_close");
   const uint32_t n_faults = dem.num_faults();
   const uint32_t n_obs = dem.num_observables();
   const uint32_t n_lead =
@@ -862,8 +964,11 @@ detector_error_model dem_close_all(const std::vector<extended_dem> &chunks,
                                    seam_id from_seam, seam_id to_seam) {
   if (chunks.empty())
     throw std::invalid_argument("dem_close_all: dem_chunks must be non-empty");
-  for (std::size_t i = 0; i < chunks.size(); ++i)
+  for (std::size_t i = 0; i < chunks.size(); ++i) {
     chunks[i].validate(("dem_close_all: chunk " + std::to_string(i)).c_str());
+    reject_extra_seams(chunks[i], from_seam, to_seam,
+                       "dem_close_all: chunk " + std::to_string(i));
+  }
 
   const uint32_t k = chunks[0].num_observables();
   for (std::size_t i = 1; i < chunks.size(); ++i)
@@ -872,8 +977,13 @@ detector_error_model dem_close_all(const std::vector<extended_dem> &chunks,
           "dem_close_all: observable count mismatch at chunk " +
           std::to_string(i));
 
-  // Cumulative fault column offsets
+  // Validate adjacent seam widths and tags using the same helper as dem_stitch.
   const std::size_t T = chunks.size();
+  for (std::size_t i = 0; i + 1 < T; ++i)
+    check_seam_boundary(chunks[i], chunks[i + 1], from_seam, to_seam,
+                        "dem_close_all: boundary " + std::to_string(i));
+
+  // Cumulative fault column offsets
   std::vector<std::size_t> col_off(T + 1, 0);
   for (std::size_t i = 0; i < T; ++i)
     col_off[i + 1] = col_off[i] + chunks[i].num_faults();
@@ -1037,6 +1147,12 @@ dem_chunks_to_o_sparse(const std::vector<extended_dem> &chunks) {
     if (nc > 0 && col_off + nc - 1 > std::numeric_limits<uint32_t>::max())
       throw std::overflow_error(
           "dem_chunks_to_o_sparse: global fault column exceeds uint32_t");
+    // A chunk with no observables may carry a default-constructed O whose
+    // column pointers are empty, so it cannot be indexed per fault column.
+    if (c.O.num_cols() == 0) {
+      col_off += nc;
+      continue;
+    }
     sparse_binary_matrix obs_converted;
     const sparse_binary_matrix &obs_csc =
         c.O.layout() == sparse_binary_matrix_layout::csc
@@ -1083,6 +1199,11 @@ struct dem_column_supports {
       : H_cols(canonical_columns(dem.H)), O_cols(canonical_columns(dem.O)),
         obs_base(dem.num_rows()) {
     const std::size_t n = dem.num_faults();
+    // A chunk with no observables may carry a default-constructed O with no
+    // columns at all; treat it as n empty columns so it can be indexed
+    // alongside H.
+    if (O_cols.empty())
+      O_cols.assign(n, {});
     std::size_t total = 0;
     for (std::size_t j = 0; j < n; ++j)
       total += H_cols[j].size() + O_cols[j].size();

@@ -36,6 +36,29 @@ detector_error_model dem_from_css_matrices(const css_code_matrices &code,
   detector_error_model result;
   const std::size_t n = resolve_num_qubits(code);
 
+  if (n == 0) {
+    // All matrices have zero columns. A matrix with rows but zero columns
+    // indicates a malformed input (e.g. 2×0 hz) rather than a trivially
+    // empty code, so reject it rather than silently returning an empty DEM.
+    auto check_zero_rows = [](const sparse_binary_matrix &m, const char *name) {
+      if (m.num_rows() > 0)
+        throw std::invalid_argument(
+            std::string(name) + " has " + std::to_string(m.num_rows()) +
+            " rows but zero columns; all matrices must be empty when "
+            "num_qubits cannot be determined");
+    };
+    check_zero_rows(code.hz, "hz");
+    check_zero_rows(code.hx, "hx");
+    check_zero_rows(code.lz, "lz");
+    check_zero_rows(code.lx, "lx");
+    if (!noise.px_per_qubit.empty() || !noise.py_per_qubit.empty() ||
+        !noise.pz_per_qubit.empty())
+      throw std::invalid_argument(
+          "per-qubit noise vectors are non-empty but all code matrices have "
+          "zero columns");
+    return result;
+  }
+
   if (n != 0) {
     // Validate hz even though n may have been resolved from hz itself:
     // if n came from a different matrix while hz has rows but zero columns,
@@ -82,12 +105,16 @@ detector_error_model dem_from_css_matrices(const css_code_matrices &code,
         x_qubits.size() + z_qubits.size() + y_qubits.size() + m_checks.size();
     const std::size_t n_errors = num_rounds * per_round;
 
+    // Always size the output tensors correctly so that consumers can derive
+    // syndrome_size and num_observables from shape even when all rates are
+    // zero.
+    result.detector_error_matrix =
+        cudaqx::tensor<uint8_t>({n_detectors, n_errors});
+    result.observables_flips_matrix =
+        cudaqx::tensor<uint8_t>({n_observables, n_errors});
+    result.error_rates.reserve(n_errors);
+
     if (n_errors != 0) {
-      result.detector_error_matrix =
-          cudaqx::tensor<uint8_t>({n_detectors, n_errors});
-      result.observables_flips_matrix =
-          cudaqx::tensor<uint8_t>({n_observables, n_errors});
-      result.error_rates.reserve(n_errors);
 
       std::size_t col = 0;
 

@@ -1114,8 +1114,17 @@ TEST(ExtendedDemPhases, MismatchedSeamTagsThrow) {
 
   const std::vector<extended_dem> permuted{rep5_phase_init(), bulk,
                                            rep5_phase_final()};
-  // dem_stitch_all checks tags and detects the mismatch
+  // Both the fold and the single-pass builder must reject the mismatch.
   EXPECT_THROW(dem_stitch_all(permuted), std::invalid_argument);
+  EXPECT_THROW(dem_close_all(permuted), std::invalid_argument);
+}
+
+TEST(ExtendedDemPhases, CloseAllNonContractingSeamThrows) {
+  // Wrong order: init, final, bulk. Width mismatch between final's next_round
+  // (0 rows) and bulk's prev_round (kRep5Checks rows).
+  const std::vector<extended_dem> broken{rep5_phase_init(), rep5_phase_final(),
+                                         rep5_phase_bulk()};
+  EXPECT_THROW(dem_close_all(broken), std::invalid_argument);
 }
 
 // A chunk closed on both sides carries no width to count rounds against.
@@ -1192,16 +1201,16 @@ TEST(DemChunkSpec, ExpandsToRequestedRoundCount) {
     auto spec = rep5_spec(rounds);
     const auto chunks = dem_chunks_from_spec(spec);
     ASSERT_EQ(chunks.size(), rounds);
-    EXPECT_FALSE(chunks.front().has_seam(seam_name::prev_round) &&
-                 chunks.front().get_seam(seam_name::prev_round).num_rows() > 0);
+    // init has a prev_round seam (initial-state detector band); final has no
+    // next_round seam (open end with nothing to compare against).
+    EXPECT_TRUE(chunks.front().has_seam(seam_name::prev_round));
+    EXPECT_GT(chunks.front().get_seam(seam_name::prev_round).num_rows(), 0u);
     EXPECT_FALSE(chunks.back().has_seam(seam_name::next_round) &&
                  chunks.back().get_seam(seam_name::next_round).num_rows() > 0);
     const auto flat = dem_close_all(chunks);
-    // Spec-built init has no interior rows; detectors arise from seam
-    // contractions. Detectors arise only from seam contractions: (rounds-1)
-    // contractions.
-    EXPECT_EQ(flat.detector_error_matrix.shape()[0],
-              (rounds - 1) * kRep5Checks);
+    // rounds seam contractions: the initial-state band (init's prev_round vs
+    // zero) plus (rounds-1) inter-chunk XOR boundaries = rounds * kRep5Checks.
+    EXPECT_EQ(flat.detector_error_matrix.shape()[0], rounds * kRep5Checks);
   }
 }
 
@@ -1626,6 +1635,185 @@ TEST(ExtendedDemValidate, MergeRejectsShortPriorList) {
   EXPECT_THROW(are_dem_columns_unique(dem_chunk), std::invalid_argument);
   EXPECT_THROW(assert_dem_columns_unique(dem_chunk), std::invalid_argument);
   EXPECT_THROW(dem_chunks_to_o_sparse({dem_chunk}), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Issue regressions
+// ---------------------------------------------------------------------------
+
+// Issue 1: phase_sequence() must not depend on connection order.
+TEST(DemChunkSpec, PhaseSequenceIsOrderIndependent) {
+  auto spec = rep5_spec(5);
+  // Reverse the connections: {bulk→final, bulk→bulk, init→bulk}
+  std::reverse(spec.connections.begin(), spec.connections.end());
+  ASSERT_NO_THROW(spec.validate());
+  const auto seq = spec.phase_sequence();
+  ASSERT_EQ(seq.size(), 5u);
+  EXPECT_EQ(seq.front(), phase_name::dem_init);
+  EXPECT_EQ(seq.back(), phase_name::dem_final);
+}
+
+// Issue 2: per-seam O_sparse must not be silently discarded.
+TEST(DemChunkSpec, PerSeamOSparseThrows) {
+  dem_chunk_spec spec;
+  spec.num_faults = 3;
+  spec.H_sparse = {};
+  spec.error_rates = {0.01, 0.01, 0.01};
+  seam_spec_entry e;
+  e.id = seam_name::next_round;
+  e.spec.H_sparse = {0, -1, 1, -1, 2, -1};
+  e.spec.O_sparse = {0, -1}; // non-empty: should throw
+  spec.seam_specs.push_back(e);
+  EXPECT_THROW(dem_chunk_from_spec(spec, {}, "test"), std::invalid_argument);
+}
+
+// Issue 3: zero-rate DEM must have correct tensor shape, not [0 × 0].
+TEST(DemConstruction, ZeroRatesDemHasCorrectShape) {
+  css_code_matrices code = rep3();
+  css_noise_params noise; // all rates default to zero
+  const auto flat = dem_from_css_matrices(code, noise, 3);
+  EXPECT_EQ(flat.detector_error_matrix.shape()[0], 3u * 2u); // T*d detectors
+  EXPECT_EQ(flat.detector_error_matrix.shape()[1], 0u);      // no fault columns
+  EXPECT_EQ(flat.observables_flips_matrix.shape()[0], 1u);   // 1 observable
+  EXPECT_EQ(flat.observables_flips_matrix.shape()[1], 0u);
+  EXPECT_TRUE(flat.error_rates.empty());
+}
+
+// Issue 4: a matrix with rows but zero columns must be rejected.
+TEST(DemConstruction, MatrixWithRowsButZeroColumnsThrows) {
+  css_code_matrices code;
+  // hz has 2 rows but 0 columns (default-constructed num_cols = 0)
+  code.hz = sparse_binary_matrix::from_nested_csr(2, 0, {{}, {}});
+  css_noise_params noise = px_only(0.01);
+  EXPECT_THROW(dem_from_css_matrices(code, noise, 1), std::invalid_argument);
+  EXPECT_THROW(extended_dem_from_css_matrices(code, noise),
+               std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Seams outside the contracted pair
+// ---------------------------------------------------------------------------
+
+constexpr seam_id kSideSeam{"side"};
+
+// prev_round [0,1), next_round [1,2), and a third named seam [2, 2+side_rows).
+// Each row touches its own fault column so a dropped row is visible.
+extended_dem chunk_with_side_seam(uint32_t side_rows) {
+  const uint32_t n_rows = 2 + side_rows;
+  using idx_t = sparse_binary_matrix::index_type;
+  std::vector<std::vector<idx_t>> rows;
+  for (uint32_t r = 0; r < n_rows; ++r)
+    rows.push_back({r});
+
+  extended_dem dem;
+  dem.H = sparse_binary_matrix::from_nested_csr(n_rows, n_rows, rows);
+  dem.O = sparse_binary_matrix::from_nested_csr(1, n_rows, {{0}});
+  dem.error_rates.assign(n_rows, 0.01);
+  dem.add_seam(seam_name::prev_round, 0, 1);
+  dem.add_seam(seam_name::next_round, 1, 2);
+  dem.add_seam(kSideSeam, 2, 2 + side_rows);
+  dem.tags.assign(2 + side_rows, 0);
+  return dem;
+}
+
+// A seam that is neither from_seam nor to_seam has no counterpart to contract
+// against, and its rows are excluded from the interior, so composing used to
+// drop them from H without any error.
+TEST(ExtendedDemSeams, StitchRejectsANonContractedSeam) {
+  const auto a = chunk_with_side_seam(1);
+  ASSERT_NO_THROW(a.validate("side-seam chunk"));
+  EXPECT_THROW(dem_stitch(a, a, seam_name::next_round, seam_name::prev_round),
+               std::invalid_argument);
+}
+
+TEST(ExtendedDemSeams, CloseAllRejectsANonContractedSeam) {
+  const auto a = chunk_with_side_seam(1);
+  EXPECT_THROW(dem_close_all({a, a}), std::invalid_argument);
+}
+
+// dem_close drops from_seam on purpose (no next round to compare against), but
+// a third seam must not disappear the same way.
+TEST(ExtendedDemSeams, CloseRejectsANonContractedSeam) {
+  const auto a = chunk_with_side_seam(1);
+  EXPECT_THROW(dem_close(a), std::invalid_argument);
+}
+
+// Zero-row seams are structural placeholders, not carriers of detector rows,
+// so they must still compose.
+TEST(ExtendedDemSeams, ZeroWidthNonContractedSeamIsAccepted) {
+  const auto a = chunk_with_side_seam(0);
+  ASSERT_TRUE(a.has_seam(kSideSeam));
+  ASSERT_NO_THROW(
+      dem_stitch(a, a, seam_name::next_round, seam_name::prev_round));
+  ASSERT_NO_THROW(dem_close_all({a, a}));
+  ASSERT_NO_THROW(dem_close(a));
+}
+
+// num_interior_rows() subtracts summed seam widths while the interior rows are
+// materialized by row membership; overlapping bands make the two disagree.
+TEST(ExtendedDemValidate, OverlappingSeamBandsThrow) {
+  extended_dem dem;
+  dem.H = sparse_binary_matrix::from_nested_csr(4, 2, {{0}, {1}, {0}, {1}});
+  dem.O = sparse_binary_matrix::from_nested_csr(0, 2, {});
+  dem.error_rates = {0.01, 0.01};
+  dem.add_seam(seam_name::prev_round, 0, 3);
+  dem.add_seam(seam_name::next_round, 2, 4); // overlaps rows [2,3)
+  dem.tags.assign(5, 0);
+
+  EXPECT_THROW(dem.validate("overlap"), std::invalid_argument);
+}
+
+// A cyclic connection graph used to walk forever, growing the phase sequence
+// until the process ran out of memory.
+TEST(DemChunkSpec, CyclicConnectionGraphThrows) {
+  dem_chunks_spec spec;
+  spec.seam = {seam_name::next_round, seam_name::prev_round};
+  const phase_id a{"A"}, b{"B"};
+  spec.connections = {{a, b}, {b, a}};
+
+  dem_chunk_spec cs;
+  cs.num_faults = 1;
+  cs.H_sparse = {0, -1};
+  cs.error_rates = {0.01};
+  spec.phases.push_back({a, cs});
+  spec.phases.push_back({b, cs});
+
+  ASSERT_NO_THROW(spec.validate());
+  EXPECT_THROW(spec.phase_sequence(), std::invalid_argument);
+  EXPECT_THROW(dem_chunks_from_spec(spec), std::invalid_argument);
+}
+
+// A chunk with no observables may leave O default-constructed (0 x 0). That
+// shape cannot be indexed per fault column, which the column-wise helpers
+// used to do unconditionally.
+TEST(ExtendedDemValidate, DefaultConstructedObservablesAreHandled) {
+  extended_dem dem;
+  dem.H = sparse_binary_matrix::from_nested_csr(2, 3, {{0}, {1}});
+  dem.error_rates = {0.1, 0.1, 0.1};
+  dem.add_seam(seam_name::prev_round, 0, 1);
+  dem.add_seam(seam_name::next_round, 1, 2);
+  dem.tags = {0, 0};
+
+  ASSERT_EQ(dem.O.num_rows(), 0u);
+  ASSERT_EQ(dem.O.num_cols(), 0u);
+  ASSERT_NO_THROW(dem.validate("no observables"));
+
+  EXPECT_TRUE(dem_chunks_to_o_sparse({dem, dem}).empty());
+  EXPECT_NO_THROW(dem_merge_duplicate_columns(dem));
+  EXPECT_NO_THROW(are_dem_columns_unique(dem));
+}
+
+// An O that has rows must still be column-aligned with H.
+TEST(ExtendedDemValidate, MisalignedObservablesThrow) {
+  extended_dem dem;
+  dem.H = sparse_binary_matrix::from_nested_csr(2, 3, {{0}, {1}});
+  dem.O = sparse_binary_matrix::from_nested_csr(0, 2, {});
+  dem.error_rates = {0.1, 0.1, 0.1};
+  dem.add_seam(seam_name::prev_round, 0, 1);
+  dem.add_seam(seam_name::next_round, 1, 2);
+  dem.tags = {0, 0};
+
+  EXPECT_THROW(dem.validate("misaligned O"), std::invalid_argument);
 }
 
 } // namespace
