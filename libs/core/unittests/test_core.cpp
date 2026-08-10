@@ -944,7 +944,7 @@ TEST(HeterogeneousMapTest, InsertMoveVector) {
 TEST(HeterogeneousMapTest, InsertMoveLargePayload) {
   cudaqx::heterogeneous_map map;
   std::vector<std::vector<float>> llr_history(100,
-                                               std::vector<float>(200, 0.5f));
+                                              std::vector<float>(200, 0.5f));
   map.insert("llr_history", std::move(llr_history));
 
   EXPECT_TRUE(llr_history.empty()); // outer vector was moved from
