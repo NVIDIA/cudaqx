@@ -126,7 +126,10 @@ struct type_caster<cudaqx::heterogeneous_map> {
     }
   }
 
-  static handle from_cpp(cudaqx::heterogeneous_map v, rv_policy,
+  // Take by const-reference: the map can hold large payloads (e.g. the
+  // bp_llr_history LLR matrix), and a by-value parameter deep-copied all of it
+  // on every conversion.
+  static handle from_cpp(const cudaqx::heterogeneous_map &v, rv_policy,
                          cleanup_list *) noexcept {
     try {
       nb::dict result;
