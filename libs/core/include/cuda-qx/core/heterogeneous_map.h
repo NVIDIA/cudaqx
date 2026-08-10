@@ -87,8 +87,8 @@ public:
   /// @param key The key
   /// @param value The value, moved into the map
   /// @note Only participates in overload resolution for rvalues; lvalues go to
-  /// the copying overload above. Useful for large payloads (e.g. LLR histories)
-  /// where the extra deep copy is expensive.
+  /// the copying overload above. Useful for large payloads where the extra
+  /// deep copy is expensive.
   template <typename T, typename = std::enable_if_t<
                             !std::is_lvalue_reference_v<T> &&
                             !is_bounded_char_array<std::remove_cv_t<T>>::value>>
