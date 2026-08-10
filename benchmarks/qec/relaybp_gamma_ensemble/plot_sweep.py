@@ -8,18 +8,7 @@
 
 # Reproduces the four figures in the gamma-ensemble Relay-BP user guide
 # (docs/sphinx/examples_rst/qec/nv_qldpc_gamma_ensemble_user_guide.rst) from
-# report_data.npz (run_sweep.py). Writes them under <QEC_DATA_ROOT>/figures/
-# with the published relaybp_* names, matching the copies in assets/docs/.
-# Also prints the numeric values reported in the guide.
-#
-# Output figures (written to $QEC_DATA_ROOT/figures/):
-#   relaybp_gamma_ensemble_perf.png
-#   relaybp_latency_percentiles.png
-#   relaybp_hard_deadline_ler.png
-#   relaybp_ler_multiplier.png
-#
-# Usage:
-#   QEC_DATA_ROOT=<same dir as run_sweep.py> python3 plot_sweep.py
+# report_data.npz (run_sweep.py). See README.md for usage.
 import os, numpy as np
 import matplotlib
 

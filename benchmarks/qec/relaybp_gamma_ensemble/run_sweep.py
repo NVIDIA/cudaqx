@@ -8,35 +8,7 @@
 
 # Reproduces the data behind the gamma-ensemble Relay-BP user guide
 # (docs/sphinx/examples_rst/qec/nv_qldpc_gamma_ensemble_user_guide.rst).
-# Records per-shot decode latency, iteration count and logical-error flag, plus
-# the per-iteration time, into report_data.npz, which plot_sweep.py turns into
-# the guide's figures.
-#
-# The Z-only stim circuits (assets/benchmarks/) come from Relay-BP
-# (https://github.com/trmue/relay, Apache-2.0); their detectors insensitive to
-# Z-stabilizer errors are stripped. They are tracked via Git LFS -- run
-# `git lfs pull` if they appear as pointer stubs.
-#
-# Requirements: a GPU; cudaq-qec (the nv-qldpc-decoder plugin is proprietary
-# and ships in the released wheel; a build from public source does not include
-# it); stim, numpy, matplotlib.
-#
-# Run both scripts, pinning run_sweep.py to an idle GPU -- another process on
-# the same device distorts latency data.
-#
-# Usage:
-#   export QEC_DATA_ROOT=<output directory>
-#   CUDA_VISIBLE_DEVICES=<idle gpu> python3 -u run_sweep.py
-#   python3 plot_sweep.py
-#
-# Environment variables:
-#   QEC_DATA_ROOT   report_data                    Output root; both scripts must agree
-#   SHOTS           150000                         Shots per configuration (~30 min on a GB200)
-#   CIRCUIT_DIR     ../../../assets/benchmarks     Directory of Z-only stim circuits
-#
-# Writes $QEC_DATA_ROOT/report_data.npz (~23 MB at 150,000 shots), holding
-# per-shot latency, iteration count, and logical-error flag for every code and
-# ensemble size.
+# See README.md for usage, requirements, and environment variables.
 import os, time, statistics as st, numpy as np, stim, cudaq_qec as qec
 
 CIRCUITS = os.environ.get(
