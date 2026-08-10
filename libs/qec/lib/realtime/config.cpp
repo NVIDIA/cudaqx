@@ -503,6 +503,20 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     const bool chunk_form =
         config.dem_chunks.has_value() && config.H_sparse.empty();
 
+    // Both forms at once is legal but lopsided: H_sparse wins and the chunk
+    // spec never runs. expand_dem_chunks() produces exactly this state, so it
+    // cannot be an error, but a hand-written document that reaches it has lost
+    // its dem_chunks without any other signal.
+    if (!io.outputting() && config.dem_chunks.has_value() &&
+        !config.H_sparse.empty())
+      CUDA_QEC_WARN(
+          "decoder {} sets both H_sparse and dem_chunks. The flat H_sparse "
+          "matrix is what decoders are built from, and dem_chunks is ignored, "
+          "including its num_rounds. This is expected for a config already "
+          "expanded by expand_dem_chunks(); otherwise drop H_sparse to decode "
+          "from dem_chunks.",
+          config.id);
+
     if (chunk_form) {
       if (config.dem_chunks->num_rounds.has_value() &&
           *config.dem_chunks->num_rounds < 2)

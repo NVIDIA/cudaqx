@@ -280,7 +280,9 @@ TEST(ExtendedDem, Close_T5_MatchesMonolithic) {
 // Tag validation
 // ---------------------------------------------------------------------------
 
-// Mismatched out/in tags must throw.
+// Mismatched out/in tags must throw. The tag has to be corrupted by hand: the
+// builders number seam rows positionally, so no pair of chunks they produce
+// can disagree on tags once the seam widths match. See extended_dem::tags.
 TEST(ExtendedDem, Stitch_TagMismatch_Throws) {
   css_code_matrices code = rep3();
   css_noise_params noise = px_only(0.01);
@@ -996,6 +998,51 @@ std::vector<extended_dem> rep5_phases(std::size_t rounds) {
   phases.insert(phases.end(), rounds - 2, rep5_phase_bulk());
   phases.push_back(rep5_phase_final());
   return phases;
+}
+
+void expect_same_chunk(const extended_dem &got, const extended_dem &want,
+                       const std::string &context) {
+  EXPECT_EQ(got.num_rows(), want.num_rows()) << context;
+  EXPECT_EQ(got.num_faults(), want.num_faults()) << context;
+  EXPECT_EQ(got.num_observables(), want.num_observables()) << context;
+  EXPECT_TRUE(tensors_equal(got.H.to_dense(), want.H.to_dense())) << context;
+  EXPECT_TRUE(tensors_equal(got.O.to_dense(), want.O.to_dense())) << context;
+  EXPECT_EQ(got.error_rates, want.error_rates) << context;
+  EXPECT_EQ(got.tags, want.tags) << context;
+  ASSERT_EQ(got.seams.size(), want.seams.size()) << context;
+  for (std::size_t s = 0; s < want.seams.size(); ++s) {
+    EXPECT_TRUE(got.seams[s].id == want.seams[s].id) << context;
+    EXPECT_EQ(got.seams[s].row_begin, want.seams[s].row_begin) << context;
+    EXPECT_EQ(got.seams[s].row_end, want.seams[s].row_end) << context;
+  }
+}
+
+extended_dem stitch_fold(const std::vector<extended_dem> &chunks) {
+  extended_dem acc = chunks[0];
+  for (std::size_t i = 1; i < chunks.size(); ++i)
+    acc = dem_stitch(acc, chunks[i], seam_name::next_round,
+                     seam_name::prev_round);
+  return acc;
+}
+
+// dem_stitch_all() assembles the chain in one forward pass because folding
+// re-copies the accumulator at every step. The fold is still the definition of
+// the result, so the two must agree on the whole chunk -- rows, observables,
+// priors, seam bands and tags -- not merely on what survives closing.
+TEST(ExtendedDemPhases, StitchAllMatchesAnExplicitFold) {
+  for (std::size_t rounds = 2; rounds <= 6; ++rounds) {
+    const auto phases = rep5_phases(rounds);
+    expect_same_chunk(dem_stitch_all(phases), stitch_fold(phases),
+                      "phases, rounds=" + std::to_string(rounds));
+  }
+  // Uniform chunks carry both seams at full width, where the phase
+  // decomposition leaves the outer two empty.
+  for (std::size_t T = 2; T <= 6; ++T) {
+    const std::vector<extended_dem> uniform(
+        T, extended_dem_from_css_matrices(rep3(), px_only(0.01)));
+    expect_same_chunk(dem_stitch_all(uniform), stitch_fold(uniform),
+                      "uniform, T=" + std::to_string(T));
+  }
 }
 
 // dem_close_all() takes a single O(T) pass and the left fold takes the general

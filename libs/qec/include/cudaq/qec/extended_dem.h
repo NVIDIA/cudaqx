@@ -31,7 +31,6 @@
 //   dem_chunk_rounds               — how many measurement rounds a chunk spans
 //   dem_chunks_to_rounds           — total rounds across a list
 //   dem_chunks_to_detector_round   — per-detector round index
-//   dem_chunks_to_d_sparse         — XOR-of-rounds detector map (memory)
 //   dem_chunks_to_o_sparse         — observable-flip map
 //   dem_chunks_to_pcm              — parity-check matrix
 //
@@ -165,8 +164,20 @@ struct extended_dem {
   std::vector<seam> seams; ///< named seam row bands
 
   /// One tag per seam row, stored flat in seams[] order.
-  /// Tag equality between a.seams[from_seam] and b.seams[to_seam] is verified
-  /// by dem_stitch to ensure the same physical check is on both sides.
+  ///
+  /// A tag is meant to name the physical check behind a seam row, and
+  /// dem_stitch() compares tags across a contracted boundary. Be aware that
+  /// both in-tree producers -- extended_dem_from_css_matrices() and
+  /// dem_chunk_from_spec() -- number tags positionally as 0..width-1 within
+  /// each seam. For chunks built either way the two sides therefore hold
+  /// identical sequences whenever their widths agree, so the tag comparison
+  /// reduces to the width comparison made just before it and rules out
+  /// nothing extra. Notably, two chunks from unrelated codes that happen to
+  /// share a seam width will stitch without complaint.
+  ///
+  /// The comparison only does independent work if a caller overwrites this
+  /// field with identifiers of its own; neither the spec form nor its YAML
+  /// schema carries tags, so that has to be done on the built chunk.
   std::vector<uint64_t> tags;
 
   // Accessors
@@ -303,7 +314,9 @@ struct dem_chunk_spec {
 ///
 /// Calls spec.expand(seam_names) to resolve the shorthand form if needed,
 /// then materializes H (all seam bands stacked, interior empty) and O.
-/// Tags are sequential within each seam.
+/// Tags are numbered positionally within each seam, 0..width-1, which leaves
+/// dem_stitch()'s tag check equivalent to its width check; see
+/// extended_dem::tags.
 ///
 /// @param spec       Chunk to materialize.
 /// @param seam_names Seam IDs for expand(); ignored when seam_specs is set.

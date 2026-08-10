@@ -117,7 +117,13 @@ void bindExtendedDem(nb::module_ &mod) {
               "Error rates, one per fault column.")
       .def_ro("seams", &extended_dem::seams, "List of named seam descriptors.")
       .def_rw("tags", &extended_dem::tags,
-              "Tags per seam row (flat, in seams[] order).")
+              "Tags per seam row (flat, in seams[] order).\n\n"
+              "dem_stitch compares tags across a contracted boundary, but "
+              "every builder here numbers them positionally as 0..width-1 per "
+              "seam, so the comparison holds automatically once the widths "
+              "match and adds no safety of its own. Assign your own "
+              "identifiers here if you need the boundary check to verify that "
+              "both sides name the same physical check.")
       .def("validate", &extended_dem::validate, nb::arg("context") = "dem",
            "Raise ValueError unless the chunk is internally consistent.");
 
@@ -177,17 +183,21 @@ void bindExtendedDem(nb::module_ &mod) {
       .def("validate", &dem_chunk_spec::validate, nb::arg("context"),
            "Raise ValueError on the first inconsistency.");
 
-  mod.def("dem_chunk_from_spec", &dem_chunk_from_spec, nb::arg("spec"),
-          nb::arg("seam_names") = std::vector<seam_id>{},
-          nb::arg("context") = "dem_chunk",
-          "Build one ExtendedDem from a DemChunkSpec.\n\n"
-          "Args:\n"
-          "    spec:       DemChunkSpec to materialize.\n"
-          "    seam_names: SeamIds for shorthand expansion (ignored if\n"
-          "                seam_specs is already populated).\n"
-          "    context:    Prefix for any error message.\n"
-          "Returns:\n"
-          "    ExtendedDem with seam tags assigned so adjacent phases stitch.");
+  mod.def(
+      "dem_chunk_from_spec", &dem_chunk_from_spec, nb::arg("spec"),
+      nb::arg("seam_names") = std::vector<seam_id>{},
+      nb::arg("context") = "dem_chunk",
+      "Build one ExtendedDem from a DemChunkSpec.\n\n"
+      "Args:\n"
+      "    spec:       DemChunkSpec to materialize.\n"
+      "    seam_names: SeamIds for shorthand expansion (ignored if\n"
+      "                seam_specs is already populated).\n"
+      "    context:    Prefix for any error message.\n"
+      "Returns:\n"
+      "    ExtendedDem whose seam rows are tagged positionally, 0..width-1\n"
+      "    within each seam. See ExtendedDem.tags: positional tags make\n"
+      "    the seam-tag check in dem_stitch equivalent to its width\n"
+      "    check.");
 
   // -------------------------------------------------------------------------
   // seam_connection / phase_connection / phase_spec_entry / dem_chunks_spec

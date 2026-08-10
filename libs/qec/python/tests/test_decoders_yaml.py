@@ -368,6 +368,30 @@ def test_expand_dem_chunks_fills_the_flat_fields():
     assert config.D_sparse.count(-1) == config.syndrome_size
 
 
+def test_both_forms_warns_and_flat_form_wins(capfd):
+    """A leftover H_sparse disables the entire chunk spec. expand_dem_chunks()
+    produces that same state, so it has to keep parsing, but it must say so.
+
+    The warning comes from the C++ logger writing to the process stderr, hence
+    capfd rather than capsys.
+    """
+    yaml = chunk_form_yaml(5) + """block_size: 2
+syndrome_size: 2
+H_sparse: [ 0, -1, 1, -1 ]
+O_sparse: [ 0, -1 ]
+D_sparse: [ 0, -1, 1, -1 ]
+"""
+    config = qec.decoder_config.from_yaml_str(yaml)
+    captured = capfd.readouterr()
+
+    assert "both H_sparse and dem_chunks" in captured.err
+    # The flat matrix is what a decoder would be built from, and dem_chunks
+    # survives so the document still round-trips.
+    assert config.syndrome_size == 2
+    assert list(config.H_sparse) == [0, -1, 1, -1]
+    assert config.dem_chunks is not None
+
+
 def test_expand_dem_chunks_is_a_no_op_on_a_flat_config():
     config = qec.decoder_config.from_yaml_str(chunk_form_yaml(3))
     qec.qecrt.config.expand_dem_chunks(config)

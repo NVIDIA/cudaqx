@@ -10,6 +10,7 @@
 #include "../lib/realtime/realtime_decoding.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/decoder_config_schema.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <cmath>
@@ -1497,6 +1498,55 @@ TEST(DecoderChunkFormTest, ExpandedConfigIsItselfAValidFlatConfig) {
   const auto emitted = wrapper.to_yaml_str(200);
   EXPECT_NE(emitted.find("H_sparse"), std::string::npos);
   EXPECT_NE(emitted.find("dem_chunks"), std::string::npos);
+}
+
+// A config carrying both forms parses as flat, which is what
+// expand_dem_chunks() leaves behind. It cannot be an error for that reason,
+// but a hand-written document that reaches it has silently lost its whole
+// chunk spec, so the parse has to say so.
+TEST(DecoderChunkFormTest, BothFormsWarnAndFlatFormWins) {
+  const std::string chunks = dem_chunks_yaml(3);
+  const auto insert_at = chunks.find("    dem_chunks:");
+  ASSERT_NE(insert_at, std::string::npos);
+  const std::string yaml = chunks.substr(0, insert_at) +
+                           "    block_size: 2\n"
+                           "    syndrome_size: 2\n"
+                           "    H_sparse: [0, -1, 1, -1]\n"
+                           "    O_sparse: [0, -1]\n"
+                           "    D_sparse: [0, -1, 1, -1]\n" +
+                           chunks.substr(insert_at);
+
+  const auto previous = cudaq::qec::detail::get_log_level();
+  cudaq::qec::detail::set_log_level(cudaq::qec::detail::log_level::warn);
+  testing::internal::CaptureStderr();
+  const auto config = parse_one(yaml);
+  cudaq::qec::detail::flush_logs();
+  const std::string logged = testing::internal::GetCapturedStderr();
+  cudaq::qec::detail::set_log_level(previous);
+
+  EXPECT_NE(logged.find("both H_sparse and dem_chunks"), std::string::npos)
+      << logged;
+  // The flat matrix wins, and dem_chunks survives so the document still
+  // round-trips.
+  EXPECT_EQ(config.syndrome_size, 2u);
+  EXPECT_EQ(config.H_sparse, (std::vector<std::int64_t>{0, -1, 1, -1}));
+  EXPECT_TRUE(config.dem_chunks.has_value());
+}
+
+// The warning must stay quiet for a config that uses the chunk form as
+// intended, otherwise it is noise on the common path.
+TEST(DecoderChunkFormTest, ChunkFormAloneDoesNotWarn) {
+  const auto previous = cudaq::qec::detail::get_log_level();
+  cudaq::qec::detail::set_log_level(cudaq::qec::detail::log_level::warn);
+  testing::internal::CaptureStderr();
+  const auto config = parse_one(dem_chunks_yaml(3));
+  cudaq::qec::detail::flush_logs();
+  const std::string logged = testing::internal::GetCapturedStderr();
+  cudaq::qec::detail::set_log_level(previous);
+
+  EXPECT_EQ(logged.find("both H_sparse and dem_chunks"), std::string::npos)
+      << logged;
+  EXPECT_TRUE(config.H_sparse.empty());
 }
 
 TEST(DecoderChunkFormTest, HSparseStillRequiredWithoutChunks) {

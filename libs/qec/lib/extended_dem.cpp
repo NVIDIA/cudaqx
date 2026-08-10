@@ -297,6 +297,11 @@ static uint32_t seam_tag_offset(const extended_dem &dem, seam_id id) {
 // Validate that the outgoing seam of 'a' and the incoming seam of 'b' have
 // the same width and identical per-row tags. An absent seam is treated as
 // width 0; the check is skipped only when both sides are absent/empty.
+//
+// The tag loop below is a hook rather than an active check: both in-tree
+// producers tag seam rows positionally, so once the widths match the two tag
+// sequences are both 0..width-1 and always agree. It bites only for tags a
+// caller assigned itself. See extended_dem::tags.
 static void check_seam_boundary(const extended_dem &a, const extended_dem &b,
                                 seam_id from_seam, seam_id to_seam,
                                 const std::string &context) {
@@ -510,7 +515,9 @@ extended_dem extended_dem_from_css_matrices(const css_code_matrices &code,
   result.O = sparse_binary_matrix::from_nested_csc(k, n_faults, obs_cols);
   result.error_rates = std::move(priors);
 
-  // Sequential tags, identical for both seams (same physical checks).
+  // Positional tags, identical for both seams: row i of either seam is check
+  // i of the same round-to-round syndrome matrix. Being positional, they carry
+  // no identity beyond the seam width -- see extended_dem::tags.
   std::vector<uint64_t> half_tags(d);
   std::iota(half_tags.begin(), half_tags.end(), uint64_t{0});
   result.tags = half_tags;
@@ -911,6 +918,169 @@ extended_dem dem_stitch(const extended_dem &a, const extended_dem &b,
 // dem_stitch_all
 // ---------------------------------------------------------------------------
 
+namespace {
+
+std::size_t seam_rows_or_zero(const extended_dem &chunk, seam_id id) {
+  return chunk.has_seam(id) ? chunk.get_seam(id).num_rows() : 0u;
+}
+
+col_list nested_csc(const sparse_binary_matrix &m) {
+  return m.layout() == sparse_binary_matrix_layout::csc
+             ? m.to_nested_csc()
+             : m.to_csc().to_nested_csc();
+}
+
+// Row and column geometry of a whole chunk chain, computed up front so the
+// chain can be filled in one pass. Row order is the one a left fold of
+// dem_stitch() produces:
+//
+//   chunk 0 to_seam | chunk 0 interior | seam(0,1) | chunk 1 interior | ...
+//   ... | chunk T-1 interior | chunk T-1 from_seam
+//
+// Dropping the trailing band leaves exactly dem_close_all()'s detector rows,
+// which is what lets both entry points below share this plan.
+struct chain_layout {
+  std::vector<std::size_t> col_off;      ///< T+1 cumulative fault columns
+  std::vector<std::size_t> interior_row; ///< T interior band starts
+  std::vector<std::size_t> seam_row;     ///< T-1 contracted seam band starts
+  std::size_t lead = 0;                  ///< rows of chunk 0's to_seam
+  std::size_t trail = 0;                 ///< rows of chunk T-1's from_seam
+  std::size_t trail_row = 0;             ///< first row of the trailing band
+  std::size_t num_faults = 0;
+};
+
+chain_layout plan_chain(const std::vector<extended_dem> &chunks,
+                        seam_id from_seam, seam_id to_seam) {
+  const std::size_t T = chunks.size();
+  chain_layout plan;
+  plan.col_off.assign(T + 1, 0);
+  plan.interior_row.assign(T, 0);
+  plan.seam_row.assign(T - 1, 0);
+  plan.lead = seam_rows_or_zero(chunks.front(), to_seam);
+  plan.trail = seam_rows_or_zero(chunks.back(), from_seam);
+
+  std::size_t rows = plan.lead;
+  for (std::size_t i = 0; i < T; ++i) {
+    plan.col_off[i + 1] = plan.col_off[i] + chunks[i].num_faults();
+    plan.interior_row[i] = rows;
+    rows += chunks[i].num_interior_rows();
+    if (i + 1 < T) {
+      plan.seam_row[i] = rows;
+      rows += seam_rows_or_zero(chunks[i], from_seam);
+    }
+  }
+  plan.trail_row = rows;
+  plan.num_faults = plan.col_off.back();
+  return plan;
+}
+
+// Where each of chunk i's own H rows lands in the assembled chain. A chunk's
+// to_seam shares its rows with the predecessor's from_seam, which is what
+// contracting the boundary means; chunk 0's to_seam has no predecessor and
+// heads the result instead.
+std::vector<uint32_t> chain_row_map(const extended_dem &chunk, std::size_t i,
+                                    std::size_t T, const chain_layout &plan,
+                                    seam_id from_seam, seam_id to_seam) {
+  const std::size_t to_base = (i == 0) ? 0 : plan.seam_row[i - 1];
+  const std::size_t from_base = (i + 1 < T) ? plan.seam_row[i] : plan.trail_row;
+
+  const bool has_to = chunk.has_seam(to_seam);
+  const bool has_from = chunk.has_seam(from_seam);
+  const uint32_t to_begin = has_to ? chunk.get_seam(to_seam).row_begin : 0u;
+  const uint32_t to_end = has_to ? chunk.get_seam(to_seam).row_end : 0u;
+  const uint32_t from_begin =
+      has_from ? chunk.get_seam(from_seam).row_begin : 0u;
+  const uint32_t from_end = has_from ? chunk.get_seam(from_seam).row_end : 0u;
+
+  // Rows outside both bands are interior. reject_extra_seams() has already
+  // ruled out a third band carrying rows, so this agrees with
+  // extract_interior_rows(), which excludes every seam.
+  std::vector<uint32_t> row_map(chunk.H.num_rows(), 0);
+  std::size_t interior_seen = 0;
+  for (uint32_t r = 0; r < chunk.H.num_rows(); ++r) {
+    if (has_to && r >= to_begin && r < to_end)
+      row_map[r] = static_cast<uint32_t>(to_base + (r - to_begin));
+    else if (has_from && r >= from_begin && r < from_end)
+      row_map[r] = static_cast<uint32_t>(from_base + (r - from_begin));
+    else
+      row_map[r] =
+          static_cast<uint32_t>(plan.interior_row[i] + interior_seen++);
+  }
+  return row_map;
+}
+
+// Fault columns are block-disjoint across chunks, so each chunk's columns are
+// copied once with their rows remapped. That is linear in total non-zeros,
+// where a left fold of dem_stitch() re-copies the whole accumulator per step
+// and so costs O(T^2).
+//
+// row_limit drops rows at or past it, which is how the closed forms discard
+// the trailing from_seam band without a second pass.
+col_list chain_h_columns(const std::vector<extended_dem> &chunks,
+                         const chain_layout &plan, seam_id from_seam,
+                         seam_id to_seam, std::size_t row_limit) {
+  const std::size_t T = chunks.size();
+  col_list cols(plan.num_faults);
+  for (std::size_t i = 0; i < T; ++i) {
+    const auto row_map =
+        chain_row_map(chunks[i], i, T, plan, from_seam, to_seam);
+    const auto local = nested_csc(chunks[i].H);
+    for (std::size_t j = 0; j < local.size(); ++j) {
+      auto &dst = cols[plan.col_off[i] + j];
+      dst.reserve(local[j].size());
+      for (auto r : local[j])
+        if (row_map[r] < row_limit)
+          dst.push_back(row_map[r]);
+    }
+  }
+  return cols;
+}
+
+col_list chain_o_columns(const std::vector<extended_dem> &chunks,
+                         const chain_layout &plan) {
+  col_list cols(plan.num_faults);
+  for (std::size_t i = 0; i < chunks.size(); ++i) {
+    // A chunk with no observables may leave O default-constructed (0 x 0).
+    if (chunks[i].O.num_cols() == 0)
+      continue;
+    const auto local = nested_csc(chunks[i].O);
+    for (std::size_t j = 0; j < local.size(); ++j)
+      cols[plan.col_off[i] + j] = local[j];
+  }
+  return cols;
+}
+
+// The checks a left fold performed through its repeated dem_stitch() calls.
+// Validating the inputs is equivalent to validating each accumulator, since
+// every accumulator is built from them.
+void validate_chain(const std::vector<extended_dem> &chunks, seam_id from_seam,
+                    seam_id to_seam, const std::string &fn) {
+  const std::size_t T = chunks.size();
+  for (std::size_t i = 0; i < T; ++i) {
+    chunks[i].validate((fn + ": chunk " + std::to_string(i)).c_str());
+    reject_extra_seams(chunks[i], from_seam, to_seam,
+                       fn + ": chunk " + std::to_string(i));
+  }
+  for (std::size_t i = 1; i < T; ++i)
+    if (chunks[i].num_observables() != chunks[0].num_observables())
+      throw std::invalid_argument(fn + ": observable count mismatch at chunk " +
+                                  std::to_string(i));
+  for (std::size_t i = 0; i + 1 < T; ++i) {
+    if (!chunks[i].has_seam(from_seam))
+      throw std::invalid_argument(fn + ": chunk " + std::to_string(i) +
+                                  " has no seam with id " + from_seam.name() +
+                                  " (from_seam); cannot contract");
+    if (!chunks[i + 1].has_seam(to_seam))
+      throw std::invalid_argument(fn + ": chunk " + std::to_string(i + 1) +
+                                  " has no seam with id " + to_seam.name() +
+                                  " (to_seam); cannot contract");
+    check_seam_boundary(chunks[i], chunks[i + 1], from_seam, to_seam,
+                        fn + ": boundary " + std::to_string(i));
+  }
+}
+
+} // namespace
+
 extended_dem dem_stitch_all(const std::vector<extended_dem> &chunks,
                             seam_id from_seam, seam_id to_seam) {
   if (chunks.empty())
@@ -919,11 +1089,44 @@ extended_dem dem_stitch_all(const std::vector<extended_dem> &chunks,
     chunks[0].validate("dem_stitch_all: chunk 0");
     return chunks[0];
   }
-  extended_dem acc = chunks[0];
-  for (std::size_t i = 1; i < chunks.size(); ++i)
-    acc = dem_stitch(acc, chunks[i], from_seam, to_seam);
-  return acc;
-}
+  validate_chain(chunks, from_seam, to_seam, "dem_stitch_all");
+
+  const std::size_t T = chunks.size();
+  const chain_layout plan = plan_chain(chunks, from_seam, to_seam);
+  const std::size_t n_rows = plan.trail_row + plan.trail;
+  const auto n_faults = static_cast<uint32_t>(plan.num_faults);
+
+  extended_dem result;
+  // Remapped rows arrive out of order within a column, so canonicalize.
+  result.H = sparse_binary_matrix::from_nested_csc(
+                 static_cast<uint32_t>(n_rows), n_faults,
+                 chain_h_columns(chunks, plan, from_seam, to_seam, n_rows))
+                 .canonicalize();
+  result.O = sparse_binary_matrix::from_nested_csc(
+      chunks[0].num_observables(), n_faults, chain_o_columns(chunks, plan));
+  result.error_rates.reserve(plan.num_faults);
+  for (const auto &chunk : chunks)
+    result.error_rates.insert(result.error_rates.end(),
+                              chunk.error_rates.begin(),
+                              chunk.error_rates.end());
+
+  result.add_seam(to_seam, 0, static_cast<uint32_t>(plan.lead));
+  result.add_seam(from_seam, static_cast<uint32_t>(plan.trail_row),
+                  static_cast<uint32_t>(plan.trail_row + plan.trail));
+
+  // Tags come from the two surviving seams, as with a pairwise stitch.
+  if (chunks[0].has_seam(to_seam)) {
+    const uint32_t off = seam_tag_offset(chunks[0], to_seam);
+    for (std::size_t k = 0; k < plan.lead; ++k)
+      result.tags.push_back(chunks[0].tags[off + k]);
+  }
+  if (chunks[T - 1].has_seam(from_seam)) {
+    const uint32_t off = seam_tag_offset(chunks[T - 1], from_seam);
+    for (std::size_t k = 0; k < plan.trail; ++k)
+      result.tags.push_back(chunks[T - 1].tags[off + k]);
+  }
+  return result;
+} // end - dem_stitch_all()
 
 // ---------------------------------------------------------------------------
 // dem_close
@@ -1170,10 +1373,21 @@ dem_chunks_to_o_sparse(const std::vector<extended_dem> &chunks) {
 
 sparse_binary_matrix dem_chunks_to_pcm(const std::vector<extended_dem> &chunks,
                                        seam_id from_seam, seam_id to_seam) {
-  return sparse_binary_matrix(
-             dem_close_all(chunks, from_seam, to_seam).detector_error_matrix)
-      .canonicalize()
-      .to_csc();
+  if (chunks.empty())
+    throw std::invalid_argument(
+        "dem_chunks_to_pcm: dem_chunks must be non-empty");
+  validate_chain(chunks, from_seam, to_seam, "dem_chunks_to_pcm");
+
+  // The same forward pass dem_stitch_all() makes, stopping before the trailing
+  // from_seam band that closing drops. Building CSC directly keeps peak memory
+  // proportional to the non-zeros; routing through dem_close_all()'s dense
+  // detector_error_matrix would make it the detector x fault product.
+  const chain_layout plan = plan_chain(chunks, from_seam, to_seam);
+  return sparse_binary_matrix::from_nested_csc(
+             static_cast<uint32_t>(plan.trail_row),
+             static_cast<uint32_t>(plan.num_faults),
+             chain_h_columns(chunks, plan, from_seam, to_seam, plan.trail_row))
+      .canonicalize();
 }
 
 // ---------------------------------------------------------------------------
