@@ -14,7 +14,7 @@
 // since the logical measurement is taken once at the end of the experiment.
 
 #include "cudaq/qec/dem_construction.h"
-#include "cudaq/qec/code_matrices.h"
+#include "dem_construction_utils.h"
 
 #include <stdexcept>
 #include <vector>

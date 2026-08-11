@@ -20,10 +20,11 @@
 // dem_close() writes seams[to_seam] rows first, then interior rows, then O.
 
 #include "cudaq/qec/extended_dem.h"
-#include "cudaq/qec/code_matrices.h"
+#include "dem_construction_utils.h"
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -48,9 +49,22 @@ static std::unordered_map<uint32_t, std::string> &seam_name_registry() {
   return reg;
 }
 
+// Display name for diagnostics; throws on FNV1a-32 name collision.
 void seam_id::register_name(seam_id id, std::string_view name) {
-  seam_name_registry().emplace(id.value, name);
-}
+  auto &reg = seam_name_registry();
+  char hex[16] = {};
+  auto [it, inserted] = reg.emplace(id.value, name);
+
+  if (inserted)
+    return;
+  if (it->second == name)
+    return;
+
+  std::snprintf(hex, sizeof(hex), "%08x", id.value);
+  throw std::invalid_argument(
+      std::string("seam_id::register_name: FNV1a-32 collision at 0x") + hex +
+      " between '" + it->second + "' and '" + std::string(name) + "'");
+} // end - register_name()
 
 std::string seam_id::name() const {
   const auto &reg = seam_name_registry();

@@ -94,8 +94,8 @@ struct seam_id {
   }
   constexpr bool operator<(seam_id o) const noexcept { return value < o.value; }
 
-  /// Associate a human-readable name with this id for use in error messages.
-  /// First registration wins; subsequent calls with the same id are ignored.
+  /// Register a display name for diagnostics. Same name is a no-op; a
+  /// different name for the same id throws (FNV1a-32 collision).
   static void register_name(seam_id id, std::string_view name);
 
   /// Return the registered name, or "seam:<hex>" if not registered.

@@ -67,6 +67,31 @@ css_noise_params px_only(double p) {
 }
 
 // ---------------------------------------------------------------------------
+// seam_id name registry
+// ---------------------------------------------------------------------------
+
+// Same id + same name must remain idempotent (YAML re-registers standard
+// seams on every parse).
+TEST(SeamIdRegistry, SameNameIsIdempotent) {
+  EXPECT_NO_THROW(seam_id::register_name(seam_name::prev_round, "prev_round"));
+  EXPECT_EQ(seam_name::prev_round.name(), "prev_round");
+}
+
+// Two distinct names that share a 32-bit hash must fail loudly. Force the
+// collision by writing the same hash value under a second display name.
+TEST(SeamIdRegistry, HashCollisionThrows) {
+  const seam_id first{"registry_collision_probe"};
+  seam_id colliding;
+  colliding.value = first.value;
+
+  ASSERT_NO_THROW(seam_id::register_name(first, "registry_collision_probe"));
+  EXPECT_THROW(seam_id::register_name(colliding, "other_display_name"),
+               std::invalid_argument);
+  // First registration must still win for diagnostics.
+  EXPECT_EQ(first.name(), "registry_collision_probe");
+}
+
+// ---------------------------------------------------------------------------
 // One-round chunk structure
 // ---------------------------------------------------------------------------
 

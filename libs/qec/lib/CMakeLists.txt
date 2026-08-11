@@ -40,6 +40,7 @@ if(NOT cuStabilizer_FOUND)
 endif()
 
 set(DECODERS_SOURCES
+  dem_construction_utils.cpp
   decoder.cpp
   decoder_config_payload.cpp
   decoder_config_schema.cpp
