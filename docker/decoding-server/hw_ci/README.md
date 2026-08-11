@@ -94,8 +94,10 @@ the GB200 lab FPGA port (`--fpga-device mlx5_4`) are the defaults.
 ## Per-machine invocations
 
 ```bash
-# GB200 (lab default wiring: FPGA on mlx5_4, SoftRoCE for two-process):
-./run_hw_ci.sh --sha <commit> --hf-token-prompt
+# GB200 (lab default wiring: FPGA on mlx5_4, SoftRoCE for two-process;
+# artifacts staged in the home directory rather than the /opt default):
+./run_hw_ci.sh --sha <commit> --hf-token-prompt \
+    --artifacts-dir ~/nvqlink-lab-artifacts
 
 # DGX Spark, single cable in loopback mode (port0 <-> port1, no FPGA):
 ./run_hw_ci.sh --sha <commit> --no-fpga --roce-pair rocep1s0f0,rocep1s0f1
