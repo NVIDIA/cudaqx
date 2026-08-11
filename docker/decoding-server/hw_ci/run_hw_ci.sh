@@ -368,10 +368,15 @@ start_container() {
     if [[ "$ROCE_PAIR" == "rxe" ]]; then
         rxe_mount=(-v /lib/modules:/lib/modules:ro -v /usr/src:/usr/src:ro)
     fi
+    # /dev/infiniband is a live bind mount, NOT --device: --device snapshots
+    # the char devices at container creation, so the uverbs node of an rxe
+    # device created later by setup_roce_pair would never appear in the
+    # container and libibverbs would not find the device.  The container is
+    # privileged, so no device-cgroup allowance is lost by the switch.
     docker run -d --name "$CONTAINER" \
         --privileged --net=host --gpus all --shm-size=8g \
         --ulimit memlock=-1:-1 \
-        --device /dev/infiniband \
+        -v /dev/infiniband:/dev/infiniband \
         -v "$SRC:/workspaces/cudaqx" \
         -v "$WORKDIR/ccache:/root/.ccache" \
         ${artifacts_mount[@]+"${artifacts_mount[@]}"} \

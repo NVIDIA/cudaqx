@@ -200,10 +200,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------------------------
 ARG mlnx_ofed_src_ver=26.01-1.0.0.0
 ARG mlnx_ofed_src_sha256=ed5597a547c2d5bb858b43f2305ec19f539bc70c4e5ed75aa6c6897a715568d3
+# NOTE: no apt cmake here -- the base image ships cmake 4.x under
+# /usr/local/cmake-*/bin, and noble's cmake 3.28 would shadow it at
+# /bin/cmake, breaking the later in-container source build (cudaq-realtime
+# requires cmake >= 4.0).  rdma-core needs >= 3.18.1, satisfied by the base.
 RUN set -e; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        cmake ninja-build pkg-config patch kmod \
+        ninja-build pkg-config patch kmod \
         libnl-3-dev libnl-route-3-dev libudev-dev; \
     RDMA_CORE_VER=$(dpkg-query -W -f '${Version}' rdma-core); \
     RDMA_CORE_VER=${RDMA_CORE_VER%-*}; \
