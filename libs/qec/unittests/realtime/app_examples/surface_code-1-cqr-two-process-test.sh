@@ -53,6 +53,16 @@ NUM_ROUNDS=$6
 DECODER_TYPE=${7:-multi_error_lut}
 NUM_LOGICAL=${8:-1}
 
+# Device-scoped endpoint args exist only for udp (udp-port.<id>=): over
+# cpu_roce the app refuses --num_logical > 1, and the server would then wedge
+# in ring 1's blocking rendezvous accept().  Skip with a named reason
+# (SKIP_RETURN_CODE 77 in the ctest registration).
+if [[ "${QEC_DECODING_SERVER_TRANSPORT:-udp}" != "udp" && "$NUM_LOGICAL" -gt 1 ]]; then
+  echo "SKIP: per-decoder ring endpoints exercised over udp only (no" \
+       "device-scoped ${QEC_DECODING_SERVER_TRANSPORT} channel args)"
+  exit 77
+fi
+
 export CUDAQ_DEFAULT_SIMULATOR=stim
 
 NUM_SHOTS=1000
@@ -86,10 +96,23 @@ fi
 QEC_DECODING_SERVER_STATS=1 $SERVER_PATH "${SERVER_ARGS[@]}" \
   > $SERVER_LOG 2>&1 &
 SERVER_PID=$!
-cleanup() {
+# TERM first; escalate to KILL after a 5 s grace.  The cpu_roce bridge's
+# rendezvous connect() blocks in accept() where the server's shutdown flag
+# is never checked, and a wedged server must fail the test fast rather
+# than sit out the whole ctest timeout.
+stop_server() {
   kill -TERM $SERVER_PID 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    kill -0 $SERVER_PID 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 $SERVER_PID 2>/dev/null; then
+    echo "WARNING: decoding_server ignored SIGTERM; sending SIGKILL"
+    kill -KILL $SERVER_PID 2>/dev/null || true
+  fi
   wait $SERVER_PID 2>/dev/null || true
 }
+cleanup() { stop_server; }
 trap cleanup EXIT
 
 # Wait for the READY line and parse the port.
@@ -133,8 +156,7 @@ QEC_DECODING_SERVER_PORT=$SERVER_PORT \
   |& tee $APP_LOG
 
 # [4] Stop the server and collect its dispatch count.
-kill -TERM $SERVER_PID
-wait $SERVER_PID 2>/dev/null || true
+stop_server
 trap - EXIT
 
 num_non_zero_values=$(grep "Number of non-zero values measured :" $APP_LOG | awk -F': ' '{print $2}')

@@ -365,6 +365,14 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
           2
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
+
+    # The script exits 77 on transports it cannot exercise (per-decoder ring
+    # endpoints are udp-only), and TIMEOUT bounds a wedged server well below
+    # the 1500 s ctest default.
+    set_tests_properties(
+      app_examples.surface_code-1-cqr-two-process-test-distance-3
+      app_examples.surface_code-1-cqr-two-process-test-distance-3-num-logical-2
+      PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
   endif()
 endif()
 

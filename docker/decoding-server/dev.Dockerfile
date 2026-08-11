@@ -126,12 +126,13 @@ RUN set -e; \
 # Ising exporter environment: the `hf` CLI plus every Python package
 # examples/qec/realtime_decoding_demo/prepare_ising_artifacts.py checks for,
 # so the hardware CI downloads the gated model and regenerates the bundle on
-# every run.  Torch comes from the PyTorch CPU wheel index: since torch 2.7
-# the plain-PyPI Linux wheels (incl. aarch64) are CUDA builds dragging in
-# multi-GB nvidia-* wheels, and the exporter's small inference pass
-# (32 samples, d=7) does not need the GPU.
+# every run.  Torch must be a CUDA build: the pinned Ising-Decoding exporter
+# is GPU-only (its local_run.sh preflights torch.cuda.is_available(), so CPU
+# torch fails the lane before inference starts).  The cu130 index matches
+# the image's toolkit and covers GB200 (sm_100) and Spark GB10 (sm_121);
+# the multi-GB nvidia-* dependency wheels are the accepted cost.
 # ---------------------------------------------------------------------------
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu130 \
     && pip install --no-cache-dir \
         "huggingface_hub[cli]" \
         stim ldpc beliefmatching hydra-core omegaconf onnx \
@@ -158,6 +159,12 @@ RUN set -e; \
             /add_subdirectory(udp_transmitter)/d; /add_subdirectory(emulator)/d; \
             /add_subdirectory(sig_gen)/d; /add_subdirectory(sig_viewer)/d' \
         src/hololink/operators/CMakeLists.txt; \
+    # In-tree mlx5 drivers (e.g. the DGX Spark's -nvidia kernel, no OFED)
+    # reject BlueFlame UAR allocation -- doca_uar_create fails and every
+    # gpu_roce lane dies at transceiver start.  NONCACHE doorbells are
+    # functionally equivalent for the CI lanes.
+    sed -i 's/#define DOCA_SEND_BLUE_FLAME 1/#define DOCA_SEND_BLUE_FLAME 0/' \
+        src/hololink/operators/gpu_roce_transceiver/gpu_roce_transceiver_common.hpp; \
     export CUDA_NATIVE_ARCH=${cuda_native_arch}; \
     cmake -G Ninja -S . -B build \
         -DCMAKE_BUILD_TYPE=Release \
@@ -170,6 +177,21 @@ RUN set -e; \
     cmake --build build --target gpu_roce_transceiver hololink_core; \
     mkdir -p /workspaces; \
     ln -sfn /opt/holoscan-sensor-bridge /workspaces/holoscan-sensor-bridge
+
+# ---------------------------------------------------------------------------
+# Tools the base image lacks:
+#  - ibdev2netdev: the in-tree --setup-network helpers shell out to it to map
+#    IB devices to netdevs.  It lives in mlnx-ofed-kernel-utils (from the
+#    DOCA repo configured above) -- NOT in modern mlnx-tools, which dropped
+#    it.  Userspace deps only; no DKMS/kernel modules ride along with
+#    --no-install-recommends.
+#  - patchelf: libs/qec's add_target_libs_to_wheel patches the rpath of
+#    staged external decoder plugins at configure time.
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        mlnx-ofed-kernel-utils patchelf \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && test -x /usr/sbin/ibdev2netdev && command -v patchelf
 
 ENV HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=/opt/holoscan-sensor-bridge \
     HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=/opt/holoscan-sensor-bridge/build

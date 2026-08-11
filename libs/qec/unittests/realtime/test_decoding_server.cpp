@@ -489,6 +489,14 @@ __qpu__ std::int64_t dual_decoding_server_kernel() {
 }
 
 TEST(DecodingServerTwoProcess, TwoProcessHostDispatchDualDecoders) {
+  // Shared-wire demux is udp-only: a multi-decoder server opens one ring
+  // per decoder, and on rendezvous transports (cpu_roce) its post-READY
+  // connect() blocks until every ring is dialed -- this caller dials one
+  // endpoint (see decoding_server.cpp [3]), so the test would hang, not
+  // fail.  Multi-ring coverage is TwoProcessPerDecoderRings (also udp-only
+  // today: device-scoped cpu_roce endpoint args do not exist yet).
+  if (env_or("QEC_DECODING_SERVER_TRANSPORT", "udp") != "udp")
+    GTEST_SKIP() << "shared-wire dual decoders demux over udp only";
   // Two identical 3-bit-identity pymatching decoders (ids 0 and 1) in one
   // server -- one per logical qubit.
   const std::string config_path =

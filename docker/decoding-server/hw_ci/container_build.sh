@@ -97,10 +97,16 @@ else
     echo "== cudevice proprietary archive: absent (device_graph-dispatch tests will SKIP)"
 fi
 if [[ -f "$NV_QLDPC_PLUGIN" ]]; then
+    # cudaqx's external-decoder install patches the plugin's rpath IN PLACE
+    # and /artifacts is mounted read-only -- hand the build a writable copy
+    # (the decoder-plugins symlink below then serves the patched copy too).
+    mkdir -p /tmp/hwci-artifacts/decoder-plugins
+    cp -f "$NV_QLDPC_PLUGIN" /tmp/hwci-artifacts/decoder-plugins/
+    NV_QLDPC_PLUGIN="/tmp/hwci-artifacts/decoder-plugins/$(basename "$NV_QLDPC_PLUGIN")"
     # Configure-time gate for test_realtime_qldpc_graph_decoding and the
     # mixed-dispatch app example.
     export QEC_EXTERNAL_DECODERS="$NV_QLDPC_PLUGIN"
-    echo "== nv-qldpc plugin: $NV_QLDPC_PLUGIN"
+    echo "== nv-qldpc plugin: $NV_QLDPC_PLUGIN (writable copy from $ARTIFACTS_DIR)"
 else
     echo "== nv-qldpc plugin: absent (nv-qldpc lanes will SKIP)"
 fi

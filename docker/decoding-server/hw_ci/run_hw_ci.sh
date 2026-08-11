@@ -52,6 +52,7 @@ CUDA_VERSION="13.0"
 CUDA_ARCH=""                  # auto-detected unless given (Spark=121, GB200=100)
 ROCE_PAIR=""                  # rxe | DEV0,DEV1 ; empty = skip cpu_roce pair lanes
 HF_TOKEN_FILE=""
+HF_TOKEN_PROMPT=false
 FPGA_DEVICE=""                # ConnectX IB device facing the FPGA
 BRIDGE_IP="192.168.0.1"
 FPGA_IP="192.168.0.2"
@@ -108,7 +109,10 @@ Hardware:
 
 Misc:
   --hf-token-file FILE    Hugging Face token for the gated Ising model (or
-                          set HF_TOKEN); absent => ising/trt lanes SKIP
+                          set HF_TOKEN); without a token the trt lanes fall
+                          back to a staged bundle (see --artifacts-dir) or SKIP
+  --hf-token-prompt       read the token from the terminal instead (nothing
+                          written to disk; for shared/public accounts)
   --keep-container        leave the container running afterwards (debugging)
   --help, -h              this help
 EOF
@@ -138,6 +142,7 @@ while [[ $# -gt 0 ]]; do
         --page-size)      PAGE_SIZE="$2"; shift ;;
         --no-fpga)        NO_FPGA=true ;;
         --hf-token-file)  HF_TOKEN_FILE="$2"; shift ;;
+        --hf-token-prompt) HF_TOKEN_PROMPT=true ;;
         --keep-container) KEEP_CONTAINER=true ;;
         --help|-h)        print_usage; exit 0 ;;
         *) echo "ERROR: unknown option: $1" >&2; print_usage >&2; exit 1 ;;
@@ -151,6 +156,16 @@ _die()  { _err "$*"; exit 1; }
 
 [[ -n "$SHA" || "$LIST_ONLY" == true ]] || { print_usage >&2; _die "--sha is required"; }
 case "$TIER" in examples|extra|all) ;; *) _die "--tier must be examples|extra|all" ;; esac
+
+# Interactive token entry: the token lives only in this process's memory (and
+# the ising-prepare lane's docker exec env), never on disk -- for runs from
+# shared/public accounts.
+if [[ "$HF_TOKEN_PROMPT" == true && "$LIST_ONLY" != true ]]; then
+    [[ -r /dev/tty ]] || _die "--hf-token-prompt needs a terminal (use --hf-token-file or HF_TOKEN otherwise)"
+    read -rs -p "Hugging Face token (input hidden): " HF_TOKEN < /dev/tty; echo
+    [[ -n "$HF_TOKEN" ]] || _die "--hf-token-prompt: empty token"
+    export HF_TOKEN
+fi
 
 # ---------------------------------------------------------------------------
 # Lane bookkeeping.  Every lane lands in the summary exactly once as
@@ -256,6 +271,10 @@ checkout_sha() {
         _info "Cloning $REPO_URL"
         git clone "$REPO_URL" "$SRC" || _die "clone failed"
     fi
+    # --repo is authoritative on every run, not just the first: retarget the
+    # cached clone (a stale origin otherwise silently pins every later run
+    # to the first-ever --repo).
+    git -C "$SRC" remote set-url origin "$REPO_URL"
     if git -C "$SRC" fetch origin "$SHA" 2>/dev/null; then
         # FETCH_HEAD is exactly the requested branch/tag/SHA tip; never
         # resolve "$SHA" locally here or a branch name would silently hit a
@@ -344,6 +363,7 @@ start_container() {
     fi
     docker run -d --name "$CONTAINER" \
         --privileged --net=host --gpus all --shm-size=8g \
+        --ulimit memlock=-1:-1 \
         --device /dev/infiniband \
         -v "$SRC:/workspaces/cudaqx" \
         -v "$WORKDIR/ccache:/root/.ccache" \
@@ -376,6 +396,36 @@ in_ctr() { docker exec "$CONTAINER" bash -lc "$*"; }
 # ---------------------------------------------------------------------------
 ROCE_READY=false
 CH_DEV=""; CH_IP=""; DA_DEV=""; DA_IP=""
+NET0=""; NET1=""
+
+apply_roce_pair_addrs() {
+    # Idempotent; called before every cpu_roce lane as well as at setup:
+    # NetworkManager-managed ports drop statically added addresses on each
+    # DHCP retry cycle (see the README for the permanent nmcli fix).
+    in_ctr "
+        set -e
+        ip link set $NET0 up; ip link set $NET1 up
+        ip addr replace 10.0.0.1/24 dev $NET0
+        ip addr replace 10.0.0.2/24 dev $NET1
+        mac0=\$(cat /sys/class/net/$NET0/address)
+        mac1=\$(cat /sys/class/net/$NET1/address)
+        ip neigh replace 10.0.0.2 lladdr \$mac1 nud permanent dev $NET0
+        ip neigh replace 10.0.0.1 lladdr \$mac0 nud permanent dev $NET1
+    "
+}
+
+wait_roce_gids() {
+    # The IPv4-mapped RoCE GIDs (::ffff:10.0.0.x) appear asynchronously
+    # after the address add, and the transceivers refuse to start without
+    # them.  Host sysfs and the --net=host container see the same tables.
+    local i
+    for i in $(seq 1 20); do
+        grep -qs 'ffff:0a00:0001' "/sys/class/infiniband/$CH_DEV/ports/1/gids/"* && \
+        grep -qs 'ffff:0a00:0002' "/sys/class/infiniband/$DA_DEV/ports/1/gids/"* && return 0
+        sleep 0.5
+    done
+    return 1
+}
 
 setup_roce_pair() {
     [[ -z "$ROCE_PAIR" ]] && return 0
@@ -400,21 +450,19 @@ setup_roce_pair() {
         local dev0="${ROCE_PAIR%%,*}" dev1="${ROCE_PAIR##*,}"
         [[ -n "$dev0" && -n "$dev1" && "$dev0" != "$dev1" ]] \
             || { _err "--roce-pair expects rxe or DEV0,DEV1"; return 1; }
-        in_ctr "
-            set -e
-            net0=\$(ibdev2netdev | awk -v d=$dev0 '\$1==d {print \$5}')
-            net1=\$(ibdev2netdev | awk -v d=$dev1 '\$1==d {print \$5}')
-            [ -n \"\$net0\" ] && [ -n \"\$net1\" ]
-            ip link set \$net0 up; ip link set \$net1 up
-            ip addr replace 10.0.0.1/24 dev \$net0
-            ip addr replace 10.0.0.2/24 dev \$net1
-            mac0=\$(cat /sys/class/net/\$net0/address)
-            mac1=\$(cat /sys/class/net/\$net1/address)
-            ip neigh replace 10.0.0.2 lladdr \$mac1 nud permanent dev \$net0
-            ip neigh replace 10.0.0.1 lladdr \$mac0 nud permanent dev \$net1
-        " || { _err "RoCE pair setup failed for $ROCE_PAIR"; return 1; }
+        # Resolve ibdev -> netdev on the host via sysfs: the image has no
+        # ibdev2netdev, and --net=host keeps the names identical inside the
+        # container anyway.
+        NET0=$(ls "/sys/class/infiniband/$dev0/device/net" 2>/dev/null | head -1)
+        NET1=$(ls "/sys/class/infiniband/$dev1/device/net" 2>/dev/null | head -1)
+        [[ -n "$NET0" && -n "$NET1" ]] \
+            || { _err "cannot resolve netdevs for $ROCE_PAIR (see /sys/class/infiniband)"; return 1; }
         CH_DEV="$dev0"; CH_IP=10.0.0.1
         DA_DEV="$dev1"; DA_IP=10.0.0.2
+        apply_roce_pair_addrs \
+            || { _err "RoCE pair setup failed for $ROCE_PAIR"; return 1; }
+        wait_roce_gids \
+            || { _err "IPv4 RoCE GIDs did not appear on $dev0/$dev1"; return 1; }
     fi
     ROCE_READY=true
     _info "cpu_roce pair ready: channel=$CH_DEV/$CH_IP daemon=$DA_DEV/$DA_IP"
@@ -429,6 +477,13 @@ teardown_roce_pair() {
 }
 
 roce_env() {  # docker exec env flags for the cpu_roce topology
+    # Re-assert the pair right before each lane: on NetworkManager-managed
+    # ports the addresses vanish on NM's retry timer, which killed lanes
+    # minutes after a successful setup.
+    if [[ "$LIST_ONLY" != true && "$ROCE_PAIR" != rxe && "$ROCE_READY" == true ]]; then
+        apply_roce_pair_addrs >/dev/null 2>&1 && wait_roce_gids \
+            || _info "WARNING: cpu_roce pair re-assert failed; lane may fail"
+    fi
     LANE_ENV+=( -e "CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE=$CH_DEV"
                 -e "CUDAQ_CPU_ROCE_TEST_CHANNEL_IP=$CH_IP"
                 -e "CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE=$DA_DEV"
@@ -462,6 +517,11 @@ CUDEVICE_HOST="$ARTIFACTS_DIR/cudevice/libcudaq-qec-realtime-cudevice-proprietar
 NV_QLDPC_PLUGIN_CTR=/artifacts/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so
 CUDEVICE_CTR=/artifacts/cudevice/libcudaq-qec-realtime-cudevice-proprietary.a
 ISING_BUNDLE=/tmp/ising-bundle
+# Optional pre-built bundle for tokenless machines (see --hf-token-file help):
+# copied into the container so the trt lanes run; only the HF download/export
+# path loses coverage, and the ising-prepare SKIP reason says so.
+ISING_STAGED_HOST="$ARTIFACTS_DIR/ising-bundle"
+ISING_STAGED_CTR=/artifacts/ising-bundle
 CQ_SRC=/tmp/cudaq-realtime-src
 
 have_hf_token() {
@@ -485,10 +545,12 @@ ising_ready() {
 # Count first and convert "no match" into a named SKIP.
 ctest_cmd() {  # regex reason-when-unregistered
     local regex="$1" reason="$2"
+    # --timeout only applies to tests without their own TIMEOUT property; it
+    # bounds a wedged test at 15 min instead of ctest's 1500 s default.
     echo "cd /workspaces/cudaqx/build && \
 n=\$(ctest -N -R '$regex' 2>/dev/null | sed -n 's/^Total Tests: //p'); \
 if [ \"\${n:-0}\" -eq 0 ]; then echo 'SKIP: $reason'; exit 77; fi; \
-ctest --output-on-failure -R '$regex'"
+ctest --output-on-failure --timeout 900 -R '$regex'"
 }
 
 fpga_dev_flag() { [[ -n "$FPGA_DEVICE" ]] && echo "--device $FPGA_DEVICE"; }
@@ -496,7 +558,13 @@ fpga_dev_flag() { [[ -n "$FPGA_DEVICE" ]] && echo "--device $FPGA_DEVICE"; }
 run_examples_tier() {
     local d
 
-    # -- Ising bundle: fresh gated-HF download + export, every run ----------
+    # -- Ising bundle: fresh gated-HF download + export when a token exists;
+    # otherwise fall back to a bundle staged in the artifacts dir.  The copy
+    # runs outside the lane gate so `--only .../trt_decoder` also benefits.
+    if ! have_hf_token && [[ "$LIST_ONLY" != true && -f "$ISING_STAGED_HOST/metadata.txt" ]]; then
+        in_ctr "rm -rf $ISING_BUNDLE && cp -r $ISING_STAGED_CTR $ISING_BUNDLE" \
+            || _info "WARNING: staged Ising bundle copy failed"
+    fi
     if have_hf_token; then
         [[ "$LIST_ONLY" == true ]] || LANE_ENV=( -e "HF_TOKEN=$(hf_token)" )
         run_lane "examples/ising-prepare" "
@@ -506,8 +574,10 @@ run_examples_tier() {
             [ -n \"\$app\" ] || { echo 'surface_code-4-yaml generator not in the build tree'; exit 1; }
             python3 $DEMO/prepare_ising_artifacts.py prepare \
                 --app \"\$app\" --artifacts-dir $ISING_BUNDLE --yes"
+    elif ising_ready; then
+        skip_lane "examples/ising-prepare" "no HF token; trt lanes use the staged bundle from $ISING_STAGED_HOST (HF download/export path NOT exercised)"
     else
-        skip_lane "examples/ising-prepare" "no HF token (--hf-token-file or HF_TOKEN)"
+        skip_lane "examples/ising-prepare" "no HF token (--hf-token-file/--hf-token-prompt/HF_TOKEN) and no staged bundle at $ISING_STAGED_HOST"
     fi
 
     # -- qpu-kernel over udp: the no-hardware baseline -----------------------

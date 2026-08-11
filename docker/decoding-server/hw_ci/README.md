@@ -58,14 +58,30 @@ as `PASS`, `FAIL`, or `SKIP(reason)`; `--strict` turns skips into failures.
    ```
    decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so   # build against the SHA under test
    cudevice/libcudaq-qec-realtime-cudevice-proprietary.a
+   ising-bundle/                                      # optional: pre-built Ising/TRT
+                                                      # bundle for tokenless machines
    ```
 
 5. Hugging Face access for the Ising lanes: request access once to the gated
    `nvidia/Ising-Decoder-SurfaceCode-1-Fast` repo, then provide a token via
-   `--hf-token-file` or `HF_TOKEN`. The token is passed only to the
-   `ising-prepare` lane's `docker exec` — never baked into an image or
-   written to a log. No token => the ising/trt lanes SKIP.
+   `--hf-token-file`, `HF_TOKEN`, or — on shared/public accounts where the
+   token must not touch disk — `--hf-token-prompt` (interactive, hidden
+   input). The token is passed only to the `ising-prepare` lane's
+   `docker exec` — never baked into an image or written to a log.
+   Without a token the trt lanes fall back to a pre-built bundle at
+   `<artifacts-dir>/ising-bundle/` when one is staged (generate it once on
+   a token-holding machine with `prepare_ising_artifacts.py prepare
+   --app <surface_code-4-yaml> --artifacts-dir <dir>` and copy the
+   directory over); `ising-prepare` then SKIPs with a reason noting the HF
+   download/export path was not exercised. No token and no staged bundle
+   => the ising/trt lanes SKIP.
 6. ~60 GB free disk for image layers and build trees.
+7. NetworkManager-managed ports (the DGX OS default) silently drop the
+   runner's statically assigned `10.0.0.x` pair addresses on NM's DHCP
+   retry timer. The runner re-asserts the addresses and waits for the
+   IPv4-mapped RoCE GIDs before every cpu_roce lane, which is normally
+   enough; the permanent fix is to mark the pair unmanaged:
+   `sudo nmcli device set <netdev> managed no` (once per port).
 
 ## Per-machine invocations
 
@@ -80,6 +96,13 @@ as `PASS`, `FAIL`, or `SKIP(reason)`; `--strict` turns skips into failures.
 # DGX Spark, single cable in FPGA mode:
 ./run_hw_ci.sh --sha <commit> --fpga-device rocep1s0f0
 ```
+
+`--repo` also accepts a local clone path (avoids pushing while iterating).
+If that clone is owned by another user — e.g. it was created from a
+devcontainer running as root — git refuses to serve it ("dubious
+ownership"); allow it once with
+`git config --global --add safe.directory <path>` and the same for
+`<path>/.git` (the clone accesses the repo by its `.git` path).
 
 The CUDA architecture is auto-detected (`--cuda-arch` to override; GB200 =
 100, Spark GB10 = 121). On 64 KiB-page kernels (GB200 `-64k`) the ring slot
