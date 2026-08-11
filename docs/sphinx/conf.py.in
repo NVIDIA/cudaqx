@@ -250,6 +250,8 @@ nitpick_ignore = [
     ('cpp:identifier', 'details'),
     ('cpp:identifier', 'spin_op'),
     ('cpp:identifier', 'heterogeneous_map'),
+    ('cpp:identifier', 'is_bounded_char_array<std::remove_cv_t<T>>'),
+    ('cpp:identifier', 'is_bounded_char_array<std::remove_cv_t<T>>::value'),
     ('cpp:identifier', 'cudaq::qkernel<void(cudaq::qvector<>&)>'),
     ('cpp:identifier', 'cudaq::qkernel<void(patch)>'),
     ('cpp:identifier', 'cudaq::qkernel<void(patch, patch)>'),
