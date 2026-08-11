@@ -361,6 +361,13 @@ start_container() {
     else
         _info "Artifacts dir $ARTIFACTS_DIR absent; proprietary lanes will SKIP"
     fi
+    # rxe mode may need to build the OFED-compat rdma_rxe module in-container
+    # (see setup_roce_pair), which compiles against the HOST kernel headers
+    # and ofa_kernel tree.
+    local rxe_mount=()
+    if [[ "$ROCE_PAIR" == "rxe" ]]; then
+        rxe_mount=(-v /lib/modules:/lib/modules:ro -v /usr/src:/usr/src:ro)
+    fi
     docker run -d --name "$CONTAINER" \
         --privileged --net=host --gpus all --shm-size=8g \
         --ulimit memlock=-1:-1 \
@@ -368,6 +375,7 @@ start_container() {
         -v "$SRC:/workspaces/cudaqx" \
         -v "$WORKDIR/ccache:/root/.ccache" \
         ${artifacts_mount[@]+"${artifacts_mount[@]}"} \
+        ${rxe_mount[@]+"${rxe_mount[@]}"} \
         "$IMAGE" sleep infinity >/dev/null || _die "docker run failed"
 }
 
@@ -431,10 +439,22 @@ setup_roce_pair() {
     [[ -z "$ROCE_PAIR" ]] && return 0
     if [[ "$ROCE_PAIR" == "rxe" ]]; then
         if ! grep -qw rdma_rxe /proc/modules; then
-            if ! sudo -n modprobe rdma_rxe 2>/dev/null; then
-                _err "rdma_rxe is not loaded; run 'sudo modprobe rdma_rxe' and retry"
+            sudo -n modprobe rdma_rxe 2>/dev/null || true
+        fi
+        if ! grep -qw rdma_rxe /proc/modules; then
+            # DOCA/MLNX-OFED DKMS hosts: the distro rdma_rxe cannot bind to
+            # the OFED ib_core (symbol CRC mismatch), so build the staged
+            # OFED-compat copy against the host headers mounted at
+            # /lib/modules + /usr/src and load it from the privileged
+            # container (see rxe-ofed/README.md).
+            _info "distro rdma_rxe not loadable; building the OFED-compat module in-container"
+            in_ctr "make -C /opt/rxe-ofed/src >/tmp/rxe-ofed-build.log 2>&1 \
+                        && insmod /opt/rxe-ofed/src/rdma_rxe.ko" || {
+                _err "OFED-compat rdma_rxe build/load failed; last lines of the build log:"
+                in_ctr "tail -15 /tmp/rxe-ofed-build.log" >&2 || true
+                _err "(full log: docker exec $CONTAINER cat /tmp/rxe-ofed-build.log)"
                 return 1
-            fi
+            }
         fi
         in_ctr "
             ip link add hwci-dummy0 type dummy 2>/dev/null || true

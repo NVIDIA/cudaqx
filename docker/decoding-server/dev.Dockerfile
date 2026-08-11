@@ -52,12 +52,12 @@ ARG cuda_native_arch=100
 # Build tools + RDMA userspace.
 # NOTE: the base image ships Mellanox OFED's rdma-core fork, whose
 # ibverbs-providers outranks Ubuntu's and contains ONLY the mlx5 provider --
-# no rxe (SoftRoCE).  The apt line below therefore keeps the Mellanox
-# package, and `--roce-pair rxe` runs will SKIP with a named reason until a
-# rxe provider matching the Mellanox libibverbs ABI is built into the image
-# (see the hw_ci README).  perftest (ib_write_bw) is for fabric smoke tests.
-# The `sudo` binary must exist because the example scripts' network helpers
-# invoke it literally (a no-op when already root).
+# no rxe (SoftRoCE).  The apt line below keeps the Mellanox package; the
+# missing rxe provider is built from the matching Mellanox source in a later
+# layer (see "SoftRoCE support" at the end of this file).  perftest
+# (ib_write_bw) is for fabric smoke tests.  The `sudo` binary must exist
+# because the example scripts' network helpers invoke it literally (a no-op
+# when already root).
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build curl pkg-config jq \
@@ -186,6 +186,60 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         mlnx-ofed-kernel-utils patchelf \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && test -x /usr/sbin/ibdev2netdev && command -v patchelf
+
+# ---------------------------------------------------------------------------
+# SoftRoCE support, part 1: the rxe userspace provider.  The Mellanox
+# rdma-core fork installed above ships only the mlx5 provider, and its
+# provider ABI (rdmav59) differs from Ubuntu's rdma-core, so the Ubuntu
+# ibverbs-providers package cannot supply librxe either.  Build it from the
+# SAME Mellanox rdma-core source release (the DOCA SOURCES bundle; the rxe
+# provider is shipped there but `if (0)`-disabled in CMakeLists.txt) and
+# install just the provider .so.  The dpkg-query / PABI derivations keep
+# this layer loudly consistent with whatever rdma-core version the DOCA
+# repo actually installed.  kmod supplies insmod for part 2.
+# ---------------------------------------------------------------------------
+ARG mlnx_ofed_src_ver=26.01-1.0.0.0
+ARG mlnx_ofed_src_sha256=ed5597a547c2d5bb858b43f2305ec19f539bc70c4e5ed75aa6c6897a715568d3
+RUN set -e; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        cmake ninja-build pkg-config patch kmod \
+        libnl-3-dev libnl-route-3-dev libudev-dev; \
+    RDMA_CORE_VER=$(dpkg-query -W -f '${Version}' rdma-core); \
+    RDMA_CORE_VER=${RDMA_CORE_VER%-*}; \
+    MULTIARCH=$(gcc -print-multiarch); \
+    PABI=$(basename /usr/lib/$MULTIARCH/libibverbs/libmlx5-rdmav*.so \
+           | sed 's|libmlx5-rdmav\([0-9]*\)\.so|\1|'); \
+    tmp=$(mktemp -d); cd "$tmp"; \
+    curl -fsSLO "https://linux.mellanox.com/public/repo/doca/3.3.0/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-${mlnx_ofed_src_ver}.tgz"; \
+    echo "${mlnx_ofed_src_sha256}  MLNX_OFED_SRC-debian-${mlnx_ofed_src_ver}.tgz" | sha256sum -c -; \
+    tar xzf "MLNX_OFED_SRC-debian-${mlnx_ofed_src_ver}.tgz" \
+        "MLNX_OFED_SRC-${mlnx_ofed_src_ver}/SOURCES/rdma-core_${RDMA_CORE_VER}.orig.tar.gz"; \
+    tar xzf "MLNX_OFED_SRC-${mlnx_ofed_src_ver}/SOURCES/rdma-core_${RDMA_CORE_VER}.orig.tar.gz"; \
+    cd "rdma-core-${RDMA_CORE_VER}"; \
+    sed -i 's|^add_subdirectory(providers/mlx5)$|add_subdirectory(providers/mlx5)\nadd_subdirectory(providers/rxe)|' \
+        CMakeLists.txt; \
+    cmake -GNinja -S . -B build -DNO_MAN_PAGES=1 -DNO_PYVERBS=1 >/dev/null; \
+    ninja -C build "librxe-rdmav${PABI}.so"; \
+    install -m 644 "build/lib/librxe-rdmav${PABI}.so" "/usr/lib/$MULTIARCH/libibverbs/"; \
+    printf 'driver rxe\n' > /etc/libibverbs.d/rxe.driver; \
+    cd /; rm -rf "$tmp"; \
+    apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    test -f "/usr/lib/$MULTIARCH/libibverbs/librxe-rdmav${PABI}.so"
+
+# ---------------------------------------------------------------------------
+# SoftRoCE support, part 2: OFED-compat rdma_rxe kernel module SOURCE (see
+# hw_ci/rxe-ofed/README.md).  On hosts whose ib_core comes from DOCA/MLNX-
+# OFED DKMS (e.g. GB200 #2), the distro's in-tree rdma_rxe.ko cannot load
+# (symbol CRC mismatch), so run_hw_ci.sh's rxe mode builds this patched
+# copy of the upstream rxe driver against the host's kernel headers +
+# ofa_kernel tree (mounted at /lib/modules and /usr/src) inside the
+# privileged container and insmods it.  The image only STAGES the patched
+# source; the compile is per-host at container setup time.
+# ---------------------------------------------------------------------------
+ARG rxe_kernel_ref=v6.17
+COPY hw_ci/rxe-ofed /opt/rxe-ofed
+RUN /opt/rxe-ofed/prepare-src.sh "${rxe_kernel_ref}" /opt/rxe-ofed/src
 
 ENV HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=/opt/holoscan-sensor-bridge \
     HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=/opt/holoscan-sensor-bridge/build

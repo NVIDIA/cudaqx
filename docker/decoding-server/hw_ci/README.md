@@ -42,12 +42,16 @@ as `PASS`, `FAIL`, or `SKIP(reason)`; `--strict` turns skips into failures.
    `docker login ghcr.io` (to pull `ghcr.io/nvidia/cudaqx-dev`).
 2. For SoftRoCE mode (`--roce-pair rxe`): `sudo modprobe rdma_rxe`, persisted
    via `echo rdma_rxe | sudo tee /etc/modules-load.d/rdma_rxe.conf`.
-   **Known gap:** the dev image inherits Mellanox OFED's `ibverbs-providers`,
-   which ships only the mlx5 userspace provider — no rxe. Until a rxe
-   provider matching that libibverbs ABI is built into the image, rxe setup
-   fails its `ibv_devinfo` preflight and the two-process cpu_roce lanes SKIP
-   with a named reason. Machines with a real loopback-cabled port pair
-   (`--roce-pair DEV0,DEV1`) are unaffected.
+   On hosts whose `ib_core` comes from DOCA/MLNX-OFED DKMS (e.g. a GB200
+   with `doca-ofed` installed), the distro module refuses to load
+   (`disagrees about version of symbol ib_*`); the runner then builds an
+   OFED-compat `rdma_rxe` from the source staged in the image and loads it
+   from the privileged container automatically — no host setup needed, but
+   the module does not persist across host reboots (see
+   `rxe-ofed/README.md`). The image also builds the rxe userspace provider
+   that Mellanox's `ibverbs-providers` omits, from the matching Mellanox
+   rdma-core source release, so `ibv_devinfo` can open rxe devices
+   in-container.
 3. FPGA cabled/flashed and reachable (defaults: NIC 192.168.0.1/24, FPGA
    192.168.0.2). Machines whose single cable is wired as a loopback pair
    instead run with `--no-fpga --roce-pair DEV0,DEV1`.

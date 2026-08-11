@@ -1,0 +1,81 @@
+--- a/rxe_verbs.c	2026-08-11 20:26:52.811000000 +0000
++++ b/rxe_verbs.c	2026-08-11 20:16:55.914000000 +0000
+@@ -1269,9 +1269,11 @@
+ 	return ERR_PTR(err);
+ }
+ 
++/* OFED-compat: DOCA-OFED 25.10's ib_device_ops.reg_user_mr has no
++ * struct ib_dmah parameter (added upstream in v6.16+); drop it and the
++ * corresponding reject-if-set check from the v6.17 source. */
+ static struct ib_mr *rxe_reg_user_mr(struct ib_pd *ibpd, u64 start,
+ 				     u64 length, u64 iova, int access,
+-				     struct ib_dmah *dmah,
+ 				     struct ib_udata *udata)
+ {
+ 	struct rxe_dev *rxe = to_rdev(ibpd->device);
+@@ -1279,9 +1281,6 @@
+ 	struct rxe_mr *mr;
+ 	int err, cleanup_err;
+ 
+-	if (dmah)
+-		return ERR_PTR(-EOPNOTSUPP);
+-
+ 	if (access & ~RXE_ACCESS_SUPPORTED_MR) {
+ 		rxe_err_pd(pd, "access = %#x not supported (%#x)\n", access,
+ 				RXE_ACCESS_SUPPORTED_MR);
+--- a/rxe_odp.c	2026-08-11 20:26:52.908892000 +0000
++++ b/rxe_odp.c	2026-08-11 20:18:05.338000000 +0000
+@@ -27,7 +27,7 @@
+ 	start = max_t(u64, ib_umem_start(umem_odp), range->start);
+ 	end = min_t(u64, ib_umem_end(umem_odp), range->end);
+ 
+-	/* update umem_odp->map.pfn_list */
++	/* update umem_odp->pfn_list */
+ 	ib_umem_odp_unmap_dma_pages(umem_odp, start, end);
+ 
+ 	mutex_unlock(&umem_odp->umem_mutex);
+@@ -137,7 +137,7 @@
+ 	while (addr < iova + length) {
+ 		idx = (addr - ib_umem_start(umem_odp)) >> umem_odp->page_shift;
+ 
+-		if (!(umem_odp->map.pfn_list[idx] & HMM_PFN_VALID)) {
++		if (!(umem_odp->pfn_list[idx] & HMM_PFN_VALID)) {
+ 			need_fault = true;
+ 			break;
+ 		}
+@@ -201,7 +201,7 @@
+ 	while (length > 0) {
+ 		u8 *src, *dest;
+ 
+-		page = hmm_pfn_to_page(umem_odp->map.pfn_list[idx]);
++		page = hmm_pfn_to_page(umem_odp->pfn_list[idx]);
+ 		user_va = kmap_local_page(page);
+ 
+ 		src = (dir == RXE_TO_MR_OBJ) ? addr : user_va;
+@@ -288,7 +288,7 @@
+ 	}
+ 
+ 	idx = rxe_odp_iova_to_index(umem_odp, iova);
+-	page = hmm_pfn_to_page(umem_odp->map.pfn_list[idx]);
++	page = hmm_pfn_to_page(umem_odp->pfn_list[idx]);
+ 
+ 	va = kmap_local_page(page);
+ 
+@@ -347,7 +347,7 @@
+ 		index = rxe_odp_iova_to_index(umem_odp, iova);
+ 		page_offset = rxe_odp_iova_to_page_offset(umem_odp, iova);
+ 
+-		page = hmm_pfn_to_page(umem_odp->map.pfn_list[index]);
++		page = hmm_pfn_to_page(umem_odp->pfn_list[index]);
+ 
+ 		bytes = min_t(unsigned int, length,
+ 			      mr_page_size(mr) - page_offset);
+@@ -396,7 +396,7 @@
+ 	}
+ 
+ 	index = rxe_odp_iova_to_index(umem_odp, iova);
+-	page = hmm_pfn_to_page(umem_odp->map.pfn_list[index]);
++	page = hmm_pfn_to_page(umem_odp->pfn_list[index]);
+ 
+ 	va = kmap_local_page(page);
+ 	/* Do atomic write after all prior operations have completed */
