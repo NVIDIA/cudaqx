@@ -12,9 +12,13 @@ CUDA-graph path is unreachable there).
 as `PASS`, `FAIL`, or `SKIP(reason)`; `--strict` turns skips into failures.
 
 ```
-./run_hw_ci.sh --sha <commit> --roce-pair rxe --hf-token-file ~/.hf_token
+./run_hw_ci.sh --sha <commit> --hf-token-prompt
 ./run_hw_ci.sh --list          # show the lane set
 ```
+
+The commit is cloned from the repo the script itself lives in, so local
+(unpushed) commits are testable directly.  SoftRoCE (`--roce-pair rxe`) and
+the GB200 lab FPGA port (`--fpga-device mlx5_4`) are the defaults.
 
 ## Lanes
 
@@ -90,9 +94,8 @@ as `PASS`, `FAIL`, or `SKIP(reason)`; `--strict` turns skips into failures.
 ## Per-machine invocations
 
 ```bash
-# GB200 #1 (FPGA on one port, no free port pair -> SoftRoCE for two-process):
-./run_hw_ci.sh --sha <commit> --roce-pair rxe --fpga-device rocep1s0f0 \
-    --hf-token-file ~/.hf_token
+# GB200 (lab default wiring: FPGA on mlx5_4, SoftRoCE for two-process):
+./run_hw_ci.sh --sha <commit> --hf-token-prompt
 
 # DGX Spark, single cable in loopback mode (port0 <-> port1, no FPGA):
 ./run_hw_ci.sh --sha <commit> --no-fpga --roce-pair rocep1s0f0,rocep1s0f1
@@ -102,8 +105,6 @@ as `PASS`, `FAIL`, or `SKIP(reason)`; `--strict` turns skips into failures.
 # port fails with "ILA: captured 0 of N expected samples"):
 ./run_hw_ci.sh --sha <commit> --fpga-device roceP2p1s0f0
 ```
-
-`--repo` also accepts a local clone path (avoids pushing while iterating).
 If that clone is owned by another user — e.g. it was created from a
 devcontainer running as root — git refuses to serve it ("dubious
 ownership"); allow it once with

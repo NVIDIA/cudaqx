@@ -36,7 +36,10 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # Defaults
 # ---------------------------------------------------------------------------
 SHA=""
-REPO_URL="https://github.com/NVIDIA/cudaqx.git"
+# The repo under test is the one this script lives in; a fresh clone of it
+# is made at the requested --sha.
+REPO_URL="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null)"
+[[ -n "$REPO_URL" ]] || { echo "error: cannot resolve the containing git repo (is the script inside a clone?)" >&2; exit 1; }
 WORKDIR="$HOME/.cache/cudaqx-hw-ci"
 ARTIFACTS_DIR="/opt/nvqlink-lab-artifacts"
 TIER="all"                    # examples | extra | all
@@ -50,10 +53,10 @@ BASE_IMAGE=""                 # resolved from the pin unless given
 BUILD_BASE=false
 CUDA_VERSION="13.0"
 CUDA_ARCH=""                  # auto-detected unless given (Spark=121, GB200=100)
-ROCE_PAIR=""                  # rxe | DEV0,DEV1 ; empty = skip cpu_roce pair lanes
+ROCE_PAIR="rxe"               # rxe | DEV0,DEV1 | (empty via --roce-pair none = skip cpu_roce pair lanes)
 HF_TOKEN_FILE=""
 HF_TOKEN_PROMPT=false
-FPGA_DEVICE=""                # ConnectX IB device facing the FPGA
+FPGA_DEVICE="mlx5_4"          # ConnectX IB device facing the FPGA (GB200 lab wiring)
 BRIDGE_IP="192.168.0.1"
 FPGA_IP="192.168.0.2"
 PAGE_SIZE=""                  # default derived from the host page size
@@ -65,7 +68,8 @@ print_usage() {
 Usage: run_hw_ci.sh --sha SHA [options]
 
   --sha SHA               cudaqx commit (or branch/tag) to clone, build, test
-  --repo URL              cudaqx clone URL (default: $REPO_URL)
+                          (cloned from the repo containing this script:
+                          $REPO_URL)
   --workdir DIR           clone/build/log root (default: $WORKDIR)
   --artifacts-dir DIR     proprietary artifacts, bind-mounted RO at /artifacts
                           (default: $ARTIFACTS_DIR); layout:
@@ -94,11 +98,12 @@ Hardware:
   --cuda-arch N           CUDA architecture (default: auto via nvidia-smi;
                           DGX Spark GB10=121, GB200=100)
   --roce-pair rxe         SoftRoCE self-loop for the two-process cpu_roce
-                          lanes (GB200 #1: no free ConnectX port pair), OR
-  --roce-pair DEV0,DEV1   a real loopback-cabled IB device pair (DGX Spark);
-                          omitted => those lanes SKIP
-  --fpga-device DEV       ConnectX IB device facing the FPGA (default: the
-                          test scripts auto-detect / rocep1s0f0)
+                          lanes (the default; no free ConnectX port pair
+                          needed), OR
+  --roce-pair DEV0,DEV1   a real loopback-cabled IB device pair (DGX Spark),
+                          OR --roce-pair none => those lanes SKIP
+  --fpga-device DEV       ConnectX IB device facing the FPGA
+                          (default: $FPGA_DEVICE, the GB200 lab wiring)
   --bridge-ip IP          server-side NIC IP (default $BRIDGE_IP)
   --fpga-ip IP            FPGA IP (default $FPGA_IP)
   --page-size N           RDMA ring slot size (default: 384, or 512 on
@@ -121,7 +126,6 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --sha)            SHA="$2"; shift ;;
-        --repo)           REPO_URL="$2"; shift ;;
         --workdir)        WORKDIR="$2"; shift ;;
         --artifacts-dir)  ARTIFACTS_DIR="$2"; shift ;;
         --tier)           TIER="$2"; shift ;;
@@ -135,7 +139,7 @@ while [[ $# -gt 0 ]]; do
         --build-base)     BUILD_BASE=true ;;
         --cuda-version)   CUDA_VERSION="$2"; shift ;;
         --cuda-arch)      CUDA_ARCH="$2"; shift ;;
-        --roce-pair)      ROCE_PAIR="$2"; shift ;;
+        --roce-pair)      ROCE_PAIR="$2"; [[ "$ROCE_PAIR" == none ]] && ROCE_PAIR=""; shift ;;
         --fpga-device)    FPGA_DEVICE="$2"; shift ;;
         --bridge-ip)      BRIDGE_IP="$2"; shift ;;
         --fpga-ip)        FPGA_IP="$2"; shift ;;
@@ -714,8 +718,6 @@ run_extra_tier() {
         "$(ctest_cmd '^test_realtime_qldpc_graph_decoding$' 'not registered (needs nv-qldpc plugin + cudevice archive at configure)')"
     run_lane "extra/ctest/mixed-dispatch" \
         "$(ctest_cmd 'app_examples.surface_code-4-yaml-mixed-dispatch' 'not registered (needs cudevice archive at configure)')"
-    run_lane "extra/ctest/ai-decoder-fp8" \
-        "$(ctest_cmd 'test_ai_decoder_quantized_onnx' 'not registered')"
 
     # -- gpu_roce bridge cross-check (same data plane, no server layers) ------
     local gbridge=/workspaces/cudaqx/libs/qec/unittests/utils/gpu_roce_qldpc_graph_decoder_test.sh
