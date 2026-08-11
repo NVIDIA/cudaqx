@@ -8,6 +8,9 @@
 
 set(LIBRARY_NAME cudaq-qec)
 set(DECODERS_LIBRARY_NAME cudaq-qec-decoders)
+# Build-only PIC archive of DEM / sparse-PCM math. Linked whole into
+# cudaq-qec-decoders.so; not installed as its own artifact.
+set(DEM_LIBRARY_NAME cudaq-qec-dem)
 
 include(FetchContent)
 
@@ -39,20 +42,23 @@ if(NOT cuStabilizer_FOUND)
     "(both are also honored as environment variables).")
 endif()
 
-set(DECODERS_SOURCES
+set(DEM_SOURCES
+  dem_chunks_memory.cpp
+  dem_construction.cpp
   dem_construction_utils.cpp
+  detector_error_model.cpp
+  extended_dem.cpp
+  pcm_utils.cpp
+  sparse_binary_matrix.cpp
+)
+
+set(DECODERS_SOURCES
   decoder.cpp
   decoder_config_payload.cpp
   decoder_config_schema.cpp
-  dem_chunks_memory.cpp
-  dem_construction.cpp
-  detector_error_model.cpp
-  extended_dem.cpp
   logger.cpp
   logger_forwarder.cpp
-  pcm_utils.cpp
   plugin_loader.cpp
-  sparse_binary_matrix.cpp
   decoders/lut.cpp
   decoders/sliding_window.cpp
   version.cpp
@@ -69,6 +75,13 @@ set(QEC_SOURCES
 list(APPEND QEC_SOURCES
   dem_sampling/dem_sampling_utils.cu
   dem_sampling/dem_sampling_gpu.cpp
+)
+
+add_library(${DEM_LIBRARY_NAME} STATIC ${DEM_SOURCES})
+set_target_properties(${DEM_LIBRARY_NAME} PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+  VISIBILITY_INLINES_HIDDEN ON
+  ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
 add_library(${DECODERS_LIBRARY_NAME} SHARED ${DECODERS_SOURCES})
@@ -96,7 +109,8 @@ endif()
 set_target_properties(${LIBRARY_NAME} PROPERTIES
   VISIBILITY_INLINES_HIDDEN ON
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-target_link_libraries(${DECODERS_LIBRARY_NAME} PRIVATE libstim)
+
+target_link_libraries(${DEM_LIBRARY_NAME} PRIVATE libstim)
 target_link_options(${DECODERS_LIBRARY_NAME} PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libstim.a>
   # cudaqx-core is linked into this DSO only; keep its symbols local so they
@@ -124,9 +138,20 @@ add_subdirectory(codes)
 add_subdirectory(device) 
 
 if (CUDAQX_QEC_USE_FLOAT)
+   target_compile_definitions(${DEM_LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
    target_compile_definitions(${DECODERS_LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
    target_compile_definitions(${LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
 endif()
+
+target_include_directories(${DEM_LIBRARY_NAME}
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+  PUBLIC
+    $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
+    $<BUILD_INTERFACE:$<TARGET_PROPERTY:cudaqx-core,INTERFACE_INCLUDE_DIRECTORIES>>
+    $<BUILD_INTERFACE:$<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>>
+    $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
+    $<INSTALL_INTERFACE:include>
+)
 
 target_include_directories(${DECODERS_LIBRARY_NAME}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -157,6 +182,7 @@ target_link_libraries(${DECODERS_LIBRARY_NAME}
     $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaqx-core>
     fmt::fmt-header-only
   PRIVATE
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,${DEM_LIBRARY_NAME}>
     # decoder::get() consumes the "cuda_device_id" construction parameter
     # (validation via cudaGetDeviceCount + persistent cudaSetDevice pin).
     CUDA::cudart
@@ -218,6 +244,8 @@ endif()
 
 # Install 
 # ==============================================================================
+# cudaq-qec-dem.a is intentionally omitted: it is a private build artifact
+# folded into cudaq-qec-decoders.so.
 
 install(TARGETS ${DECODERS_LIBRARY_NAME} ${LIBRARY_NAME}
   COMPONENT qec-lib
