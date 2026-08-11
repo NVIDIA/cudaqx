@@ -9,7 +9,7 @@
 #ifndef RXE_OFED_COMPAT_H
 #define RXE_OFED_COMPAT_H
 
-#define IB_ODP_SUPPORT_FLUSH		(1 << 6)
-#define IB_ODP_SUPPORT_ATOMIC_WRITE	(1 << 7)
+#define IB_ODP_SUPPORT_FLUSH (1 << 6)
+#define IB_ODP_SUPPORT_ATOMIC_WRITE (1 << 7)
 
 #endif
