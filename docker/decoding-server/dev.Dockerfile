@@ -159,12 +159,6 @@ RUN set -e; \
             /add_subdirectory(udp_transmitter)/d; /add_subdirectory(emulator)/d; \
             /add_subdirectory(sig_gen)/d; /add_subdirectory(sig_viewer)/d' \
         src/hololink/operators/CMakeLists.txt; \
-    # In-tree mlx5 drivers (e.g. the DGX Spark's -nvidia kernel, no OFED)
-    # reject BlueFlame UAR allocation -- doca_uar_create fails and every
-    # gpu_roce lane dies at transceiver start.  NONCACHE doorbells are
-    # functionally equivalent for the CI lanes.
-    sed -i 's/#define DOCA_SEND_BLUE_FLAME 1/#define DOCA_SEND_BLUE_FLAME 0/' \
-        src/hololink/operators/gpu_roce_transceiver/gpu_roce_transceiver_common.hpp; \
     export CUDA_NATIVE_ARCH=${cuda_native_arch}; \
     cmake -G Ninja -S . -B build \
         -DCMAKE_BUILD_TYPE=Release \

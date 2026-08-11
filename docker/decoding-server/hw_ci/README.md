@@ -93,8 +93,10 @@ as `PASS`, `FAIL`, or `SKIP(reason)`; `--strict` turns skips into failures.
 # DGX Spark, single cable in loopback mode (port0 <-> port1, no FPGA):
 ./run_hw_ci.sh --sha <commit> --no-fpga --roce-pair rocep1s0f0,rocep1s0f1
 
-# DGX Spark, single cable in FPGA mode:
-./run_hw_ci.sh --sha <commit> --fpga-device rocep1s0f0
+# DGX Spark, single cable in FPGA mode (use the port actually cabled to the
+# FPGA -- on the current lab Spark that is roceP2p1s0f0; a wrong-but-linked
+# port fails with "ILA: captured 0 of N expected samples"):
+./run_hw_ci.sh --sha <commit> --fpga-device roceP2p1s0f0
 ```
 
 `--repo` also accepts a local clone path (avoids pushing while iterating).

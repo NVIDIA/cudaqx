@@ -699,12 +699,15 @@ run_extra_tier() {
     elif [[ ( ! -f "$NV_QLDPC_PLUGIN_HOST" || ! -f "$CUDEVICE_HOST" ) && "$LIST_ONLY" != true ]]; then
         skip_lane "extra/gpu-roce-qldpc-bridge" "missing nv-qldpc plugin and/or cudevice archive"
     else
+        # --spacing 100: at the playback tool's default 10 us inter-shot
+        # spacing the ILA verification deterministically undercounts
+        # (194/500 on the Spark); 100 us matches the demo lanes' pacing.
         run_lane "extra/gpu-roce-qldpc-bridge" "
             set -e
             bridge=\$(find /workspaces/cudaqx/build -name gpu_roce_qldpc_graph_decoder_bridge -type f | head -1)
             [ -n \"\$bridge\" ] || { echo 'SKIP: bridge executable not built'; exit 77; }
             bash $gbridge --setup-network $(fpga_dev_flag) --bridge-ip $BRIDGE_IP --fpga-ip $FPGA_IP \
-                --page-size $PAGE_SIZE_DG \
+                --page-size $PAGE_SIZE_DG --spacing 100 \
                 --cuda-qx-dir /workspaces/cudaqx --cuda-quantum-dir $CQ_SRC \
                 --hsb-dir /opt/holoscan-sensor-bridge \
                 --proprietary-archive $CUDEVICE_CTR --nv-qldpc-plugin $NV_QLDPC_PLUGIN_CTR"
@@ -755,14 +758,15 @@ check_cudaq_pin
 start_container
 setup_roce_pair || _info "continuing without a cpu_roce pair"
 
-_info "Building cudaq-realtime + cudaqx + demo binaries in the container"
+_info "Image ready; compiling the commit under test inside the container:"
+_info "  cudaq-realtime + cudaqx + demo binaries (log: $LOG_DIR/container_build.log)"
 build_log="$LOG_DIR/container_build.log"
 if ! in_ctr "bash /workspaces/cudaqx/docker/decoding-server/hw_ci/container_build.sh \
         --cuda-arch $CUDA_ARCH" >"$build_log" 2>&1; then
     tail -40 "$build_log" >&2
-    _die "container build failed; full log: $build_log"
+    _die "in-container source build failed; full log: $build_log"
 fi
-_info "Container build complete"
+_info "Source build complete (cudaq-realtime + cudaqx + demo)"
 
 run_all_lanes
 print_summary
