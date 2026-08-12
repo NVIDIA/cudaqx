@@ -7,19 +7,15 @@
  ******************************************************************************/
 
 #include "DecodingServer.h"
-#include "HopStats.h"
 #include "../../hardware_guards.h"
 
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
-#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
-#include <thread>
-#include <vector>
 
 // Device-graph dispatch is an optional component
 // (cudaq-qec-decoding-server-device-graph) so this core library carries no DOCA
@@ -38,17 +34,6 @@ namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::DecoderDispatch;
 using cudaq::qec::decoding::config::transport_shape_override;
-using cudaq::qec::decoding::rpc::EnqueueRequestPayload;
-using cudaq::qec::decoding::rpc::GetCorrectionsRequestPayload;
-using cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
-using cudaq::qec::decoding::rpc::kGetCorrectionsFunctionId;
-using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
-using cudaq::qec::decoding::rpc::ResetRequestPayload;
-using cudaq::realtime::RPCHeader;
-
-// ---------------------------------------------------------------------------
-// Constructors
-// ---------------------------------------------------------------------------
 
 /// Resolve the CUDA device a decode pipeline runs on from the decoder's
 /// cuda_device_id pin; an unpinned decoder (-1) defaults to device 0. The
@@ -79,8 +64,8 @@ DecodingServer::make_transport(DecoderDispatch dispatch, int pinned_cuda_device,
         "cudaq-qec-decoding-server-device-graph (whole-archive).");
 
   case DecoderDispatch::host:
-    // Host dispatch runs through the CQR HOST_CALL plugin (the decoding
-    // server's dispatcher-over-bridge-provider path); the standalone
+    // Host dispatch runs through the CQR HOST_CALL plugin, which serves each
+    // request inline on the CUDAQ dispatcher thread; the standalone
     // DecodingServer has no host transport of its own.
     throw std::runtime_error(
         "host dispatch is served by the CQR HOST_CALL plugin, not the "
@@ -90,11 +75,10 @@ DecodingServer::make_transport(DecoderDispatch dispatch, int pinned_cuda_device,
 }
 
 DecodingServer::DecodingServer(const std::string &config_yaml) {
-  // Parse the YAML once: SessionRegistry validates the decoder entries
-  // (including the uniform-dispatch rule — MVP limitation: heterogeneous
-  // deployments require per-session transceiver binding, deferred to a
-  // follow-up once CpuRoce/DeviceGraphTransceiverAdapter are available) and
-  // required_dispatch() then drives transceiver creation.
+  // Parse the YAML once: SessionRegistry validates the decoder entries and
+  // required_dispatch() then drives transceiver creation (a mixed config
+  // throws — heterogeneous deployments are composed by the decoding_server
+  // process, which binds a consumer per decoder).
   std::ifstream f(config_yaml);
   if (!f.is_open())
     throw std::runtime_error("Cannot open config: " + config_yaml);
@@ -105,7 +89,6 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
   if (config.decoders.empty())
     throw std::runtime_error("No decoders in config: " + config_yaml);
   registry_.load_from_config(config, config_yaml);
-  register_handlers();
 
   const auto dispatch = registry_.required_dispatch();
   // device_graph must run on the GPU the FPGA/NIC is affine to; when exactly
@@ -120,13 +103,10 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
                           config.transport.resolve_device_graph());
   ITransceiver *raw = t.get();
   owned_transports_.push_back(std::move(t));
-  function_transport_[kEnqueueSyndromesFunctionId] = raw;
-  function_transport_[kGetCorrectionsFunctionId] = raw;
-  function_transport_[kResetDecoderFunctionId] = raw;
 
-  // For the device_graph path, wire the first (and only) session's decoder
-  // graph to the ring buffer via the CUDAQ device-graph scheduler.
-  // Multi-decoder device_graph binding is deferred to a follow-up.
+  // Wire the first (and only) session's decoder graph to the ring buffer via
+  // the CUDAQ device-graph scheduler.  Multi-decoder device_graph binding is
+  // deferred to a follow-up.
   if (dispatch == DecoderDispatch::device_graph) {
     const auto &sessions = registry_.sessions();
     if (sessions.size() != 1)
@@ -147,57 +127,6 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
       throw std::runtime_error(
           "device_graph transceiver did not provide a device scheduler");
   }
-  install_direct_dispatch();
-}
-
-DecodingServer::DecodingServer(std::unique_ptr<ITransceiver> transport,
-                               const std::string &config_yaml) {
-  ITransceiver *raw = transport.get();
-  owned_transports_.push_back(std::move(transport));
-  function_transport_[kEnqueueSyndromesFunctionId] = raw;
-  function_transport_[kGetCorrectionsFunctionId] = raw;
-  function_transport_[kResetDecoderFunctionId] = raw;
-  try {
-    init(config_yaml);
-  } catch (...) {
-    registry_.stop_workers();
-    throw;
-  }
-  install_direct_dispatch();
-}
-
-DecodingServer::DecodingServer(
-    std::unique_ptr<ITransceiver> transport,
-    const cudaq::qec::decoding::config::multi_decoder_config &config) {
-  ITransceiver *raw = transport.get();
-  owned_transports_.push_back(std::move(transport));
-  function_transport_[kEnqueueSyndromesFunctionId] = raw;
-  function_transport_[kGetCorrectionsFunctionId] = raw;
-  function_transport_[kResetDecoderFunctionId] = raw;
-  try {
-    registry_.load_from_config(config, "configure_decoders()");
-  } catch (...) {
-    // Members destroy in reverse order (transports before registry); join any
-    // already-started workers while the transports still exist.
-    registry_.stop_workers();
-    throw;
-  }
-  register_handlers();
-  install_direct_dispatch();
-}
-
-DecodingServer::DecodingServer(std::vector<std::unique_ptr<ITransceiver>> owned,
-                               TransportMap function_transport,
-                               const std::string &config_yaml)
-    : owned_transports_(std::move(owned)),
-      function_transport_(std::move(function_transport)) {
-  try {
-    init(config_yaml);
-  } catch (...) {
-    registry_.stop_workers();
-    throw;
-  }
-  install_direct_dispatch();
 }
 
 void *DecodingServer::graph_resources_for(uint64_t decoder_id) const {
@@ -208,174 +137,17 @@ void *DecodingServer::graph_resources_for(uint64_t decoder_id) const {
   return iter->second->graph_resources.get();
 }
 
-DecodingServer::~DecodingServer() {
-  stop();
-  // Join session workers while owned_transports_ is still alive: queued
-  // WorkItems reply via raw ITransceiver pointers.  Decoder/graph teardown
-  // still happens in ~registry_, after the transports, per the member-order
-  // comment in DecodingServer.h.
-  registry_.stop_workers();
-}
-
-// ---------------------------------------------------------------------------
-// init — load sessions and register RPC handlers
-// ---------------------------------------------------------------------------
-
-void DecodingServer::init(const std::string &config_yaml) {
-  registry_.load_from_config(config_yaml);
-  register_handlers();
-}
-
-void DecodingServer::install_direct_dispatch() {
-  for (auto &[fid, t] : function_transport_) {
-    if (std::find(direct_dispatch_transports_.begin(),
-                  direct_dispatch_transports_.end(),
-                  t) != direct_dispatch_transports_.end())
-      continue;
-    if (t->install_dispatch_sink([this, transport = t](RxFrame &&frame) {
-          dispatcher_.dispatch(std::move(frame), *transport);
-        }))
-      direct_dispatch_transports_.push_back(t);
-  }
-}
-
-void DecodingServer::register_handlers() {
-  // enqueue_syndromes — fire-and-forget at the RPC level; the transport
-  // layer ACKs delivery (ACCEPTED), and a queue-full drop is reported both
-  // here and at the next get_corrections.
-  dispatcher_.register_handler(
-      kEnqueueSyndromesFunctionId,
-      [this](RxFrame frame, ResponseWriter &writer) {
-        if (frame.buf.size() <
-            sizeof(RPCHeader) + sizeof(EnqueueRequestPayload)) {
-          writer.write_error(RpcStatus::BAD_REQUEST);
-          return;
-        }
-        const auto *req = reinterpret_cast<const EnqueueRequestPayload *>(
-            frame.buf.data() + sizeof(RPCHeader));
-        const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
-
-        auto &session = registry_.get(static_cast<uint64_t>(req->decoder_id));
-
-        WorkItem item;
-        item.function_id = kEnqueueSyndromesFunctionId;
-        item.frame_buf = std::move(frame.buf);
-        item.peer = frame.peer;
-        item.request_id = hdr->request_id;
-        item.ptp_timestamp = hdr->ptp_timestamp;
-        item.vp_id = frame.vp_id;
-        item.response_transport = writer.transport();
-        item.release_fn = std::move(frame.release_fn);
-
-        if (!session.try_enqueue(std::move(item))) {
-          session.latch_syndromes_dropped();
-          writer.write_error(RpcStatus::SYNDROMES_DROPPED);
-        }
-      });
-
-  // get_corrections — response sent by the worker thread.
-  dispatcher_.register_handler(
-      kGetCorrectionsFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
-        if (frame.buf.size() <
-            sizeof(RPCHeader) + sizeof(GetCorrectionsRequestPayload)) {
-          writer.write_error(RpcStatus::BAD_REQUEST);
-          return;
-        }
-        const auto *req =
-            reinterpret_cast<const GetCorrectionsRequestPayload *>(
-                frame.buf.data() + sizeof(RPCHeader));
-        const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
-
-        auto &session = registry_.get(static_cast<uint64_t>(req->decoder_id));
-
-        WorkItem item;
-        item.function_id = kGetCorrectionsFunctionId;
-        item.frame_buf = std::move(frame.buf);
-        item.peer = frame.peer;
-        item.request_id = hdr->request_id;
-        item.ptp_timestamp = hdr->ptp_timestamp;
-        item.vp_id = frame.vp_id;
-        item.response_transport = writer.transport();
-
-        if (!session.try_enqueue(std::move(item)))
-          writer.write_error(RpcStatus::BUSY);
-      });
-
-  // reset_decoder — response sent by the worker thread.
-  dispatcher_.register_handler(
-      kResetDecoderFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
-        if (frame.buf.size() <
-            sizeof(RPCHeader) + sizeof(ResetRequestPayload)) {
-          writer.write_error(RpcStatus::BAD_REQUEST);
-          return;
-        }
-        const auto *req = reinterpret_cast<const ResetRequestPayload *>(
-            frame.buf.data() + sizeof(RPCHeader));
-        const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
-
-        auto &session = registry_.get(static_cast<uint64_t>(req->decoder_id));
-
-        WorkItem item;
-        item.function_id = kResetDecoderFunctionId;
-        item.frame_buf = std::move(frame.buf);
-        item.peer = frame.peer;
-        item.request_id = hdr->request_id;
-        item.ptp_timestamp = hdr->ptp_timestamp;
-        item.vp_id = frame.vp_id;
-        item.response_transport = writer.transport();
-
-        if (!session.try_enqueue(std::move(item)))
-          writer.write_error(RpcStatus::BUSY);
-      });
-} // register_handlers
+DecodingServer::~DecodingServer() { stop(); }
 
 // ---------------------------------------------------------------------------
 // run / stop
 // ---------------------------------------------------------------------------
 
 void DecodingServer::run() {
-  std::vector<ITransceiver *> unique_transports;
-  for (auto &[fid, t] : function_transport_) {
-    // Direct-dispatch transports deliver frames from their own producer
-    // threads via the installed sink; a receiver thread here would park in
-    // recv() forever.
-    if (std::find(direct_dispatch_transports_.begin(),
-                  direct_dispatch_transports_.end(),
-                  t) != direct_dispatch_transports_.end())
-      continue;
-    if (std::find(unique_transports.begin(), unique_transports.end(), t) ==
-        unique_transports.end())
-      unique_transports.push_back(t);
-  }
-
-  if (unique_transports.empty()) {
-    CUDA_QEC_INFO(
-        "DecodingServer: all transports direct-dispatch; no receiver threads");
-    return;
-  }
-
-  CUDA_QEC_INFO("DecodingServer: starting {} receiver thread(s)",
-                unique_transports.size());
-
-  // All threads share dispatcher_ — routing is by function_id, not transport.
-  std::vector<std::thread> recv_threads;
-  recv_threads.reserve(unique_transports.size());
-  for (ITransceiver *t : unique_transports) {
-    recv_threads.emplace_back([this, t] {
-      hopstats::on_recv_thread();
-      while (!shutdown_.load(std::memory_order_acquire)) {
-        RxFrame frame = t->recv();
-        if (frame.buf.empty())
-          continue; // shutdown sentinel; loop re-checks the flag
-        dispatcher_.dispatch(std::move(frame), *t);
-      }
-    });
-  }
-
-  for (auto &th : recv_threads)
-    th.join();
-
-  CUDA_QEC_INFO("DecodingServer: all receiver threads exited");
+  // The GPU scheduler owns the entire data path (RX→dispatch→decode→TX);
+  // there is nothing to receive on the CPU.  Park until stop().
+  std::unique_lock<std::mutex> lk(stop_mutex_);
+  stop_cv_.wait(lk, [this] { return shutdown_; });
 }
 
 void DecodingServer::print_session_stats() const {
@@ -390,8 +162,11 @@ void DecodingServer::print_session_stats() const {
 }
 
 void DecodingServer::stop() {
-  shutdown_.store(true, std::memory_order_release);
-  // Unblock any receive loop parked in recv().
+  {
+    std::lock_guard<std::mutex> lk(stop_mutex_);
+    shutdown_ = true;
+  }
+  stop_cv_.notify_all();
   for (auto &t : owned_transports_)
     t->shutdown();
 }
