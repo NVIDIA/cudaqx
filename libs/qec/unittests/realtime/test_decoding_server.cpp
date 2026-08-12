@@ -750,6 +750,42 @@ TEST(DecodingServerTwoProcess, DeviceGraphRejectsTransportGpuArgument) {
       << server.captured;
 }
 
+// Host dispatch over gpu_roce has the same single source of GPU placement:
+// decoder.cuda_device_id. Reject the duplicate transport setting before the
+// provider is loaded so this regression needs no GPU or RoCE device.
+TEST(DecodingServerTwoProcess, HostGpuRoceRejectsTransportGpuArgument) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_host_gpu_roce_gpu_arg.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "transport:\n"
+                << "  provider: gpu_roce\n"
+                << "  args: [--gpu=1]\n"
+                << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    cuda_device_id: 1\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("gpu_roce transport arguments must not set "
+                                 "--gpu; set decoder cuda_device_id in YAML "
+                                 "instead"),
+            std::string::npos)
+      << server.captured;
+}
+
 // GPU RoCE remains YAML-only even if a caller tries to select it for the
 // generic host-dispatch path.
 TEST(DecodingServerTwoProcess, HostDispatchRejectsCliGpuRoceTransport) {

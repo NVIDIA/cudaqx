@@ -410,11 +410,23 @@ int main(int argc, char **argv) {
               << std::endl;
     return 1;
   }
-  if (has_device_graph &&
+  const bool device_graph_sets_gpu =
+      has_device_graph &&
       std::any_of(resolved_device_graph.args.begin(),
-                  resolved_device_graph.args.end(), is_gpu_argument)) {
+                  resolved_device_graph.args.end(), is_gpu_argument);
+  const bool host_gpu_roce_sets_gpu =
+      host_uses_gpu_roce &&
+      std::any_of(decoder_config.transport.args.begin(),
+                  decoder_config.transport.args.end(), is_gpu_argument);
+  if (device_graph_sets_gpu) {
     std::cerr << "ERROR: device_graph transport arguments must not set --gpu; "
                  "set decoder cuda_device_id in YAML instead"
+              << std::endl;
+    return 1;
+  }
+  if (host_gpu_roce_sets_gpu) {
+    std::cerr << "ERROR: gpu_roce transport arguments must not set --gpu; set "
+                 "decoder cuda_device_id in YAML instead"
               << std::endl;
     return 1;
   }
@@ -578,8 +590,7 @@ int main(int argc, char **argv) {
     const auto &dc = decoder_config.decoders[i];
     ring.decoder_id = dc.id;
     ring.device_graph = (dc.dispatch == config::DecoderDispatch::device_graph);
-    if (ring.device_graph)
-      ring.gpu_id = dc.cuda_device_id.value_or(0);
+    ring.gpu_id = dc.cuda_device_id.value_or(0);
 
     // The wire is deployment config, resolved from the YAML's top-level
     // `transport:` section (never from decoder entries).  Per-ring
@@ -599,11 +610,12 @@ int main(int argc, char **argv) {
       ring_extra_args = std::move(resolved.args);
     } else
       ring_extra_args = transport_section.args;
+    const bool ring_uses_gpu_roce = is_gpu_roce_provider(ring_provider_name);
     const std::string ring_lib = resolve_provider_lib(ring_provider_name);
     // Provider parsers follow the C argv convention and start at argv[1].
     // Keep the strings alive until create() returns, add a program-name
-    // placeholder, and only then form the char-pointer view. For a
-    // device_graph ring, cuda_device_id is the sole GPU-placement setting.
+    // placeholder, and only then form the char-pointer view. For a gpu_roce
+    // ring, cuda_device_id is the sole GPU-placement setting.
     std::vector<std::string> ring_args{"decoding-server-transport"};
     if (!ring.device_graph) {
       ring_args.insert(ring_args.end(), cfg.provider_args.begin(),
@@ -611,7 +623,7 @@ int main(int argc, char **argv) {
     }
     ring_args.insert(ring_args.end(), ring_extra_args.begin(),
                      ring_extra_args.end());
-    if (ring.device_graph)
+    if (ring.device_graph || ring_uses_gpu_roce)
       ring_args.push_back("--gpu=" + std::to_string(ring.gpu_id));
 
     std::vector<char *> ring_argv;

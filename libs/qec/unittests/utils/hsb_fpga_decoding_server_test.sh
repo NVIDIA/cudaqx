@@ -898,27 +898,6 @@ generate_data_files() {
         _info "Config carries the trt_decoder entry (onnx_load_path set)"
     fi
 
-    # The server selects the dispatch shape from the per-decoder `dispatch:`
-    # YAML key (default host). For device_graph, `cuda_device_id` pins graph
-    # capture and worker-thread execution to the selected GPU. The generator
-    # doesn't emit these non-default optional fields, so inject them into our
-    # generated config directly under the decoder's `type:` line.
-    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
-        _info "Injecting 'dispatch: device_graph' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
-        awk -v gpu_id="$GPU_ID" '{ print }
-             /^[[:space:]]*type:/ && !done {
-                 print "    dispatch:        device_graph"
-                 print "    cuda_device_id:  " gpu_id
-                 done = 1
-             }' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" \
-            && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-        if ! grep -q "dispatch:.*device_graph" "$CONFIG_FILE" || \
-           ! grep -q "cuda_device_id:.*$GPU_ID" "$CONFIG_FILE"; then
-            _err "Failed to inject device_graph dispatch/cuda_device_id into $CONFIG_FILE"
-            return 1
-        fi
-    fi
-
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
           "--p_spam $GEN_P_SPAM --num_shots $GEN_SHOTS --yaml $(basename "$CONFIG_FILE")" \
           "--save_syndrome $(basename "$SYNDROMES_FILE")"
@@ -1059,46 +1038,132 @@ extract_hex() {
 # endpoint line into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
 prepare_gpu_roce_config() {
     local peer_ip="$1" remote_qp="$2"
+    local source_config="$CONFIG_FILE" runtime_config
 
-    # A caller-supplied transport section is already authoritative. Generated
-    # decoder-only configs get a temporary launch copy carrying the runtime
-    # endpoint discovered from the FPGA/emulator; never modify the source file.
-    if grep -Eq '^[[:space:]]*transport:' "$CONFIG_FILE"; then
-        _info "Using gpu_roce transport settings from $CONFIG_FILE"
-        return 0
+    if ! python3 -c 'import yaml' 2>/dev/null; then
+        _err "python3 module 'yaml' (PyYAML) is required to prepare the gpu_roce launch config"
+        return 1
     fi
-
-    local runtime_config
     runtime_config=$(mktemp /tmp/hsb_decoding_server_config.XXXXXX.yml)
     TEMP_FILES+=("$runtime_config")
-    # Strip a terminal YAML document marker even when blank lines follow it;
-    # the generated transport section must remain in the same document.
-    awk '
-        { lines[NR] = $0 }
-        END {
-            last = NR
-            while (last > 0 && lines[last] ~ /^[[:space:]]*$/)
-                --last
-            if (last > 0 && lines[last] ~ /^[[:space:]]*\.\.\.[[:space:]]*$/)
-                --last
-            for (line = 1; line <= last; ++line)
-                print lines[line]
-        }
-    ' "$CONFIG_FILE" > "$runtime_config"
-    cat >> "$runtime_config" <<EOF
-transport:
-  provider: gpu_roce
-  args:
-    - --device=$BRIDGE_DEVICE
-    - --peer-ip=$peer_ip
-    - --remote-qp=$remote_qp
-    - --page-size=$SERVER_PAGE_SIZE
-    - --num-pages=$GPU_ROCE_NUM_PAGES
-    - --payload-size=$GPU_ROCE_PAYLOAD_SIZE
-...
-EOF
+    if ! python3 - "$source_config" "$runtime_config" "$GPU_ID" \
+            "$BRIDGE_DEVICE" "$peer_ip" "$remote_qp" "$SERVER_PAGE_SIZE" \
+            "$GPU_ROCE_NUM_PAGES" "$GPU_ROCE_PAYLOAD_SIZE" <<'PY'
+import sys
+
+import yaml
+
+runtime_options = {"--device", "--peer-ip", "--remote-qp", "--page-size",
+                   "--num-pages", "--payload-size"}
+
+
+def launch_args(section, location):
+    if "args" not in section:
+        return []
+    args = section["args"]
+    if not isinstance(args, list) or not all(isinstance(arg, str)
+                                              for arg in args):
+        raise ValueError(f"{location}.args must be a list of strings")
+    result = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        option = arg.split("=", 1)[0]
+        if option == "--gpu":
+            raise ValueError(f"{location}.args must not set --gpu; "
+                             "use decoder.cuda_device_id")
+        if option not in runtime_options:
+            result.append(arg)
+            index += 1
+            continue
+        if arg == option:
+            if index + 1 >= len(args) or args[index + 1].startswith("--"):
+                raise ValueError(f"{location}.args has no value for {option}")
+            index += 2
+        else:
+            index += 1
+    return result
+
+
+source_path, output_path, gpu_text, device, peer_ip, remote_qp, page_size, \
+    num_pages, payload_size = sys.argv[1:]
+
+try:
+    try:
+        gpu_id = int(gpu_text, 10)
+    except ValueError as error:
+        raise ValueError(
+            f"requested cuda_device_id {gpu_text!r} is not an integer") from error
+    if gpu_id < 0:
+        raise ValueError("requested cuda_device_id must be non-negative")
+
+    with open(source_path, encoding="utf-8") as source:
+        config = yaml.safe_load(source)
+    if not isinstance(config, dict):
+        raise ValueError("configuration root must be a YAML mapping")
+
+    decoders = config.get("decoders")
+    if not isinstance(decoders, list) or len(decoders) != 1:
+        count = len(decoders) if isinstance(decoders, list) else "non-list"
+        raise ValueError(
+            "gpu_roce HSB helper supports exactly one decoder "
+            f"(found {count})")
+    decoder = decoders[0]
+    if not isinstance(decoder, dict):
+        raise ValueError("decoders[0] must be a YAML mapping")
+
+    if "dispatch" not in decoder:
+        decoder["dispatch"] = "device_graph"
+    elif decoder["dispatch"] != "device_graph":
+        raise ValueError(
+            "decoders[0].dispatch must be device_graph for gpu_roce "
+            f"(found {decoder['dispatch']!r})")
+
+    if "cuda_device_id" not in decoder:
+        decoder["cuda_device_id"] = gpu_id
+    elif (type(decoder["cuda_device_id"]) is not int or
+          decoder["cuda_device_id"] != gpu_id):
+        raise ValueError(
+            "decoders[0].cuda_device_id contradicts --gpu "
+            f"(YAML {decoder['cuda_device_id']!r}, requested {gpu_id})")
+
+    transport = config.get("transport", {})
+    if not isinstance(transport, dict):
+        raise ValueError("transport must be a YAML mapping")
+    if transport.get("provider", "gpu_roce") != "gpu_roce":
+        raise ValueError(
+            "transport.provider must be gpu_roce "
+            f"(found {transport['provider']!r})")
+    device_graph = transport.get("device_graph", {})
+    if not isinstance(device_graph, dict):
+        raise ValueError("transport.device_graph must be a YAML mapping")
+    if device_graph.get("provider", "gpu_roce") != "gpu_roce":
+        raise ValueError(
+            "transport.device_graph.provider must be gpu_roce "
+            f"(found {device_graph['provider']!r})")
+    args = launch_args(transport, "transport")
+    args += launch_args(device_graph, "transport.device_graph")
+    config["transport"] = {"provider": "gpu_roce", "args": args + [
+        f"--device={device}",
+        f"--peer-ip={peer_ip}",
+        f"--remote-qp={remote_qp}",
+        f"--page-size={page_size}",
+        f"--num-pages={num_pages}",
+        f"--payload-size={payload_size}",
+    ]}
+
+    with open(output_path, "w", encoding="utf-8") as output:
+        yaml.safe_dump(config, output, explicit_end=True, sort_keys=False)
+except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
+    print(f"ERROR: invalid gpu_roce launch config {source_path}: {error}",
+          file=sys.stderr)
+    sys.exit(1)
+PY
+    then
+        return 1
+    fi
     CONFIG_FILE="$runtime_config"
-    _info "GPU RoCE launch settings written to YAML: $CONFIG_FILE"
+    _info "Authoritative GPU RoCE launch YAML written to $CONFIG_FILE (source unchanged: $source_config)"
 }
 
 start_server() {
@@ -1122,12 +1187,11 @@ start_server() {
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
         # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
         # on the GPU and the captured RelayBP decode graph fires device-side.
-        # Provider selection and settings come only from YAML;
-        # dispatch-shape selection comes from the config's `dispatch:
-        # device_graph` key, injected at config-generation time.
+        # The temporary launch YAML prepared below makes the gpu_roce provider,
+        # device_graph dispatch, GPU, and runtime endpoint authoritative.
         # Eager module loading avoids lazy-load stalls inside the persistent
         # scheduler (same as the old bridge launcher).
-        prepare_gpu_roce_config "$peer_ip" "$remote_qp"
+        prepare_gpu_roce_config "$peer_ip" "$remote_qp" || return 1
         CUDA_MODULE_LOADING=EAGER \
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
         "$SERVER_BIN" \
