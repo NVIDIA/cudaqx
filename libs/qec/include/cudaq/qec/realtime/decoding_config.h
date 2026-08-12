@@ -72,6 +72,11 @@ struct decoder_config {
   std::optional<int> cuda_device_id;
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
+  /// Path to a Stim detector error model. When set, the decoder is
+  /// constructed from the DEM text rather than from `H_sparse`, which is what
+  /// a DEM-native decoder such as Chromobius requires. Interpreted like the
+  /// other model paths in a configuration, relative to the working directory.
+  std::string stim_dem_path;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;

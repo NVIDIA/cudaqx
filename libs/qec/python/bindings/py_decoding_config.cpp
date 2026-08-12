@@ -187,6 +187,7 @@ void bindDecodingConfig(nb::module_ &mod) {
       .def_rw("type", &decoder_config::type)
       .def_rw("dispatch", &decoder_config::dispatch)
       .def_rw("cuda_device_id", &decoder_config::cuda_device_id)
+      .def_rw("stim_dem_path", &decoder_config::stim_dem_path)
       .def_rw("block_size", &decoder_config::block_size)
       .def_rw("syndrome_size", &decoder_config::syndrome_size)
       .def_rw("H_sparse", &decoder_config::H_sparse)
