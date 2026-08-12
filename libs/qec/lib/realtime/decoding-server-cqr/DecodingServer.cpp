@@ -12,6 +12,8 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -84,7 +86,9 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
           yaml_str);
   if (config.decoders.empty())
     throw std::runtime_error("No decoders in config: " + config_yaml);
-  registry_.load_from_config(config, config_yaml);
+  registry_.load_from_config(
+      config, config_yaml,
+      std::filesystem::absolute(config_yaml).parent_path());
 
   const auto dispatch = registry_.required_dispatch();
   // device_graph must run on the GPU the FPGA/NIC is affine to; when exactly

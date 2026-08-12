@@ -428,9 +428,9 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchDualDecoders) {
                   << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
                   << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
                   << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+                  << "    error_rate_vec: [0.1, 0.1, 0.1]\n"
                   << "    decoder_custom_args:\n"
-                  << "      merge_strategy: smallest_weight\n"
-                  << "      error_rate_vec: [0.1, 0.1, 0.1]\n";
+                  << "      merge_strategy: smallest_weight\n";
     }
   }
 
@@ -484,9 +484,9 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchYamlTransportSection) {
                   << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
                   << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
                   << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+                  << "    error_rate_vec: [0.1, 0.1, 0.1]\n"
                   << "    decoder_custom_args:\n"
-                  << "      merge_strategy: smallest_weight\n"
-                  << "      error_rate_vec: [0.1, 0.1, 0.1]\n";
+                  << "      merge_strategy: smallest_weight\n";
     }
   }
 
@@ -532,9 +532,9 @@ TEST(DecodingServerTwoProcess, TransportCliConflictsWithYamlSection) {
                 << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
                 << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
                 << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    error_rate_vec: [0.1, 0.1, 0.1]\n"
                 << "    decoder_custom_args:\n"
-                << "      merge_strategy: smallest_weight\n"
-                << "      error_rate_vec: [0.1, 0.1, 0.1]\n";
+                << "      merge_strategy: smallest_weight\n";
   }
 
   ServerProcess server;
@@ -575,9 +575,9 @@ TEST(DecodingServerTwoProcess, TwoProcessPerDecoderRings) {
                   << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
                   << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
                   << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+                  << "    error_rate_vec: [0.1, 0.1, 0.1]\n"
                   << "    decoder_custom_args:\n"
-                  << "      merge_strategy: smallest_weight\n"
-                  << "      error_rate_vec: [0.1, 0.1, 0.1]\n";
+                  << "      merge_strategy: smallest_weight\n";
     }
   }
 

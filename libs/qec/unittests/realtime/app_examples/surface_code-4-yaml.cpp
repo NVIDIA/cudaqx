@@ -316,8 +316,8 @@ static void enforce_ising_metadata(const std::string &bundle, int distance,
 // same measurement span. The error-column representations are intentionally
 // not probabilistically identical.
 void save_dem_to_file(
-    const std::vector<cudaq::qec::decoder_inputs> &matching_inputs,
-    const std::vector<cudaq::qec::decoder_inputs> &bp_inputs,
+    const std::vector<cudaq::qec::decoder_init> &matching_inputs,
+    const std::vector<cudaq::qec::decoder_init> &bp_inputs,
     std::string dem_filename, const std::vector<std::string> &decoder_types,
     bool use_relay_bp, const std::string &onnx_path, bool use_ising,
     const std::string &ising_artifacts_dir) {
@@ -327,24 +327,32 @@ void save_dem_to_file(
     const auto &inputs = (decoder_type == "nv-qldpc-decoder")
                              ? bp_inputs[i]
                              : matching_inputs[i];
-    const auto &edem = inputs.dem;
     cudaq::qec::decoding::config::decoder_config config;
     config.id = i;
     config.type = decoder_type;
-    config.block_size = edem.num_error_mechanisms();
-    config.syndrome_size = edem.num_detectors();
-    config.H_sparse = cudaq::qec::pcm_to_sparse_vec(edem.detector_error_matrix);
+    config.block_size = inputs.num_error_mechanisms();
+    config.syndrome_size = inputs.num_detectors();
+    config.H_sparse =
+        cudaq::qec::pcm_to_sparse_vec(inputs.detector_error_matrix());
     config.O_sparse =
-        cudaq::qec::pcm_to_sparse_vec(edem.observables_flips_matrix);
+        cudaq::qec::pcm_to_sparse_vec(inputs.observable_flips_matrix());
     // Ising replaces this native mapping with its detector ordering below.
-    config.D_sparse = cudaq::qec::d_sparse(inputs.m2d);
+    const auto *D = inputs.measurement_to_detectors();
+    if (!D)
+      throw std::runtime_error("decoder inputs are missing D");
+    config.D_sparse.clear();
+    for (const auto &row : D->to_nested_csr()) {
+      for (const auto measurement : row)
+        config.D_sparse.push_back(static_cast<std::int64_t>(measurement));
+      config.D_sparse.push_back(-1);
+    }
+    config.error_rate_vec = inputs.error_rates();
 
     if (decoder_type == "nv-qldpc-decoder") {
       cudaqx::heterogeneous_map nv_args;
 
       // Basic settings
       nv_args.insert("use_sparsity", true);
-      nv_args.insert("error_rate_vec", edem.error_rates);
       nv_args.insert("max_iterations", 50);
 
       if (use_relay_bp) {
@@ -370,7 +378,6 @@ void save_dem_to_file(
     } else if (decoder_type == "pymatching") {
       cudaqx::heterogeneous_map pm_args;
       pm_args.insert("merge_strategy", "smallest_weight");
-      pm_args.insert("error_rate_vec", edem.error_rates);
       config.decoder_custom_args = pm_args;
     } else if (decoder_type == "trt_decoder") {
       cudaqx::heterogeneous_map trt_args;
@@ -380,6 +387,8 @@ void save_dem_to_file(
       trt_args.insert("batch_size", std::size_t{1});
       trt_args.insert("use_cuda_graph", true);
       trt_args.insert("global_decoder", "pymatching");
+      trt_args.insert("engine_output_format",
+                      "observables_and_residual_detectors");
 
       cudaqx::heterogeneous_map pm_args;
       pm_args.insert("merge_strategy", "smallest_weight");
@@ -394,20 +403,18 @@ void save_dem_to_file(
             ising_artifacts_dir + "/O_csr.bin", oRows, oCols);
         auto priors = read_priors_bin(ising_artifacts_dir + "/priors.bin");
         std::size_t dRows = 0;
-        config.D_sparse =
-            read_D_sparse_txt(ising_artifacts_dir + "/D_sparse.txt",
-                              inputs.m2d.num_measurements, dRows);
+        config.D_sparse = read_D_sparse_txt(
+            ising_artifacts_dir + "/D_sparse.txt", D->num_cols(), dRows);
 
-        if (hRows != inputs.m2d.rows.size())
+        if (hRows != D->num_rows())
           throw std::runtime_error("Ising H rows (" + std::to_string(hRows) +
                                    ") != cudaqx m2d detectors (" +
-                                   std::to_string(inputs.m2d.rows.size()) +
-                                   ")");
-        if (dRows != inputs.m2d.rows.size())
-          throw std::runtime_error(
-              "D_sparse.txt rows (" + std::to_string(dRows) +
-              ") != cudaqx m2d detectors (" +
-              std::to_string(inputs.m2d.rows.size()) + ")");
+                                   std::to_string(D->num_rows()) + ")");
+        if (dRows != D->num_rows())
+          throw std::runtime_error("D_sparse.txt rows (" +
+                                   std::to_string(dRows) +
+                                   ") != cudaqx m2d detectors (" +
+                                   std::to_string(D->num_rows()) + ")");
         if (hCols != oCols || hCols != priors.size())
           throw std::runtime_error("Ising H/O/priors column counts disagree");
         if (oRows != 1)
@@ -416,13 +423,11 @@ void save_dem_to_file(
 
         config.syndrome_size = hRows;
         config.block_size = hCols;
-        pm_args.insert("error_rate_vec", priors);
+        config.error_rate_vec = priors;
         printf("trt+Ising: loaded Ising bundle '%s' (H %ux%u, O %u rows, "
                "priors %zu); D_sparse from D_sparse.txt (%zu detectors)\n",
                ising_artifacts_dir.c_str(), hRows, hCols, oRows, priors.size(),
                dRows);
-      } else {
-        pm_args.insert("error_rate_vec", edem.error_rates);
       }
       trt_args.insert("global_decoder_params", pm_args);
 
@@ -975,8 +980,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
         contains_type("pymatching") || contains_type("trt_decoder");
     const bool haveBp = contains_type("nv-qldpc-decoder");
     const bool decompose_errors = haveMatching;
-    std::vector<cudaq::qec::decoder_inputs> matching_inputs;
-    std::vector<cudaq::qec::decoder_inputs> bp_inputs;
+    std::vector<cudaq::qec::decoder_init> matching_inputs;
+    std::vector<cudaq::qec::decoder_init> bp_inputs;
     matching_inputs.reserve(numLogical);
     bp_inputs.reserve(numLogical);
     const bool dual_parse = haveMatching && haveBp;
@@ -989,7 +994,11 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
           patch_m2o, prep, numData, numAncx, numAncz, pairedRounds,
           cnot_schedX_flat, cnot_schedZ_flat, p_spam_per_patch[patch],
           z_logical_indices, z_supports_flat, z_supports_offsets);
-      if (patch > 0 && patch_m2d.rows != matching_inputs.front().m2d.rows)
+      const auto patch_D = cudaq::qec::m2d_to_sparse(patch_m2d);
+      if (patch > 0 &&
+          patch_D.to_nested_csr() != matching_inputs.front()
+                                         .measurement_to_detectors()
+                                         ->to_nested_csr())
         throw std::runtime_error(
             "per-patch DEMs produced different measurement mappings");
 
@@ -999,19 +1008,19 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
           dual_parse ? cudaq::qec::dem_from_stim_text(
                            dem_text, /*use_decomp_suggestions=*/false)
                      : patch_dem;
-      matching_inputs.push_back({std::move(patch_dem), patch_m2d, patch_m2o});
-      bp_inputs.push_back({std::move(patch_dem_undecomposed),
-                           std::move(patch_m2d), std::move(patch_m2o)});
+      matching_inputs.emplace_back(std::move(patch_dem), patch_D);
+      bp_inputs.emplace_back(std::move(patch_dem_undecomposed), patch_D);
     }
-    dem = matching_inputs.front().dem;
+    const auto &front = matching_inputs.front();
 
     numSyndromesPerRound = numAncx + numAncz;
     printf("numSyndromesPerRound: %ld\n", numSyndromesPerRound);
 
-    printf("dem.detector_error_matrix:\n");
-    dem.detector_error_matrix.dump_bits();
-    printf("dem.observables_flips_matrix:\n");
-    dem.observables_flips_matrix.dump_bits();
+    printf("H: %u x %u (%u nonzeros)\n",
+           front.detector_error_matrix().num_rows(),
+           front.detector_error_matrix().num_cols(),
+           front.detector_error_matrix().num_nnz());
+    printf("O: %zu observables\n", front.num_observables());
 
     if (save_dem) {
       save_dem_to_file(matching_inputs, bp_inputs, dem_filename, decoder_types,

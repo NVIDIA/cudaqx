@@ -39,7 +39,8 @@ The configuration API enables setting up decoders before circuit execution. Deco
 .. doxygenclass:: cudaq::qec::decoding::config::multi_decoder_config
    :members:
 
-.. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders
+.. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders(multi_decoder_config &)
+.. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders(multi_decoder_config &, const std::filesystem::path &)
 .. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_file
 .. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_str
 .. doxygenfunction:: cudaq::qec::decoding::config::finalize_decoders

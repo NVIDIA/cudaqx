@@ -17,9 +17,11 @@
 #include <dlfcn.h>
 #include <filesystem>
 #include <fmt/ranges.h>
+#include <span>
 #include <vector>
 
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
+INSTANTIATE_REGISTRY(cudaq::qec::decoder, cudaq::qec::decoder_init,
+                     std::optional<cudaq::qec::decode_result_type>,
                      const cudaqx::heterogeneous_map &)
 
 // Include decoder implementations AFTER registry instantiation
@@ -56,7 +58,14 @@ struct decoder::rt_impl {
   /// The id of the decoder (for instrumentation)
   uint32_t decoder_id = 0;
 
-  bool is_sliding_window = false;
+  /// Written last by initialize_streaming_layout(), so per-round streaming
+  /// never activates on incomplete geometry. Also the one-shot construction
+  /// latch: a second call is rejected rather than resetting a live decoder.
+  bool round_streaming_initialized = false;
+
+  /// The model's measurement-to-detector map, by detector row. Empty when the
+  /// model supplies none, i.e. the decoder is handed detectors directly.
+  std::vector<std::vector<uint32_t>> measurement_to_detectors;
 
   /// The number of syndromes per round.  Only used for sliding window decoder.
   size_t num_syndromes_per_round = 0;
@@ -78,14 +87,22 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(cudaq::qec::sparse_binary_matrix H)
-    : H(std::move(H)),
-      pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())) {
-  syndrome_size = this->H.num_rows();
-  block_size = this->H.num_cols();
-  reset_decoder();
+decoder::decoder(decoder_init inputs, decode_result_type requested_output)
+    : pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())),
+      inputs_(std::move(inputs)), result_type_(requested_output) {
+  syndrome_size = inputs_.num_detectors();
+  block_size = inputs_.num_error_mechanisms();
+
+  // Everything the realtime path needs that the model determines is sized
+  // here, from the model. Nothing arrives later: a decoder is usable as soon
+  // as it is constructed.
+  if (const auto *D = inputs_.measurement_to_detectors()) {
+    pimpl->measurement_to_detectors = D->to_nested_csr();
+    pimpl->num_msyn_per_decode = D->num_cols();
+  }
   pimpl->persistent_detector_buffer.resize(this->syndrome_size);
   pimpl->persistent_soft_detector_buffer.resize(this->syndrome_size);
+  reset_decoder();
 
   // We allow detailed logging of decoder stats via the CUDAQ_QEC_DEBUG_DECODER
   // environment variable or the CUDAQ_LOG_LEVEL=info environment variable. If
@@ -94,6 +111,32 @@ decoder::decoder(cudaq::qec::sparse_binary_matrix H)
   // it will be instrumented as a simple printf.
   if (auto *ch = std::getenv("CUDAQ_QEC_DEBUG_DECODER"))
     pimpl->should_log = ch[0] == '1' || ch[0] == 'y' || ch[0] == 'Y';
+}
+
+void decoder::project_errors_to_observables(
+    const float_t *errors, float_t *observables,
+    std::size_t observables_size) const {
+  // Hot path: one call per shot on the realtime path. Sizes and O-row counts
+  // are fixed by construction, so they are not re-checked here. There is one
+  // observable model -- the one this decoder was constructed with -- so there
+  // is no second source to fall back to.
+  if (!inputs_.has_observable_model())
+    throw std::runtime_error("decoder was asked to project an error frame onto "
+                             "observables but its model supplies no observable "
+                             "mapping");
+  if (observables_size > 0)
+    std::fill(observables, observables + observables_size, float_t{0});
+
+  const auto &O = inputs_.observable_flips_matrix();
+  assert(O.layout() == sparse_binary_matrix_layout::csr);
+  const auto &ptr = O.ptr();
+  const auto &indices = O.indices();
+  for (std::size_t row = 0; row < O.num_rows(); ++row) {
+    bool parity = false;
+    for (auto pos = ptr[row]; pos < ptr[row + 1]; ++pos)
+      parity ^= convert_soft_to_hard(errors[indices[pos]]);
+    observables[row] = static_cast<float_t>(parity);
+  }
 }
 
 // Provide a trivial implementation of for tensor<uint8_t> decode call. Child
@@ -203,8 +246,28 @@ private:
 };
 
 std::unique_ptr<decoder>
-decoder::get(const std::string &name, const decoder_init &init,
+decoder::get(const std::string &name, decoder_init inputs,
              const cudaqx::heterogeneous_map &param_map) {
+  return get_impl(name, std::move(inputs), std::nullopt, param_map);
+}
+
+std::unique_ptr<decoder>
+decoder::get(const std::string &name, decoder_init inputs,
+             decode_result_type output,
+             const cudaqx::heterogeneous_map &param_map) {
+  return get_impl(name, std::move(inputs), output, param_map);
+}
+
+std::unique_ptr<decoder>
+decoder::get_impl(const std::string &name, decoder_init inputs,
+                  std::optional<decode_result_type> output,
+                  const cudaqx::heterogeneous_map &param_map) {
+  for (const char *reserved : {"H", "O", "D", "error_rate_vec"})
+    if (param_map.contains(reserved))
+      throw std::runtime_error(
+          fmt::format("'{}' is framework model data; provide it through "
+                      "decoder_init instead of decoder custom parameters",
+                      reserved));
   auto [mutex, registry] = get_registry();
   std::lock_guard<std::recursive_mutex> lock(mutex);
   auto iter = registry.find(name);
@@ -214,8 +277,11 @@ decoder::get(const std::string &name, const decoder_init &init,
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
   const int cuda_device_id = read_cuda_device_id(param_map);
-  if (cuda_device_id < 0)
-    return iter->second(init, param_map);
+  if (cuda_device_id < 0) {
+    // The plugin validates the requested form against its model during
+    // construction; there is nothing left for the factory to re-check.
+    return iter->second(std::move(inputs), output, param_map);
+  }
   ConstructionDevicePin device_pin(cuda_device_id);
   // The key is consumed here; strip it so plugins that strictly validate
   // their parameter keys do not reject it.
@@ -223,7 +289,7 @@ decoder::get(const std::string &name, const decoder_init &init,
   for (const auto &kv : param_map)
     if (kv.first != "cuda_device_id")
       plugin_params.insert(kv.first, kv.second);
-  auto d = iter->second(init, plugin_params);
+  auto d = iter->second(std::move(inputs), output, plugin_params);
   d->cuda_device_id_ = cuda_device_id;
   device_pin.commit();
   return d;
@@ -244,63 +310,6 @@ dem_default_values dem_defaults_for_missing_keys(
 
 } // namespace details
 
-static uint32_t calculate_num_msyn_per_decode(
-    const std::vector<std::vector<uint32_t>> &D_sparse) {
-  uint32_t max_col = 0;
-  for (const auto &row : D_sparse)
-    for (const auto col : row)
-      max_col = std::max(max_col, col);
-  return max_col + 1;
-}
-
-static void
-validate_sparse_column_indices(const std::vector<std::vector<uint32_t>> &sparse,
-                               std::size_t max_col, const char *name) {
-  for (std::size_t row = 0; row < sparse.size(); ++row) {
-    for (const auto col : sparse[row]) {
-      if (col >= max_col) {
-        throw std::invalid_argument(
-            fmt::format("{} column index {} out of range [0, {}) at row {}",
-                        name, col, max_col, row));
-      }
-    }
-  }
-}
-
-static void
-set_sparse_from_vec(const std::vector<int64_t> &vec_in,
-                    std::vector<std::vector<uint32_t>> &sparse_out) {
-  sparse_out.clear();
-  bool first_of_row = true;
-  for (auto elem : vec_in) {
-    if (elem < 0) {
-      first_of_row = true;
-    } else {
-      if (first_of_row) {
-        sparse_out.emplace_back();
-        first_of_row = false;
-      }
-      sparse_out.back().push_back(static_cast<uint32_t>(elem));
-    }
-  }
-}
-
-void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
-  this->O_sparse = O_sparse;
-  validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
-  this->pimpl->corrections.clear();
-  this->pimpl->corrections.resize(O_sparse.size());
-  on_o_sparse_configured();
-}
-
-void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
-  set_sparse_from_vec(O_sparse_vec_in, this->O_sparse);
-  validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
-  this->pimpl->corrections.clear();
-  this->pimpl->corrections.resize(O_sparse.size());
-  on_o_sparse_configured();
-}
-
 uint32_t decoder::get_num_msyn_per_decode() const {
   return pimpl->num_msyn_per_decode;
 }
@@ -311,56 +320,34 @@ void decoder::set_decoder_id(uint32_t decoder_id) {
 
 uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 
-template <typename PimplType>
-void set_D_sparse_common(decoder *decoder,
-                         const std::vector<std::vector<uint32_t>> &D_sparse,
-                         PimplType *pimpl) {
-  auto *sw_decoder = dynamic_cast<sliding_window *>(decoder);
+void decoder::initialize_streaming_layout(
+    std::size_t num_syndromes_per_round,
+    std::vector<std::size_t> detector_layer_offsets) {
+  if (pimpl->round_streaming_initialized)
+    throw std::logic_error(
+        "initialize_streaming_layout() is construction state and may be called "
+        "only once");
+  if (detector_layer_offsets.empty())
+    throw std::invalid_argument(
+        "initialize_streaming_layout() requires at least one detector layer");
+  if (detector_layer_offsets.back() != syndrome_size)
+    throw std::invalid_argument(fmt::format(
+        "detector layer offsets end at {} but the model has {} detectors",
+        detector_layer_offsets.back(), syndrome_size));
 
-  if (sw_decoder != nullptr) {
-    pimpl->is_sliding_window = true;
-    pimpl->num_syndromes_per_round = sw_decoder->get_num_syndromes_per_round();
-    // Check if first row is a first-round detector (single syndrome index)
-    pimpl->has_first_round_detectors =
-        (D_sparse.size() > 0 && D_sparse[0].size() == 1);
-    pimpl->current_round = 0;
-    // Detector-layer offsets for the [B | S...S | B] layout; each streamed
-    // layer's width comes from these.
-    const std::size_t num_layers = sw_decoder->get_num_detector_layers();
-    pimpl->detector_layer_offsets.resize(num_layers + 1);
-    for (std::size_t r = 0; r <= num_layers; ++r)
-      pimpl->detector_layer_offsets[r] = sw_decoder->get_layer_offset(r);
-    pimpl->detector_layer_index = 0;
-    // The interior width is the widest layer, so it bounds the buffers.
-    pimpl->persistent_detector_buffer.resize(pimpl->num_syndromes_per_round);
-    pimpl->persistent_soft_detector_buffer.resize(
-        pimpl->num_syndromes_per_round);
-
-  } else {
-    pimpl->is_sliding_window = false;
-    if (D_sparse.size() != decoder->get_syndrome_size()) {
-      throw std::invalid_argument(
-          fmt::format("D_sparse row count ({}) must match syndrome_size ({})",
-                      D_sparse.size(), decoder->get_syndrome_size()));
-    }
-  }
-
-  pimpl->num_msyn_per_decode = calculate_num_msyn_per_decode(D_sparse);
-  pimpl->msyn_buffer.clear();
-  pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
-  pimpl->msyn_buffer_index = 0;
-}
-
-void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
-  this->D_sparse = D_sparse;
-  set_D_sparse_common(this, D_sparse, pimpl.get());
-  on_d_sparse_configured();
-}
-
-void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
-  set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
-  set_D_sparse_common(this, this->D_sparse, pimpl.get());
-  on_d_sparse_configured();
+  pimpl->num_syndromes_per_round = num_syndromes_per_round;
+  // A first-round detector layer references a single measurement per detector.
+  pimpl->has_first_round_detectors =
+      !pimpl->measurement_to_detectors.empty() &&
+      pimpl->measurement_to_detectors[0].size() == 1;
+  pimpl->detector_layer_offsets = std::move(detector_layer_offsets);
+  pimpl->detector_layer_index = 0;
+  pimpl->current_round = 0;
+  // Layers are emitted one at a time, so the widest layer bounds the buffers
+  // rather than the full detector count.
+  pimpl->persistent_detector_buffer.resize(num_syndromes_per_round);
+  pimpl->persistent_soft_detector_buffer.resize(num_syndromes_per_round);
+  pimpl->round_streaming_initialized = true;
 }
 
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
@@ -379,7 +366,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
   }
 
   bool should_decode = false;
-  if (!pimpl->is_sliding_window) {
+  if (!pimpl->round_streaming_initialized) {
     should_decode = (pimpl->msyn_buffer_index == pimpl->msyn_buffer.size());
   } else {
     should_decode =
@@ -406,15 +393,15 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     if (should_log) {
       log_t0 = std::chrono::high_resolution_clock::now();
       log_errors.reserve(syndrome_length);
-      log_observables.reserve(O_sparse.size());
-      log_observable_corrections.resize(O_sparse.size());
+      log_observables.reserve(get_num_observables());
+      log_observable_corrections.resize(get_num_observables());
     }
 
     // Decode now.
-    if (!pimpl->is_sliding_window) {
-      for (std::size_t i = 0; i < this->D_sparse.size(); i++) {
+    if (!pimpl->round_streaming_initialized) {
+      for (std::size_t i = 0; i < pimpl->measurement_to_detectors.size(); i++) {
         pimpl->persistent_detector_buffer[i] = 0;
-        for (auto col : this->D_sparse[i])
+        for (auto col : pimpl->measurement_to_detectors[i])
           pimpl->persistent_detector_buffer[i] ^= pimpl->msyn_buffer[col];
       }
     } else {
@@ -424,7 +411,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       pimpl->persistent_detector_buffer.resize(width);
       for (std::size_t j = 0; j < width; j++) {
         uint8_t v = 0;
-        for (auto col : this->D_sparse[off + j])
+        for (auto col : pimpl->measurement_to_detectors[off + j])
           v ^= pimpl->msyn_buffer[col];
         pimpl->persistent_detector_buffer[j] = v;
       }
@@ -448,45 +435,40 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     convert_vec_hard_to_soft(pimpl->persistent_detector_buffer,
                              pimpl->persistent_soft_detector_buffer);
     auto decoded_result = decode(pimpl->persistent_soft_detector_buffer);
+    std::span<const float_t> decoded_values = decoded_result.result;
 
     // If we didn't get a decoded result, just return
-    if (pimpl->is_sliding_window) {
-      if (decoded_result.result.size() == 0) {
+    if (pimpl->round_streaming_initialized) {
+      if (decoded_values.empty()) {
         return false;
       }
     }
     // Process the results.
     // TODO - should this interrogate the decoded_result.converged flag?
-    const auto result_type = get_result_type();
     const auto num_observables = get_num_observables();
     const char *result_type_str = nullptr;
     const char *result_type_name = nullptr;
     std::size_t expected_result_size = 0;
-    switch (result_type) {
-    case decode_result_type::decode_to_errs:
+    switch (result_type_) {
+    case decode_result_type::errors:
       result_type_str = "errs";
-      result_type_name = "decode_to_errs";
+      result_type_name = "errors";
       expected_result_size = block_size;
       break;
-    case decode_result_type::decode_to_obs:
+    case decode_result_type::observables:
       result_type_str = "obs";
-      result_type_name = "decode_to_obs";
+      result_type_name = "observables";
       expected_result_size = num_observables;
       break;
     }
-    if (!result_type_name)
-      throw std::runtime_error(
-          fmt::format("Unsupported decoder result type ({})",
-                      static_cast<int>(result_type)));
-    if ((!pimpl->is_sliding_window &&
-         decoded_result.result.size() != expected_result_size) ||
-        (pimpl->is_sliding_window && !decoded_result.result.empty() &&
-         decoded_result.result.size() != expected_result_size)) {
+    if ((!pimpl->round_streaming_initialized &&
+         decoded_values.size() != expected_result_size) ||
+        (pimpl->round_streaming_initialized && !decoded_values.empty() &&
+         decoded_values.size() != expected_result_size)) {
       throw std::runtime_error(fmt::format(
           "Decoder result size ({}) does not match expected size ({}) for "
           "result type {}",
-          decoded_result.result.size(), expected_result_size,
-          result_type_name));
+          decoded_values.size(), expected_result_size, result_type_name));
     }
 
     // Flip an observable correction and mirror it into the per-call log so the
@@ -500,30 +482,39 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     if (should_log)
       log_t2 = std::chrono::high_resolution_clock::now();
 
-    switch (result_type) {
-    case decode_result_type::decode_to_obs:
+    switch (result_type_) {
+    case decode_result_type::observables:
       // Observable-frame path: decoder already projected to observables via its
       // internal "O" matrix; use the result directly.
       for (std::size_t i = 0; i < num_observables; i++)
-        if (decoded_result.result[i]) {
+        if (decoded_values[i]) {
           if (should_log)
             log_observables.push_back(i);
           flip_correction(i);
         }
       break;
-    case decode_result_type::decode_to_errs:
+    case decode_result_type::errors:
       // Error-frame path: decoder returns a block-sized error vector; project
       // to observables via O_sparse.
+      if (!inputs_.has_observable_model())
+        throw std::runtime_error(
+            "Error-frame decoders need an observable model to project through; "
+            "this one was constructed without one");
       if (should_log)
-        for (std::size_t e = 0, E = decoded_result.result.size(); e < E; e++)
-          if (decoded_result.result[e])
+        for (std::size_t e = 0, E = decoded_values.size(); e < E; e++)
+          if (decoded_values[e])
             log_errors.push_back(e);
       // For each observable, flip its correction once for each predicted error
       // that flips it (net parity over O_sparse[i]).
-      for (std::size_t i = 0; i < num_observables; i++)
-        for (auto col : O_sparse[i])
-          if (decoded_result.result[col])
-            flip_correction(i);
+      {
+        const auto &O = inputs_.observable_flips_matrix();
+        const auto &ptr = O.ptr();
+        const auto &indices = O.indices();
+        for (std::size_t i = 0; i < num_observables; i++)
+          for (auto k = ptr[i]; k < ptr[i + 1]; ++k)
+            if (decoded_values[indices[k]])
+              flip_correction(i);
+      }
       break;
     }
     if (should_log) {
@@ -569,7 +560,7 @@ bool decoder::enqueue_syndrome(const std::vector<uint8_t> &syndrome) {
 
 void decoder::clear_corrections() {
   pimpl->corrections.clear();
-  pimpl->corrections.resize(O_sparse.size());
+  pimpl->corrections.resize(get_num_observables());
   const bool log_due_to_log_level =
       cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
@@ -602,7 +593,9 @@ const uint8_t *decoder::get_obs_corrections() const {
   return pimpl->corrections.data();
 }
 
-std::size_t decoder::get_num_observables() const { return O_sparse.size(); }
+std::size_t decoder::get_num_observables() const {
+  return inputs_.num_observables();
+}
 
 void decoder::reset_decoder() {
   // Zero out all data that is considered "per-shot" memory.
@@ -612,7 +605,7 @@ void decoder::reset_decoder() {
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
   pimpl->corrections.clear();
-  pimpl->corrections.resize(O_sparse.size());
+  pimpl->corrections.resize(get_num_observables());
   const bool log_due_to_log_level =
       cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
@@ -629,9 +622,16 @@ void decoder::reset_decoder() {
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     const decoder_init &init,
+                                     decoder_init inputs,
                                      const cudaqx::heterogeneous_map options) {
-  return decoder::get(name, init, options);
+  return decoder::get(name, std::move(inputs), options);
+}
+
+std::unique_ptr<decoder> get_decoder(const std::string &name,
+                                     decoder_init inputs,
+                                     decode_result_type output,
+                                     const cudaqx::heterogeneous_map options) {
+  return decoder::get(name, std::move(inputs), output, options);
 }
 
 // Constructor function for auto-loading plugins

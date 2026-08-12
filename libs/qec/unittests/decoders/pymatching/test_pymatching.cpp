@@ -163,7 +163,17 @@ TEST(PyMatchingDecoder, AcceptsAllMergeStrategiesAndRejectsUnknown) {
         "replace"}) {
     cudaqx::heterogeneous_map params;
     params.insert("merge_strategy", strategy);
-    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    std::unique_ptr<cudaq::qec::decoder> d;
+    if (strategy == "disallow") {
+      d = cudaq::qec::decoder::get("pymatching", H, params);
+    } else {
+      auto sparse_H = cudaq::qec::sparse_binary_matrix(H);
+      auto O = cudaq::qec::sparse_binary_matrix::from_nested_csr(1, 1, {{0}});
+      d = cudaq::qec::decoder::get(
+          "pymatching",
+          cudaq::qec::decoder_init(std::move(sparse_H), std::move(O)),
+          cudaq::qec::decode_result_type::observables, params);
+    }
     ASSERT_NE(d, nullptr) << strategy;
     auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0});
     ASSERT_TRUE(result.converged) << strategy;
@@ -176,6 +186,41 @@ TEST(PyMatchingDecoder, AcceptsAllMergeStrategiesAndRejectsUnknown) {
                std::runtime_error);
 }
 
+// Parallel columns share one matching edge, so an error frame has to name one
+// of them. The column named is the one whose parameters the graph actually
+// holds after the merge: KEEP_ORIGINAL and INDEPENDENT retain the first
+// column's observables, REPLACE adopts the last, SMALLEST_WEIGHT adopts
+// whichever weight is smaller. Baseline main named the last column for every
+// strategy, which contradicts the retained edge for the first two.
+TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
+  cudaqx::tensor<uint8_t> H;
+  const std::vector<uint8_t> H_vec = {1, 1};
+  H.copy(H_vec.data(), {1, 2});
+
+  auto decode_with = [&](const std::string &strategy) {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", strategy);
+    auto O = cudaq::qec::sparse_binary_matrix::from_csr(
+        0, 2, std::vector<std::uint32_t>{0}, {});
+    auto inputs = cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                           std::move(O), {0.1, 0.2});
+    auto decoder = cudaq::qec::decoder::get(
+        "pymatching", std::move(inputs), cudaq::qec::decode_result_type::errors,
+        params);
+    return decoder->decode(std::vector<cudaq::qec::float_t>{1.0}).result;
+  };
+
+  EXPECT_EQ(decode_with("keep_original"),
+            (std::vector<cudaq::qec::float_t>{1.0, 0.0}));
+  EXPECT_EQ(decode_with("independent"),
+            (std::vector<cudaq::qec::float_t>{1.0, 0.0}));
+  EXPECT_EQ(decode_with("replace"),
+            (std::vector<cudaq::qec::float_t>{0.0, 1.0}));
+  EXPECT_EQ(decode_with("smallest_weight"),
+            (std::vector<cudaq::qec::float_t>{0.0, 1.0}));
+  EXPECT_THROW((void)decode_with("disallow"), std::invalid_argument);
+}
+
 TEST(PyMatchingDecoder, RejectsObservableMatrixWithWrongBlockSize) {
   cudaqx::tensor<uint8_t> H;
   std::vector<uint8_t> H_vec = {1, 0, 0, 1};
@@ -183,11 +228,10 @@ TEST(PyMatchingDecoder, RejectsObservableMatrixWithWrongBlockSize) {
 
   cudaqx::tensor<uint8_t> O({1, 3});
   O.at({0, 0}) = 1;
-  cudaqx::heterogeneous_map params;
-  params.insert("O", O);
-
-  EXPECT_THROW((void)cudaq::qec::decoder::get("pymatching", H, params),
-               std::runtime_error);
+  EXPECT_THROW(
+      (void)cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                     cudaq::qec::sparse_binary_matrix(O)),
+      std::invalid_argument);
 }
 
 TEST(PyMatchingDecoder, DecodesHighObservableIndicesAcrossPaths) {
@@ -203,9 +247,11 @@ TEST(PyMatchingDecoder, DecodesHighObservableIndicesAcrossPaths) {
       O.at({i, i}) = 1;
     }
 
-    cudaqx::heterogeneous_map params;
-    params.insert("O", O);
-    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    auto d = cudaq::qec::decoder::get(
+        "pymatching",
+        cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                 cudaq::qec::sparse_binary_matrix(O)),
+        cudaq::qec::decode_result_type::observables);
     // ASSERT: valid graph-like identity matrices must construct a decoder.
     ASSERT_NE(d, nullptr);
 

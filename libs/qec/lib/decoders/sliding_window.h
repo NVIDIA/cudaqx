@@ -22,6 +22,9 @@ namespace cudaq::qec {
 /// low-latency decoding of streaming syndrome data.
 class sliding_window : public decoder {
 private:
+  /// Canonical materialized matrix view retained by this matrix-family decoder.
+  const sparse_binary_matrix &H;
+
   // --- Input parameters ---
 
   /// The number of rounds of syndrome data in each window.
@@ -41,7 +44,7 @@ private:
   /// any subsequent rounds be included?
   bool straddle_end_round = true;
   /// The vector of error rates for the error mechanisms.
-  std::vector<cudaq::qec::float_t> error_rate_vec;
+  std::vector<double> error_rate_vec;
   /// The name of the inner decoder to use.
   std::string inner_decoder_name;
   /// The parameters to pass to the inner decoder.
@@ -104,7 +107,8 @@ public:
   ///   - num_boundary_syndromes: Boundary-layer width (0 if uniform)
   ///   - inner_decoder_name: Name of the inner decoder to use
   ///   - inner_decoder_params: Parameters for the inner decoder (optional)
-  sliding_window(const cudaq::qec::sparse_binary_matrix &H,
+  sliding_window(cudaq::qec::decoder_init inputs,
+                 decode_result_type requested_output,
                  const cudaqx::heterogeneous_map &params);
 
   /// @brief Decode a syndrome vector
@@ -141,9 +145,12 @@ public:
   // Plugin registration macros
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sliding_window, static std::unique_ptr<decoder> create(
-                          const cudaq::qec::decoder_init &init,
+                          cudaq::qec::decoder_init inputs,
+                          std::optional<decode_result_type> output,
                           const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<sliding_window>(init, params);
+        return std::make_unique<sliding_window>(
+            std::move(inputs), output.value_or(decode_result_type::errors),
+            params);
       })
 };
 
