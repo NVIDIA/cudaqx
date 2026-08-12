@@ -939,7 +939,7 @@ setup_network_cpu_roce() {
 }
 
 prepare_gpu_roce_config() {
-    local peer_ip="$1" remote_qp="$2" num_pages="$3"
+    local peer_ip="$1" remote_qp="$2" num_pages="$3" page_size="$4"
     local remote_qp_decimal=$((remote_qp))
     local payload_size=$((PAGE_SIZE - 24))
     if (( payload_size <= 0 )); then
@@ -973,7 +973,7 @@ transport:
     - --device=$BRIDGE_DEVICE
     - --peer-ip=$peer_ip
     - --remote-qp=$remote_qp_decimal
-    - --page-size=$PAGE_SIZE
+    - --page-size=$page_size
     - --num-pages=$num_pages
     - --payload-size=$payload_size
 ...
@@ -982,14 +982,16 @@ EOF
 }
 
 start_roce_server() {
-    local peer_ip="$1" remote_qp="$2" server_log="$3" device_graph_num_pages="$4"
+    local peer_ip="$1" remote_qp="$2" server_log="$3"
+    local device_graph_num_pages="$4" device_graph_page_size="$5"
     _log "Starting decoding_server (wire=$WIRE, dispatch=$DISPATCH, remote-qp=$remote_qp)"
     local ready
     if [[ "$DISPATCH" == "device_graph" ]]; then
         # All-device_graph config: the standalone device-graph transceiver
         # brings up the GPU RoCE wire from the generated YAML; no transport
         # environment variables, CLI selector, or provider arguments are used.
-        prepare_gpu_roce_config "$peer_ip" "$remote_qp" "$device_graph_num_pages" || return 1
+        prepare_gpu_roce_config "$peer_ip" "$remote_qp" \
+            "$device_graph_num_pages" "$device_graph_page_size" || return 1
         CUDA_MODULE_LOADING=EAGER \
         "$SERVER_BIN" --config="$CONFIG_FILE" --timeout="$TIMEOUT" \
             > >(tee "$server_log") 2>&1 &
@@ -1029,6 +1031,9 @@ run_fpga() {
     # clamps), device_graph dispatch via DEVICE_GRAPH_NUM_PAGES here.
     local HSB_WQE_DEPTH=64
     local DEVICE_GRAPH_NUM_PAGES="$HSB_WQE_DEPTH"
+    # GPU RoCE ring slots are 128-byte granular. Keep PAGE_SIZE as the frame
+    # budget, but give the provider and playback the same aligned slot stride.
+    local DEVICE_GRAPH_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
     if (( NUM_SLOTS > HSB_WQE_DEPTH )); then
         _warn "NUM_SLOTS=$NUM_SLOTS exceeds the HSB WQE depth ($HSB_WQE_DEPTH); clamping"
         NUM_SLOTS="$HSB_WQE_DEPTH"
@@ -1040,8 +1045,8 @@ run_fpga() {
         # configs) the server would reject the ring at startup, so fail fast
         # with the constraint spelled out.
         local host_page; host_page=$(getconf PAGESIZE)
-        if (( (DEVICE_GRAPH_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
-            _err "device_graph ring ($DEVICE_GRAPH_NUM_PAGES slots x $PAGE_SIZE B) is not a multiple of this host's page size ($host_page B)."
+        if (( (DEVICE_GRAPH_NUM_PAGES * DEVICE_GRAPH_PAGE_SIZE) % host_page != 0 )); then
+            _err "device_graph ring ($DEVICE_GRAPH_NUM_PAGES slots x $DEVICE_GRAPH_PAGE_SIZE B) is not a multiple of this host's page size ($host_page B)."
             _err "The HSB frame stride must be a multiple of $(( host_page / HSB_WQE_DEPTH )) B on this host; see the unittests"
             _err "hsb_fpga_decoding_server_test.sh (--page-size) for a tunable-geometry run."
             exit 1
@@ -1050,7 +1055,8 @@ run_fpga() {
     : "${BRIDGE_DEVICE:=${IB_DEVICE:-rocep1s0f0}}"
 
     local server_log="$GEN_DIR/server.log"
-    start_roce_server "$FPGA_IP" "0x2" "$server_log" "$DEVICE_GRAPH_NUM_PAGES" || return 1
+    start_roce_server "$FPGA_IP" "0x2" "$server_log" \
+        "$DEVICE_GRAPH_NUM_PAGES" "$DEVICE_GRAPH_PAGE_SIZE" || return 1
 
     _log "Streaming syndromes from the FPGA via playback (spacing=${SPACING}us)"
     # The FPGA writes syndrome frame rid to RDMA slot (rid % num-pages), so the
@@ -1060,10 +1066,14 @@ run_fpga() {
     # (num_slots). The cpu_roce wire's server ring is NUM_SLOTS; the
     # device_graph ring is DEVICE_GRAPH_NUM_PAGES.
     local pb_pages="$NUM_SLOTS"
-    if [[ "$DISPATCH" == "device_graph" ]]; then pb_pages="$DEVICE_GRAPH_NUM_PAGES"; fi
+    local pb_page_size="$PAGE_SIZE"
+    if [[ "$DISPATCH" == "device_graph" ]]; then
+        pb_pages="$DEVICE_GRAPH_NUM_PAGES"
+        pb_page_size="$DEVICE_GRAPH_PAGE_SIZE"
+    fi
     local args=( --hsb-ip "$FPGA_IP" --per-round --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE" --qp-number "$SERVER_QP" --rkey "$SERVER_RKEY"
-        --buffer-addr "$SERVER_ADDR" --page-size "$PAGE_SIZE" --num-pages "$pb_pages" )
+        --buffer-addr "$SERVER_ADDR" --page-size "$pb_page_size" --num-pages "$pb_pages" )
     $VERIFY && args+=(--verify)
     [[ -n "$NUM_SHOTS" ]] && args+=(--num-shots "$NUM_SHOTS")
     [[ -n "$SPACING"   ]] && args+=(--spacing "$SPACING")
