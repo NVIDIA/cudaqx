@@ -24,7 +24,8 @@ the GB200 lab FPGA port (`--fpga-device mlx5_4`) are the defaults.
 
 * **examples tier** — the shipped `examples/qec/realtime_decoding_demo`
   driver: all 4 decoders (pymatching, multi_error_lut, nv-qldpc-decoder,
-  trt_decoder) over `udp` (baseline), `cpu_roce` two-process (RoCE pair),
+  and the TensorRT plugin running the exported Ising model — lane name
+  `trt_decoder(ising)`) over `udp` (baseline), `cpu_roce` two-process (RoCE pair),
   and the FPGA source (`cpu_roce` host dispatch ×4, `device_graph`
   nv-qldpc ×1); plus `ising-prepare`, which downloads the gated Hugging Face
   Ising model and rebuilds the TRT artifact bundle **on every run** — a FAIL
@@ -84,7 +85,17 @@ the GB200 lab FPGA port (`--fpga-device mlx5_4`) are the defaults.
    download/export path was not exercised. No token and no staged bundle
    => the ising/trt lanes SKIP.
 6. ~60 GB free disk for image layers and build trees.
-7. NetworkManager-managed ports (the DGX OS default) silently drop the
+7. **One run per machine at a time.** The FPGA (SIF/BRAM/ILA), the
+   SoftRoCE objects, and the RoCE pair addressing are host-global, so the
+   runner serializes itself with a host-wide lock
+   (`/tmp/cudaqx-hw-ci.lock`). A second invocation fails immediately,
+   naming the active run's user/pid/sha; `--lock-wait` queues behind it
+   instead. A crashed or killed run releases the lock automatically (the
+   kernel drops it with the process — the lock file itself is inert), so
+   only a live-but-wedged run can hold others out: `--force-unlock` kills
+   whatever actually holds the lock and proceeds (for another user's
+   wedged run: `sudo fuser -vk /tmp/cudaqx-hw-ci.lock`).
+8. NetworkManager-managed ports (the DGX OS default) silently drop the
    runner's statically assigned `10.0.0.x` pair addresses on NM's DHCP
    retry timer. The runner re-asserts the addresses and waits for the
    IPv4-mapped RoCE GIDs before every cpu_roce lane, which is normally

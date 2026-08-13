@@ -62,6 +62,8 @@ FPGA_IP="192.168.0.2"
 PAGE_SIZE=""                  # default derived from the host page size
 KEEP_CONTAINER=false
 NO_FPGA=false
+LOCK_WAIT=false               # queue behind an active run instead of failing
+FORCE_UNLOCK=false            # kill a wedged lock holder, then run
 
 print_usage() {
     cat <<EOF
@@ -119,6 +121,12 @@ Misc:
   --hf-token-prompt       read the token from the terminal instead (nothing
                           written to disk; for shared/public accounts)
   --keep-container        leave the container running afterwards (debugging)
+  --lock-wait             one hw CI run per machine at a time (the FPGA and
+                          SoftRoCE objects are host-global): queue behind
+                          the active run instead of failing fast
+  --force-unlock          kill a wedged run that is still holding the host
+                          lock, then proceed (a crashed run releases the
+                          lock by itself; see the README)
   --help, -h              this help
 EOF
 }
@@ -148,6 +156,8 @@ while [[ $# -gt 0 ]]; do
         --hf-token-file)  HF_TOKEN_FILE="$2"; shift ;;
         --hf-token-prompt) HF_TOKEN_PROMPT=true ;;
         --keep-container) KEEP_CONTAINER=true ;;
+        --lock-wait)      LOCK_WAIT=true ;;
+        --force-unlock)   FORCE_UNLOCK=true ;;
         --help|-h)        print_usage; exit 0 ;;
         *) echo "ERROR: unknown option: $1" >&2; print_usage >&2; exit 1 ;;
     esac
@@ -170,6 +180,56 @@ if [[ "$HF_TOKEN_PROMPT" == true && "$LIST_ONLY" != true ]]; then
     [[ -n "$HF_TOKEN" ]] || _die "--hf-token-prompt: empty token"
     export HF_TOKEN
 fi
+
+# ---------------------------------------------------------------------------
+# Host-wide run lock: one hw CI run per machine at a time.  The FPGA (SIF
+# registers/BRAM/ILA), the SoftRoCE objects (hwci-dummy0/hwci_rxe0), and the
+# RoCE pair addressing are all host-global, so concurrent runs would corrupt
+# each other.  flock(2) is released by the kernel the instant the holding
+# process dies (crash, Ctrl-C, kill -9), so no failure can leave a stale
+# lock; the lock FILE persisting on disk is inert.  The only lockout is a
+# live-but-wedged holder -- --force-unlock kills whatever actually holds the
+# lock (fuser sees the real holders, including orphaned children that
+# inherited the fd), and the lock-busy message shows them.
+# ---------------------------------------------------------------------------
+LOCK_FILE="${HWCI_LOCK_FILE:-/tmp/cudaqx-hw-ci.lock}"
+LOCK_FD=""
+
+acquire_run_lock() {
+    # 0666 regardless of umask: every user must be able to lock it.
+    ( umask 000; : >>"$LOCK_FILE" ) 2>/dev/null
+    exec {LOCK_FD}<>"$LOCK_FILE" || _die "cannot open lock file $LOCK_FILE"
+
+    if ! flock -n "$LOCK_FD"; then
+        if [[ "$FORCE_UNLOCK" == true ]]; then
+            _info "--force-unlock: killing the current holder(s) of $LOCK_FILE:"
+            fuser -v "$LOCK_FILE" || true
+            fuser -k -TERM "$LOCK_FILE" >/dev/null 2>&1 || true
+            local i
+            for i in 1 2 3 4 5; do sleep 1; flock -n "$LOCK_FD" && break; done
+            if ! flock -n "$LOCK_FD"; then
+                fuser -k -KILL "$LOCK_FILE" >/dev/null 2>&1 || true
+                sleep 1
+            fi
+            flock -n "$LOCK_FD" || _die "--force-unlock failed -- the holder likely belongs to another user; escalate with: sudo fuser -vk $LOCK_FILE"
+        elif [[ "$LOCK_WAIT" == true ]]; then
+            _info "another hw CI run is active ($(tr -d '\n' <"$LOCK_FILE" 2>/dev/null)); waiting for it to finish ..."
+            flock "$LOCK_FD" || _die "waiting for the lock failed"
+        else
+            local holder pid orphan=""
+            holder=$(tr -d '\n' <"$LOCK_FILE" 2>/dev/null)
+            pid=$(sed -n 's/.*pid=\([0-9]\+\).*/\1/p' <<<"$holder")
+            [[ -n "$pid" && ! -d "/proc/$pid" ]] && \
+                orphan=" -- its recorded pid is gone, so an orphaned child still holds the lock (fuser -v $LOCK_FILE shows it)"
+            _err "another hw CI run is active on this machine: ${holder:-<no holder info>}$orphan"
+            _die "rerun with --lock-wait to queue behind it, or --force-unlock to kill a wedged holder"
+        fi
+    fi
+    # Advisory holder info for the messages above; the flock itself is the gate.
+    printf 'user=%s pid=%s sha=%s since=%s\n' "$USER" $$ "$SHA" "$(date -Is)" >"$LOCK_FILE" 2>/dev/null || true
+}
+
+[[ "$LIST_ONLY" == true ]] || acquire_run_lock
 
 # ---------------------------------------------------------------------------
 # Lane bookkeeping.  Every lane lands in the summary exactly once as
@@ -356,7 +416,10 @@ Wait for build_dev.yaml to publish the new pin's image, pass --base-image, or us
 }
 
 start_container() {
-    CONTAINER="hwci-$SHORT_SHA"
+    # $USER in the name so a --keep-container debugging container from one
+    # user is not docker-rm'd by another user later testing the same SHA
+    # (concurrent runs are already excluded by the host-wide lock).
+    CONTAINER="hwci-$USER-$SHORT_SHA"
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     mkdir -p "$WORKDIR/ccache"
     local artifacts_mount=()
@@ -524,6 +587,11 @@ roce_env() {  # docker exec env flags for the cpu_roce topology
 # the device_graph ring (64 slots) must total a multiple of the host page
 # size, so its value rounds up to the compatible one.
 # ---------------------------------------------------------------------------
+# Lane label: the trt_decoder plugin runs the exported Ising model in these
+# lanes -- make that visible in lane names and the summary table.  The
+# --decoder argument stays 'trt_decoder' (the plugin name).
+lane_label() { [[ "$1" == trt_decoder ]] && echo 'trt_decoder(ising)' || echo "$1"; }
+
 derive_page_sizes() {
     local host_page; host_page=$(getconf PAGESIZE)
     if [[ -z "$PAGE_SIZE" ]]; then
@@ -611,7 +679,7 @@ run_examples_tier() {
 
     # -- qpu-kernel over udp: the no-hardware baseline -----------------------
     for d in pymatching multi_error_lut nv-qldpc-decoder trt_decoder; do
-        local name="examples/qpu-kernel/udp/$d" extra=""
+        local name="examples/qpu-kernel/udp/$(lane_label "$d")" extra=""
         case "$d" in
             nv-qldpc-decoder)
                 [[ -f "$NV_QLDPC_PLUGIN_HOST" || "$LIST_ONLY" == true ]] \
@@ -628,7 +696,7 @@ run_examples_tier() {
     # No --setup-network: the runner configured the pair itself (the demo's
     # helper resolves ports via ibdev2netdev, which cannot see rxe devices).
     for d in pymatching multi_error_lut nv-qldpc-decoder trt_decoder; do
-        local name="examples/qpu-kernel/cpu_roce/$d" extra=""
+        local name="examples/qpu-kernel/cpu_roce/$(lane_label "$d")" extra=""
         [[ "$ROCE_READY" == true || "$LIST_ONLY" == true ]] \
             || { skip_lane "$name" "no cpu_roce pair (--roce-pair not set / setup failed)"; continue; }
         case "$d" in
@@ -646,7 +714,7 @@ run_examples_tier() {
 
     # -- FPGA source, cpu_roce wire, host dispatch ---------------------------
     for d in pymatching multi_error_lut nv-qldpc-decoder trt_decoder; do
-        local name="examples/fpga/cpu_roce/$d" extra=""
+        local name="examples/fpga/cpu_roce/$(lane_label "$d")" extra=""
         [[ "$NO_FPGA" == true ]] && { skip_lane "$name" "--no-fpga"; continue; }
         case "$d" in
             nv-qldpc-decoder)
