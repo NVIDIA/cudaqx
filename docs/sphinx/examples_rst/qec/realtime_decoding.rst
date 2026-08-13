@@ -168,6 +168,13 @@ arguments:
          error_rate_vec: [ 0.1, 0.1, 0.1 ]
          merge_strategy: smallest_weight
 
+When the round count is not fixed until run time, describe the DEM as
+``dem_chunks`` -- named ``phases``, the ``connections`` between them, the
+``seam`` they contract on, and ``num_rounds`` -- instead of spelling out
+``H_sparse``, ``O_sparse``, and ``D_sparse``. Decoder construction expands the
+phases through ``expand_dem_chunks``. See
+:doc:`/examples_rst/qec/dyn_dem` for the chunk layout and a YAML example.
+
 The ``decoder_custom_args`` section is converted between YAML and the
 parameter map a decoder's constructor receives using a *parameter schema*
 registered under the decoder's name. All built-in decoders ship with a

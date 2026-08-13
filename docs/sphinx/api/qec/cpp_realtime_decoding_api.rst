@@ -43,6 +43,7 @@ The configuration API enables setting up decoders before circuit execution. Deco
 .. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_file
 .. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_str
 .. doxygenfunction:: cudaq::qec::decoding::config::finalize_decoders
+.. doxygenfunction:: cudaq::qec::decoding::config::expand_dem_chunks
 
 Helper Functions
 ----------------
