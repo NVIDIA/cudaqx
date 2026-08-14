@@ -12,6 +12,9 @@
 #include "py_decoding_config.h"
 #include "py_dem_sampling.h"
 #include "py_surface_code.h"
+#ifdef CUDAQX_QEC_HAS_PLAYBACK_EMULATOR
+#include "py_playback_emulator.h"
+#endif
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
@@ -28,6 +31,9 @@ NB_MODULE(_pycudaqx_qec_the_suffix_matters_cudaq_qec, mod) {
   cudaq::qec::decoding::bindDecoding(mod);
   cudaq::qec::dem_sampler::bindDemSampling(mod);
   cudaq::qec::surface_code::bindSurfaceCode(mod);
+#ifdef CUDAQX_QEC_HAS_PLAYBACK_EMULATOR
+  cudaq::qec::playback::bindPlaybackEmulator(mod);
+#endif
   // Suppress nanobind's reference-leak warnings.
   //
   // Background: nanobind runs leak detection when its internal state capsule is

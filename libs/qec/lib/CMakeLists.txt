@@ -226,3 +226,7 @@ install(DIRECTORY ${CUDAQX_QEC_INCLUDE_DIR}/cudaq
 )
 
 add_subdirectory(realtime)
+
+# The playback emulator (library, CLI, python bindings, tests) is
+# self-contained under tools/playback-emulator/ -- see
+# tools/playback-emulator/CMakeLists.txt, added from tools/CMakeLists.txt.

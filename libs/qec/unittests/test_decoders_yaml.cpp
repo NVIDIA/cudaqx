@@ -1310,3 +1310,98 @@ TEST(DecoderYAMLTest, NonSchemaKeysDroppedFromDecoderParamsAndEmission) {
   // The stored args are untouched -- only the derived views are filtered.
   EXPECT_TRUE(config.decoder_custom_args.map().contains("not_a_real_param"));
 }
+
+#ifdef CUDAQX_QEC_HAS_CHROMOBIUS
+// Four detectors carrying the colour/basis annotation chromobius decodes from,
+// matching the model used by the chromobius unit tests.
+constexpr const char *kChromobiusDem = R"DEM(
+error(0.1) D0 D1
+error(0.1) D0 D1 D2
+error(0.1) D0 L0
+error(0.1) D1 D2 D3
+error(0.1) D2 D3
+error(0.1) D3
+detector(0, 0, 0, 1) D0
+detector(1, 0, 0, 2) D1
+detector(2, 0, 0, 0) D2
+detector(3, 0, 0, 1) D3
+)DEM";
+
+/// Writes the model to a file, since a config names a DEM by path.
+class ScopedDemFile {
+public:
+  ScopedDemFile() {
+    static int counter = 0;
+    path_ = std::filesystem::temp_directory_path() /
+            ("unblock-" + std::to_string(getpid()) + "-" +
+             std::to_string(counter++) + ".dem");
+    std::ofstream(path_) << kChromobiusDem;
+  }
+  ~ScopedDemFile() {
+    std::error_code ec;
+    std::filesystem::remove(path_, ec);
+  }
+  std::string path() const { return path_.string(); }
+
+private:
+  std::filesystem::path path_;
+};
+
+TEST(ChromobiusOnDecodingServer, ConstructsFromARawDemSource) {
+  ScopedDemFile dem;
+
+  // No H_sparse and no O_sparse: the DEM is the model, and chromobius installs
+  // the observable mapping its results are expressed in.
+  cudaq::qec::decoding::config::decoder_config dc;
+  dc.id = 0;
+  dc.type = "chromobius";
+  dc.stim_dem_path = dem.path();
+  dc.D_sparse = {0, -1, 1, -1, 2, -1, 3, -1};
+
+  cudaq::qec::decoding::config::multi_decoder_config mc;
+  mc.decoders.push_back(dc);
+  ASSERT_EQ(cudaq::qec::decoding::config::configure_decoders(mc), 0);
+  cudaq::qec::decoding::config::finalize_decoders();
+}
+
+TEST(ChromobiusOnDecodingServer, MatrixOnlyConfigStillFails) {
+  // The converse: without a DEM source chromobius cannot be built, which is
+  // what naming a DEM lifts. If this ever passes, the test above proves
+  // nothing.
+  auto dc = create_test_sample_realtime_decoder_config(0);
+  dc.type = "chromobius";
+
+  cudaq::qec::decoding::config::multi_decoder_config mc;
+  mc.decoders.push_back(dc);
+  EXPECT_NE(cudaq::qec::decoding::config::configure_decoders(mc), 0);
+  cudaq::qec::decoding::config::finalize_decoders();
+}
+
+TEST(ChromobiusOnDecodingServer, DemReachesANestedGlobalDecoder) {
+  ScopedDemFile dem;
+
+  // The nesting half: a DEM-sourced entry hands the model text down through
+  // global_decoder_params, which is where trt_decoder builds chromobius from.
+  cudaq::qec::decoding::config::decoder_config dc;
+  dc.id = 0;
+  dc.type = "trt_decoder";
+  dc.stim_dem_path = dem.path();
+  dc.D_sparse = {0, -1, 1, -1, 2, -1, 3, -1};
+  dc.decoder_custom_args.map().insert("global_decoder",
+                                      std::string{"chromobius"});
+  dc.decoder_custom_args.map().insert("global_decoder_params",
+                                      cudaqx::heterogeneous_map{});
+
+  auto params = cudaq::qec::decoding::host::prepare_decoder_params(dc);
+  ASSERT_TRUE(params.contains("global_decoder_params"));
+  const auto global_params =
+      params.get<cudaqx::heterogeneous_map>("global_decoder_params");
+  ASSERT_TRUE(global_params.contains("stim_dem"));
+
+  // What trt_decoder passes to decoder::get() must build the decoder the
+  // config named.
+  auto global_decoder = cudaq::qec::decoder::get(
+      "chromobius", global_params.get<std::string>("stim_dem"), global_params);
+  EXPECT_EQ(global_decoder->get_syndrome_size(), 4);
+}
+#endif // CUDAQX_QEC_HAS_CHROMOBIUS

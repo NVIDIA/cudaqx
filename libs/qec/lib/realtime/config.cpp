@@ -281,17 +281,25 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapOptional("dispatch", config.dispatch,
                    cudaq::qec::decoding::config::DecoderDispatch::host);
     io.mapOptional("cuda_device_id", config.cuda_device_id);
-    io.mapRequired("block_size", config.block_size);
-    io.mapRequired("syndrome_size", config.syndrome_size);
-    io.mapRequired("H_sparse", config.H_sparse);
-    io.mapRequired("O_sparse", config.O_sparse);
+    io.mapOptional("stim_dem_path", config.stim_dem_path, std::string{});
+    // A DEM-sourced decoder derives these, so they cannot be required at the
+    // parser; create_realtime_decoder() decides which model keys it needs.
+    io.mapOptional("block_size", config.block_size, std::uint64_t{0});
+    io.mapOptional("syndrome_size", config.syndrome_size, std::uint64_t{0});
+    io.mapOptional("H_sparse", config.H_sparse, std::vector<std::int64_t>{});
+    io.mapOptional("O_sparse", config.O_sparse, std::vector<std::int64_t>{});
     io.mapRequired("D_sparse", config.D_sparse);
+
+    // A DEM-sourced decoder derives its own dimensions, so the checks below
+    // that compare against syndrome_size do not apply to it; the D row count
+    // is checked against the constructed decoder instead.
+    const bool from_dem = !config.stim_dem_path.empty();
 
     // Validate that the number of rows in the H_sparse vector is equal to
     // syndrome_size.
     auto num_H_rows =
         std::count(config.H_sparse.begin(), config.H_sparse.end(), -1);
-    if (num_H_rows != config.syndrome_size) {
+    if (!from_dem && num_H_rows != config.syndrome_size) {
       throw std::runtime_error(
           "Number of rows in H_sparse vector is not equal to syndrome_size: " +
           std::to_string(num_H_rows) +
@@ -320,7 +328,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     if (!config.D_sparse.empty()) {
       auto num_D_rows =
           std::count(config.D_sparse.begin(), config.D_sparse.end(), -1);
-      if (num_D_rows != config.syndrome_size) {
+      if (!from_dem && num_D_rows != config.syndrome_size) {
         throw std::runtime_error("Number of rows in D_sparse vector is not "
                                  "equal to syndrome_size: " +
                                  std::to_string(num_D_rows) +
@@ -608,6 +616,7 @@ std::string decoder_config_json_schema() {
       {"block_size", llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
       {"syndrome_size",
        llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
+      {"stim_dem_path", llvm::json::Object{{"type", "string"}}},
       {"H_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"O_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"D_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
@@ -683,9 +692,16 @@ std::string decoder_config_json_schema() {
        llvm::json::Object{
            {"type", "object"},
            {"properties", std::move(config_properties)},
-           {"required",
-            llvm::json::Array{"id", "type", "block_size", "syndrome_size",
-                              "H_sparse", "O_sparse", "D_sparse"}},
+           {"required", llvm::json::Array{"id", "type", "D_sparse"}},
+           // Either a raw DEM or the matrix form of the same model.
+           {"oneOf",
+            llvm::json::Array{
+                llvm::json::Object{
+                    {"required",
+                     llvm::json::Array{"block_size", "syndrome_size",
+                                       "H_sparse", "O_sparse"}}},
+                llvm::json::Object{
+                    {"required", llvm::json::Array{"stim_dem_path"}}}}},
            {"additionalProperties", false},
            {"allOf", std::move(dispatch)}}},
       {"decoder_params", std::move(decoder_params)},
