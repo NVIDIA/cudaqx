@@ -1023,7 +1023,7 @@ run_fpga() {
     # device_graph ring is DEVICE_GRAPH_NUM_PAGES.
     local pb_pages="$NUM_SLOTS"
     if [[ "$DISPATCH" == "device_graph" ]]; then pb_pages="$DEVICE_GRAPH_NUM_PAGES"; fi
-    local args=( --hololink "$FPGA_IP" --per-round --config "$CONFIG_FILE"
+    local args=( --hsb-ip "$FPGA_IP" --per-round --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE" --qp-number "$SERVER_QP" --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR" --page-size "$PAGE_SIZE" --num-pages "$pb_pages" )
     $VERIFY && args+=(--verify)

@@ -44,6 +44,102 @@ Detector Error Model
 .. doxygenfunction:: cudaq::qec::decoder_context_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
 .. doxygenfunction:: cudaq::qec::dem_from_stim_text(const std::string &, bool)
 
+.. _dyn_dem_cpp_api:
+
+Dynamic DEM Construction
+========================
+
+Build a code-capacity or phenomenological DEM from CSS generator matrices
+(no Stim circuit required), or compose per-round DEM chunks that can be
+stitched and closed into a flat :cpp:struct:`cudaq::qec::detector_error_model`.
+See :doc:`/examples_rst/qec/dyn_dem` for a walkthrough.
+
+CSS matrices and noise
+----------------------
+
+.. doxygenstruct:: cudaq::qec::css_code_matrices
+    :members:
+
+.. doxygenstruct:: cudaq::qec::css_noise_params
+    :members:
+
+.. doxygenfunction:: cudaq::qec::css_matrices_from_code
+.. doxygenfunction:: cudaq::qec::dem_from_css_matrices(const css_code_matrices &, const css_noise_params &, std::size_t)
+.. doxygenfunction:: cudaq::qec::dem_from_css_matrices(const code &, const css_noise_params &, std::size_t)
+
+Extended DEM chunks
+-------------------
+
+Seam and phase identifiers
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenstruct:: cudaq::qec::seam_id
+    :members:
+
+.. doxygentypedef:: cudaq::qec::phase_id
+
+.. doxygennamespace:: cudaq::qec::seam_name
+    :members:
+
+.. doxygennamespace:: cudaq::qec::phase_name
+    :members:
+
+Chunk types
+~~~~~~~~~~~
+
+.. doxygenstruct:: cudaq::qec::extended_dem
+    :members:
+
+.. doxygenfunction:: cudaq::qec::extended_dem_from_css_matrices
+
+.. doxygenstruct:: cudaq::qec::dem_seam_spec
+    :members:
+
+.. doxygenstruct:: cudaq::qec::seam_spec_entry
+    :members:
+
+.. doxygenstruct:: cudaq::qec::dem_chunk_spec
+    :members:
+
+.. doxygenstruct:: cudaq::qec::seam_connection
+    :members:
+
+.. doxygenstruct:: cudaq::qec::phase_connection
+    :members:
+
+.. doxygenstruct:: cudaq::qec::phase_spec_entry
+    :members:
+
+.. doxygenstruct:: cudaq::qec::dem_chunks_spec
+    :members:
+
+.. doxygenfunction:: cudaq::qec::dem_chunk_from_spec
+.. doxygenfunction:: cudaq::qec::dem_chunks_from_spec
+
+Stitch, close, and merge
+------------------------
+
+.. doxygenenum:: cudaq::qec::prior_combine_mode
+
+.. doxygenfunction:: cudaq::qec::dem_stitch
+.. doxygenfunction:: cudaq::qec::dem_stitch_all
+.. doxygenfunction:: cudaq::qec::dem_stitch_merged
+.. doxygenfunction:: cudaq::qec::dem_close
+.. doxygenfunction:: cudaq::qec::dem_close_all
+.. doxygenfunction:: cudaq::qec::dem_merge_duplicate_columns
+.. doxygenfunction:: cudaq::qec::are_dem_columns_unique
+.. doxygenfunction:: cudaq::qec::assert_dem_columns_unique
+
+Streaming decoder maps
+----------------------
+
+.. doxygenfunction:: cudaq::qec::dem_chunk_rounds
+.. doxygenfunction:: cudaq::qec::dem_chunks_to_rounds
+.. doxygenfunction:: cudaq::qec::dem_chunks_to_detector_round
+.. doxygenfunction:: cudaq::qec::dem_chunks_to_d_sparse
+.. doxygenfunction:: cudaq::qec::dem_chunks_to_o_sparse
+.. doxygenfunction:: cudaq::qec::dem_chunks_to_pcm
+
 .. _dem_sampling_cpp_api:
 
 Detector Error Model (DEM) Sampling
