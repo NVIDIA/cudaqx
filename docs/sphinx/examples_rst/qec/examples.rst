@@ -13,6 +13,7 @@ Examples that illustrate how to use CUDA-QX for application development are avai
       Decoders <decoders.rst>
       Improving Relay BP Decoding With Gamma Ensembles <nv_qldpc_gamma_ensemble_user_guide.rst>
       DEM Sampling <dem_sampling.rst>
+      Dynamic DEM Construction <dyn_dem.rst>
       Real-Time Decoding <realtime_decoding.rst>
       Realtime Decoding with CUDA-Q Decoding Server <realtime_decoding_demo.rst>
       AI Predecoder with CUDA-Q Realtime <realtime_predecoder_pymatching.rst>
