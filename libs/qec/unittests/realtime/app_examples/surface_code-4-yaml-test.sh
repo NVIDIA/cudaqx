@@ -392,6 +392,28 @@ if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
     exit 1
   fi
   echo "External decoding server ready on UDP port $SERVER_PORT"
+
+  # The server serves each decoder on its own ring and the READY line carries
+  # one ring<id>=<port> token per decoder.  Export ring 1..N-1 as
+  # QEC_DECODING_SERVER_PORT_<id> so the app wires each logical qubit's
+  # device_call session to its decoder's ring (same pattern as the
+  # surface_code-1 two-process driver).  Requests execute inline on the
+  # server's per-ring dispatcher threads, so decoder concurrency requires the
+  # per-decoder-ring topology — a single shared ring serializes decodes.
+  # Every expected ring token is REQUIRED: a missing token would silently
+  # route that decoder over the shared default ring, and the test would no
+  # longer exercise per-ring dispatch.
+  READY_LINE=$(grep -m1 "QEC_DECODING_SERVER_READY" "$SERVER_LOG")
+  for ((id = 1; id < NUM_LOGICAL; id++)); do
+    RING_PORT=$(echo "$READY_LINE" | sed -n "s/.*ring${id}=\([0-9]\+\).*/\1/p")
+    if [[ -z "$RING_PORT" ]]; then
+      echo "FAIL: READY line has no ring${id}= token for decoder ${id}"
+      echo "$READY_LINE"
+      exit 1
+    fi
+    export "QEC_DECODING_SERVER_PORT_${id}=${RING_PORT}"
+    echo "Decoder ${id} ring on port $RING_PORT"
+  done
 fi
 
 # -------------------------------------------------------------------------- #

@@ -109,18 +109,41 @@ cudaqx::heterogeneous_map prepare_decoder_params(
 }
 
 std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
-    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
-  if (decoder_config.id < 0 || static_cast<std::uint64_t>(decoder_config.id) >
-                                   std::numeric_limits<std::uint32_t>::max())
+    const cudaq::qec::decoding::config::decoder_config &config_in) {
+  if (config_in.id < 0 || static_cast<std::uint64_t>(config_in.id) >
+                              std::numeric_limits<std::uint32_t>::max())
     throw std::invalid_argument("Decoder ID is outside the uint32_t range: " +
-                                std::to_string(decoder_config.id));
+                                std::to_string(config_in.id));
+
+  // A chunk-form configuration names its DEM one round at a time. Expand it
+  // here so everything below is written against the flat form only.
+  auto expanded_config = config_in;
+  const auto closed_dem =
+      cudaq::qec::decoding::config::expand_dem_chunks(expanded_config);
+  const auto &decoder_config = expanded_config;
+
   if (decoder_config.D_sparse.empty())
     throw std::runtime_error(
         "D_sparse must be provided in decoder configuration");
+  // pcm_from_sparse_vec() turns an empty H_sparse into an all-zero matrix
+  // rather than failing, so without this check a config that described no DEM
+  // at all would build a decoder whose parity-check matrix decodes nothing.
+  if (decoder_config.H_sparse.empty())
+    throw std::runtime_error(
+        "H_sparse must be provided to build decoder " +
+        std::to_string(decoder_config.id) +
+        ", either directly or by way of dem_chunks and num_rounds.");
 
   auto t0 = std::chrono::high_resolution_clock::now();
   CUDA_QEC_INFO("Creating decoder {} of type {}", decoder_config.id,
                 decoder_config.type);
+
+  auto params = prepare_decoder_params(decoder_config);
+  // The phases carry a prior per fault, which the derived matrices do not. A
+  // hand-written flat configuration would have had to pass these through
+  // decoder_custom_args, so supply them here for the ones that did not.
+  if (closed_dem && !params.contains("error_rate_vec"))
+    params.insert("error_rate_vec", closed_dem->error_rates);
 
   auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
                                              decoder_config.syndrome_size,
@@ -129,11 +152,10 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
                                           decoder_config.O_sparse.end(), -1);
   // Materialize O before decoder construction to validate its sparse shape and
   // column indices for every decoder type. TRT also receives this matrix in its
-  // constructor parameters through prepare_decoder_params() below.
+  // constructor parameters through prepare_decoder_params() above.
   (void)cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  auto decoder = cudaq::qec::get_decoder(
-      decoder_config.type, pcm, prepare_decoder_params(decoder_config));
+  auto decoder = cudaq::qec::get_decoder(decoder_config.type, pcm, params);
   decoder->set_decoder_id(decoder_config.id);
   decoder->set_O_sparse(decoder_config.O_sparse);
   decoder->set_D_sparse(decoder_config.D_sparse);
