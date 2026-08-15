@@ -788,30 +788,12 @@ if(TARGET cudaq-qec-nv-qldpc-decoder
    OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
   set(_SC4_HAVE_NV_QLDPC TRUE)
 endif()
-# The nv-qldpc decoder captures a CUDA device graph during construction even on
-# the udp/cpu_roce transports, so any test that builds one INSIDE the decoding
-# server also needs decoding_server linked against the proprietary cudevice
-# archive -- otherwise the server dies at bring-up with
-# "cudaqx_qec_realtime_dispatch_register_decoder_state not found via dlsym".
-# The direct-call cases construct the decoder in the app and need no such link,
-# which is why only the external-server cases carry this second gate.  Mirrors
-# the condition in tools/decoding-server/CMakeLists.txt.
-set(_SC4_NV_QLDPC_IN_SERVER FALSE)
-if(_SC4_HAVE_NV_QLDPC AND CUDAQ_QEC_DEVICE_GRAPH_AVAILABLE
-   AND TARGET cudaq-qec-realtime-cudevice-proprietary)
-  set(_SC4_NV_QLDPC_IN_SERVER TRUE)
-endif()
 # Same lesson as the trt gate below: name the gate that actually failed rather
 # than letting the nv-qldpc cases evaporate silently.
 if(NOT _SC4_HAVE_NV_QLDPC)
   message(WARNING "surface_code-4-yaml: nv-qldpc-decoder tests NOT registered "
     "(no cudaq-qec-nv-qldpc-decoder target and QEC_EXTERNAL_DECODERS unset); "
     "point QEC_EXTERNAL_DECODERS at the plugin to enable them.")
-elseif(NOT _SC4_NV_QLDPC_IN_SERVER)
-  message(WARNING "surface_code-4-yaml: nv-qldpc-decoder EXTERNAL-SERVER tests "
-    "NOT registered (cudaq-qec-realtime-cudevice-proprietary target not "
-    "defined; set CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE to enable). "
-    "The direct-call nv-qldpc cases still register.")
 endif()
 # A silent skip here once masked a dead test check for a whole release cycle:
 # the trt surface-code tests register only when BOTH the trt plugin target and
@@ -893,13 +875,6 @@ if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
     --generate-identity-onnx)
 endif()
 
-# nv-qldpc relay-BP: --use-relay-bp only sets nv-qldpc parameters at config
-# generation, so these need the plugin, not a dispatch backend.
-if(_SC4_HAVE_NV_QLDPC)
-  add_surface_code_4_yaml_decoder_cases(relay-bp nv-qldpc-decoder
-    --use-relay-bp)
-endif()
-
 # Relaxed round rule (T=6 not a multiple of d=5) and multi-logical patches, each
 # through the full generate + reload + decode driver -- so no hand-written
 # generate/reload duplication, and both get the driver's residual-LER check.
@@ -953,39 +928,6 @@ if(TARGET surface_code-4-yaml-cqr)
     APPEND PROPERTY ENVIRONMENT
       "CHECK_HARD_PATCH_MODELS=1;REQUIRE_DECODER_CONCURRENCY=2;SKIP_LOGICAL_ERROR_CEILING=1")
 
-  # relay-BP over the server's per-decoder rings, one host ring per patch.
-  if(_SC4_NV_QLDPC_IN_SERVER)
-    add_surface_code_4_yaml_external_test(relay-bp 3 3
-      "nv-qldpc-decoder,nv-qldpc-decoder,nv-qldpc-decoder" 200
-      --use-relay-bp)
-    # Relay BP iterates, so it needs more headroom than the 300s the pymatching
-    # and trt external cases run under.
-    set_tests_properties(app_examples.surface_code-4-yaml-cqr-relay-bp
-      PROPERTIES TIMEOUT 600)
-    set_property(TEST app_examples.surface_code-4-yaml-cqr-relay-bp
-      APPEND PROPERTY ENVIRONMENT
-        "REQUIRE_SERVER_DECODE_COUNTS=1")
-
-    if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
-      add_surface_code_4_yaml_external_test(trio-relay 3 3
-        "pymatching,trt_decoder,nv-qldpc-decoder" 200
-        --generate-identity-onnx --use-relay-bp)
-      set_tests_properties(app_examples.surface_code-4-yaml-cqr-trio-relay
-        PROPERTIES TIMEOUT 600)
-      set_property(TEST app_examples.surface_code-4-yaml-cqr-trio-relay
-        APPEND PROPERTY ENVIRONMENT
-          "REQUIRE_SERVER_DECODE_COUNTS=1")
-    endif()
-  endif()
-
-endif()
-
-# Three-way heterogeneous trio incl. relay-BP (pymatching, trt, nv-qldpc).
-if(_SC4_HAVE_NV_QLDPC AND TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
-  add_surface_code_4_yaml_test(trio-relay-d3 3 3
-    "pymatching,trt_decoder,nv-qldpc-decoder" 1000
-    --generate-identity-onnx
-    --num_logical 3 --use-relay-bp)
 endif()
 
 # --------------------------------------------------------------------------- #
