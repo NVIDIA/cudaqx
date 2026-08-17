@@ -124,7 +124,7 @@ public:
       if (n < 0) {
         // No dedicated "local timeout" status exists in RpcStatus; a
         // client-side synthesized timeout/hard-error is reported as
-        // INTERNAL_ERROR rather than hanging 
+        // INTERNAL_ERROR rather than hanging
         return RpcStatus::INTERNAL_ERROR;
       }
       if (static_cast<std::size_t>(n) < sizeof(RPCResponse))

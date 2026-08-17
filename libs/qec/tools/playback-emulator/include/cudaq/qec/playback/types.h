@@ -56,16 +56,15 @@ inline const char *to_string(operation op) {
 
 /// Final outcome of one record. For `reset`/`enqueue`/`get_corrections` this
 /// is the wire `RpcStatus` (see decoder_rpc_wire_format.h) cast into this
-/// field. For `stream_until` it is instead one of five termination
+/// field. For `stream_until` it is instead one of four termination
 /// reasons -- the two enumerations are disjoint (RpcStatus
-/// occupies 0..6) so a reader can tell which one a given record used from
+/// occupies 0..7) so a reader can tell which one a given record used from
 /// `record::op` alone.
 enum class stream_terminate : std::int32_t {
   READY = 100,
   SOURCE_EXHAUSTED = 101,
   EXHAUSTED_ROUNDS = 102,
-  TIMEOUT = 103,
-  ERROR = 104,
+  ERROR = 103,
 };
 
 inline const char *to_string(stream_terminate t) {
@@ -76,27 +75,11 @@ inline const char *to_string(stream_terminate t) {
     return "SOURCE_EXHAUSTED";
   case stream_terminate::EXHAUSTED_ROUNDS:
     return "EXHAUSTED_ROUNDS";
-  case stream_terminate::TIMEOUT:
-    return "TIMEOUT";
   case stream_terminate::ERROR:
     return "ERROR";
   }
   return "unknown";
 }
-
-/// Parameters unique to `stream_until`. Only meaningful when
-/// `event::op == operation::stream_until`.
-struct stream_params {
-  std::uint32_t source_id = kNoSource;
-  /// Pacing, in ticks. 0 means unpaced (rounds fire as fast as the decoder
-  /// answers); the parser defaults this to 1 tick (paced) when `every=` is
-  /// omitted, and only sets it to 0 on an explicit `every=0` 
-  std::uint64_t every_ticks = 1;
-  /// Bounded, always. Parser applies a finite default when
-  /// omitted.
-  std::uint32_t max_rounds = 1000;
-  std::uint64_t timeout_ns = 1'000'000'000ull; // 1 s default
-};
 
 /// One line of the parsed playback schedule. Data and timing only -- no
 /// blocking/retry/result-size semantics, which are properties of the
@@ -105,12 +88,21 @@ struct event {
   std::uint64_t deadline_ns = 0; // absolute offset from t0, resolved at parse
   std::uint64_t decoder_id = 0;  // routing key -- required on every event
   operation op = operation::reset;
-  std::uint32_t source_id = kNoSource; // syndrome source for enqueue, or none
-  std::uint32_t syndrome_offset = 0;   // into schedule::syndrome_arena
+  // syndrome source for enqueue/enqueue_data/stream_until (one op per
+  // event, so one source_id suffices for all of them); kNoSource otherwise.
+  std::uint32_t source_id = kNoSource;
+  std::uint32_t syndrome_offset = 0; // into schedule::syndrome_arena
   std::uint32_t syndrome_count = 0;
   std::uint32_t expected_offset = 0; // into schedule::expected_arena
   std::uint32_t expected_count = 0;
-  stream_params stream; // stream_until only
+
+  // -- stream_until only; meaningless (left default) for every other op --
+  /// Pacing, in ticks. 0 means unpaced (rounds fire as fast as the decoder
+  /// answers); the parser defaults this to 1 tick (paced) when `every=` is
+  /// omitted, and only sets it to 0 on an explicit `every=0`
+  std::uint64_t stream_every_ticks = 1;
+  /// Bounded, always: maximum number of streamed rounds before aborting
+  std::uint32_t stream_max_rounds = 1000;
 };
 
 /// The parsed input. Bits live in shared arenas; events hold

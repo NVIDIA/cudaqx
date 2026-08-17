@@ -112,7 +112,6 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .value("READY", stream_terminate::READY)
       .value("SOURCE_EXHAUSTED", stream_terminate::SOURCE_EXHAUSTED)
       .value("EXHAUSTED_ROUNDS", stream_terminate::EXHAUSTED_ROUNDS)
-      .value("TIMEOUT", stream_terminate::TIMEOUT)
       .value("ERROR", stream_terminate::ERROR);
 
   nb::class_<record>(m, "record")

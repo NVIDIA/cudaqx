@@ -66,32 +66,6 @@ std::uint64_t parse_u64(const std::string &s, const char *what) {
   return parse_uint<std::uint64_t>(s, what);
 }
 
-/// "<number><unit>" where unit is ns|us|ms|s (bare number = ns).
-std::uint64_t parse_duration_ns(const std::string &s) {
-  std::size_t split = s.size();
-  while (split > 0 && !std::isdigit(static_cast<unsigned char>(s[split - 1])))
-    --split;
-  if (split == 0)
-    throw std::invalid_argument("malformed duration '" + s + "'");
-  const std::uint64_t value = parse_u64(s.substr(0, split), "duration");
-  const std::string unit = s.substr(split);
-  std::uint64_t multiplier = 1;
-  if (unit.empty() || unit == "ns")
-    multiplier = 1;
-  else if (unit == "us")
-    multiplier = 1'000;
-  else if (unit == "ms")
-    multiplier = 1'000'000;
-  else if (unit == "s")
-    multiplier = 1'000'000'000;
-  else
-    throw std::invalid_argument("unknown duration unit '" + unit + "'");
-  std::uint64_t out = 0;
-  if (__builtin_mul_overflow(value, multiplier, &out))
-    throw std::invalid_argument("duration '" + s + "' overflows");
-  return out;
-}
-
 /// Bit-string token: only '0'/'1' characters. Appends one byte (0x00/0x01)
 /// per character to `arena`
 void append_bits(std::vector<std::uint8_t> &arena, const std::string &s,
@@ -211,18 +185,16 @@ schedule parse(std::string_view text,
         bool have_source = false;
         // Paced at the schedule's tick unless an explicit every= says
         // otherwise 
-        e.stream.every_ticks = 1;
+        e.stream_every_ticks = 1;
         for (const auto &tok : operands) {
           std::string value;
           if (key_is(tok, "source", value)) {
-            e.stream.source_id = parse_u32(value, "source");
+            e.source_id = parse_u32(value, "source");
             have_source = true;
           } else if (key_is(tok, "every", value)) {
-            e.stream.every_ticks = parse_u64(value, "every");
+            e.stream_every_ticks = parse_u64(value, "every");
           } else if (key_is(tok, "max_rounds", value)) {
-            e.stream.max_rounds = parse_u32(value, "max_rounds");
-          } else if (key_is(tok, "timeout", value)) {
-            e.stream.timeout_ns = parse_duration_ns(value);
+            e.stream_max_rounds = parse_u32(value, "max_rounds");
           } else if (std::all_of(tok.begin(), tok.end(), [](unsigned char c) {
                        return c == '0' || c == '1';
                      })) {

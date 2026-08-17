@@ -15,10 +15,16 @@
 #include "cudaq/qec/playback/emulator.h"
 
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstring>
 #include <ctime>
-#include <limits>
+#include <functional>
+#include <future>
+#include <mutex>
+#include <optional>
 #include <sstream>
+#include <thread>
 #include <unordered_map>
 
 namespace cudaq::qec::playback {
@@ -232,11 +238,9 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
 
     if ((e.op == operation::enqueue && e.source_id != kNoSource) ||
         e.op == operation::enqueue_data || e.op == operation::stream_until) {
-      const auto src_id =
-          e.op == operation::stream_until ? e.stream.source_id : e.source_id;
-      if (!sources.contains(src_id))
+      if (!sources.contains(e.source_id))
         throw std::invalid_argument("no syndrome_source registered for source_id=" +
-                               std::to_string(src_id));
+                               std::to_string(e.source_id));
     }
   }
 
@@ -307,53 +311,189 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
 
 namespace {
 
-/// One round of stream_until. Returns once a terminal
-/// status is reached; `rec` and `result` are updated in place.
-/// `next_request_id` is run()'s single global counter, shared across every
-/// event -- each RPC this loop sends increments it by 1.
+/// Outcome of one get_corrections issued by stream_until's listener.
+struct listener_reply {
+  RpcStatus status = RpcStatus::INTERNAL_ERROR;
+  std::vector<std::uint8_t> bits; // valid only when status == OK
+};
+
+/// Runs stream_until's blocking get_corrections calls off the main thread.
+/// Created once per run() and reused by every stream_until event
+class listener_worker {
+public:
+  listener_worker() : thread_([this] { loop(); }) {}
+  ~listener_worker() {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      stop_ = true;
+    }
+    cv_.notify_one();
+    thread_.join();
+  }
+  listener_worker(const listener_worker &) = delete;
+  listener_worker &operator=(const listener_worker &) = delete;
+
+  /// Hands `job` to the background thread and returns a future for its
+  /// result. Returns once that thread has picked the job up, so the caller
+  /// can count on the request being in flight rather than still waiting to
+  /// be scheduled.
+  std::future<listener_reply> submit(std::function<listener_reply()> job) {
+    std::promise<listener_reply> promise;
+    auto future = promise.get_future();
+    std::unique_lock<std::mutex> lock(mu_);
+    job_ = std::move(job);
+    promise_ = std::move(promise);
+    cv_.notify_one();
+    taken_.wait(lock, [this] { return !job_; });
+    return future;
+  }
+
+private:
+  void loop() {
+    std::unique_lock<std::mutex> lock(mu_);
+    for (;;) {
+      cv_.wait(lock, [this] { return job_ || stop_; });
+      if (!job_)
+        return;
+      auto job = std::move(job_);
+      auto promise = std::move(promise_);
+      job_ = nullptr;
+      taken_.notify_one();
+      lock.unlock();
+      promise.set_value(job());
+      lock.lock();
+    }
+  }
+
+  std::mutex mu_;
+  std::condition_variable cv_;    // a job was submitted, or stop_ was set
+  std::condition_variable taken_; // the submitted job was picked up
+  std::function<listener_reply()> job_;
+  std::promise<listener_reply> promise_;
+  bool stop_ = false;
+  std::thread thread_; // last, so loop() only ever sees initialized members
+};
+
+/// Forces a real yield wherever a thread would otherwise check "is the other
+/// side done yet?" in a tight loop: (1) the shortest gap between two of the
+/// listener's own get_corrections calls, and (2) how long the main thread's
+/// round-generation loop blocks on the listener's future before checking
+/// again. Neither use changes correctness -- a ready result or an actual
+/// reply is noticed the instant it happens, not delayed until the next tick
+/// of this gap -- it only bounds how long a thread can go without giving up
+/// its timeslice. Without it, a session with no real wait to speak of
+/// (in-process, null) can spin one thread flat out and starve the other of
+/// a core entirely on a busy host: a correctness problem (the rounds/polls
+/// it should be making never happen), not just wasted CPU.
+constexpr std::uint64_t kMinYieldGapNs = 50'000;
+
+/// One stream_until event. Returns once a terminal status is reached; `rec`
+/// and `result` are updated in place. 
+/// 
+/// `next_request_id` is run()'s single global counter, shared across every event 
+/// -- each RPC sent here increments it by 1. The listener claims ids from it too, 
+/// which is safe precisely because this thread never touches it between submitting 
+/// the job and collecting its result.
+///
+/// The server dispatches every request for a decoder -- enqueue and
+/// get_corrections alike -- inline on one thread, strictly in arrival order
+/// (see DecodingSession's "Inline HOST_CALL path"), so a get_corrections
+/// queued behind a slow synchronous decode cannot be answered until that
+/// decode finishes. `worker` therefore issues blocking get_corrections
+/// calls whose reply lands when the server becomes free to answer, while this
+/// thread independently keeps generating rounds at the schedule's cadence until
+/// that reply arrives or a local bound (max_rounds, source exhaustion, an
+/// oversized frame) is hit.
+///
+/// A local bound sets `abort_listener`, which the listener checks between
+/// polls, so it can be safely joined
+///
+/// Rounds are cached and flushed in one go only once that reply is in
+/// hand: DecodingSession::enqueue_core resets shot_state unconditionally,
+/// so sending a round before the outcome is known could clobber a
+/// correction that became ready in the meantime.
 void run_stream_until(run_plan &plan, const event &e, std::uint64_t t0, session &s,
                       record &rec, run_result &result, std::uint64_t slack,
-                      std::uint32_t &next_request_id) {
-  auto &source = *plan.sources.at(e.stream.source_id);
+                      std::uint32_t &next_request_id, listener_worker &worker) {
+  auto &source = *plan.sources.at(e.source_id);
   const std::uint32_t return_size = return_size_for(e);
   const auto caps = s.caps();
-  const std::uint64_t timeout_deadline = e.stream.timeout_ns > 0
-                                             ? now_ns() + e.stream.timeout_ns
-                                             : std::numeric_limits<std::uint64_t>::max();
+
+  std::atomic<bool> abort_listener{false};
+  const std::uint32_t rid_gc = next_request_id++;
+
+  // Submit the listener job to the background thread and await response
+  auto future = worker.submit([&s, &e, &abort_listener, &next_request_id, return_size,
+                               rid_gc] {
+    std::vector<std::uint8_t> bits(wire::bit_packed_bytes(return_size));
+    for (std::uint32_t rid = rid_gc;; rid = next_request_id++) {
+      auto gc_frame =
+          build_get_corrections_frame(e.decoder_id, return_size, /*reset=*/true, rid);
+      std::size_t reply_len = 0;
+      const std::uint64_t sent_ns = now_ns();
+      const auto raw_status =
+          s.send_sync({gc_frame.data(), gc_frame.size()}, bits, reply_len);
+      const auto status = reject_truncated_reply(raw_status, reply_len, return_size);
+      if (status == RpcStatus::OK) {
+        bits.resize(reply_len);
+        return listener_reply{status, std::move(bits)};
+      }
+      if (status != RpcStatus::NOT_READY)
+        return listener_reply{status, {}}; // a genuine wire error ends the stream
+      if (abort_listener.load(std::memory_order_acquire))
+        return listener_reply{status, {}}; // the main thread is done; let its reason win
+      if (now_ns() - sent_ns < kMinYieldGapNs)
+        std::this_thread::sleep_for(std::chrono::nanoseconds(kMinYieldGapNs));
+    }
+  });
+
+  // Always generate one round before first checking the listener
   std::uint64_t next = t0 + e.deadline_ns;
   std::uint32_t rounds = 0;
-  stream_terminate term = stream_terminate::ERROR;
-
-  while (true) {
-    if (rounds >= e.stream.max_rounds) {
-      term = stream_terminate::EXHAUSTED_ROUNDS;
-      break;
-    }
-    if (now_ns() > timeout_deadline) {
-      term = stream_terminate::TIMEOUT;
+  std::vector<std::vector<std::uint8_t>> cached;
+  std::optional<stream_terminate> local_give_up;
+  do {
+    if (cached.size() >= e.stream_max_rounds) {
+      local_give_up = stream_terminate::EXHAUSTED_ROUNDS;
       break;
     }
 
     auto bits = source.next_round();
     if (bits.empty()) {
-      term = stream_terminate::SOURCE_EXHAUSTED;
+      local_give_up = stream_terminate::SOURCE_EXHAUSTED;
       break;
     }
 
-    if (e.stream.every_ticks > 0) {
+    // Ensure that the frame size is within the session's limits
+    if (caps.max_frame_bytes != 0 &&
+        build_enqueue_frame(e.decoder_id, 0, bits.data(), bits.size()).size() >
+            caps.max_frame_bytes) {
+      local_give_up = stream_terminate::ERROR;
+      break;
+    }
+
+    if (e.stream_every_ticks > 0) {
       wait_until(next, slack);
-      next += e.stream.every_ticks * plan.sched.tick_ns;
+      next += e.stream_every_ticks * plan.sched.tick_ns;
     }
 
+    cached.push_back(std::move(bits));
+    // Unpaced (every==0): this is the loop's only yield point, so sleep 
+    // allow wait_for to yield the thread, otherwise listener thread may starve.
+    // Paced (every>0): wait_until() above slept, which yields the
+    // thread -- no need to block here too.
+  } while (future.wait_for(std::chrono::nanoseconds(
+               e.stream_every_ticks > 0 ? 0 : kMinYieldGapNs)) !=
+          std::future_status::ready);
+
+  abort_listener.store(true, std::memory_order_release);
+  const listener_reply reply = future.get();
+
+  // Submit all cached syndromes
+  for (auto &bits : cached) {
     const std::uint32_t rid_enqueue = next_request_id++;
-    auto enqueue_frame =
-        build_enqueue_frame(e.decoder_id, rid_enqueue, bits.data(), bits.size());
-    if (caps.max_frame_bytes != 0 && enqueue_frame.size() > caps.max_frame_bytes) {
-      term = stream_terminate::ERROR;
-      break;
-    }
+    auto enqueue_frame = build_enqueue_frame(e.decoder_id, rid_enqueue, bits.data(), bits.size());
     s.send_async({enqueue_frame.data(), enqueue_frame.size()});
-
     if (rounds == 0) {
       rec.first_request_id = rid_enqueue;
       rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
@@ -361,28 +501,24 @@ void run_stream_until(run_plan &plan, const event &e, std::uint64_t t0, session 
     result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
     rec.syndrome_count += static_cast<std::uint32_t>(bits.size());
     ++rounds;
+  }
+  if (rounds == 0)
+    rec.first_request_id = rid_gc; // nothing was ever cached; the poll was this event's only RPC
 
-    const std::uint32_t rid_gc = next_request_id++;
-    auto gc_frame = build_get_corrections_frame(e.decoder_id, return_size, /*reset=*/true, rid_gc);
-    std::vector<std::uint8_t> reply(wire::bit_packed_bytes(return_size));
-    std::size_t reply_len = 0;
-    const auto raw_status = s.send_sync({gc_frame.data(), gc_frame.size()}, reply, reply_len);
-    const auto status = reject_truncated_reply(raw_status, reply_len, return_size);
-
-    if (status == RpcStatus::NOT_READY)
-      continue;
-    if (status == RpcStatus::OK) {
-      term = stream_terminate::READY;
-      rec.read_completed = true;
-      rec.correction_offset = static_cast<std::uint32_t>(result.correction_log.size());
-      rec.correction_count = return_size;
-      append_unpacked_bits(result.correction_log, reply.data(), return_size);
-      rec.correction_mismatch = mismatches_expected(
-          plan.sched, e, result.correction_log.data() + rec.correction_offset, return_size);
-    } else {
-      term = stream_terminate::ERROR;
-    }
-    break;
+  stream_terminate term;
+  if (reply.status == RpcStatus::OK) { // everything went well
+    term = stream_terminate::READY;
+    // Load corrections into the correction log
+    rec.read_completed = true;
+    rec.correction_offset = static_cast<std::uint32_t>(result.correction_log.size());
+    rec.correction_count = return_size;
+    append_unpacked_bits(result.correction_log, reply.bits.data(), return_size);
+    rec.correction_mismatch = mismatches_expected(
+        plan.sched, e, result.correction_log.data() + rec.correction_offset, return_size);
+  } else if (reply.status == RpcStatus::NOT_READY) { // the listener had an error
+    term = *local_give_up;
+  } else { // the main thread had an error
+    term = stream_terminate::ERROR;
   }
 
   rec.status = static_cast<std::int32_t>(term);
@@ -412,6 +548,12 @@ run_result run(std::shared_ptr<run_plan> p) {
 
   // Single global counter, incremented once per RPC actually sent to a session
   std::uint32_t next_request_id = 1;
+
+  // Spawned listener thread (if needed)
+  std::optional<listener_worker> listener;
+  if (std::any_of(sched.events.begin(), sched.events.end(),
+                  [](const event &e) { return e.op == operation::stream_until; }))
+    listener.emplace();
 
   bool aborted = false;
   for (std::size_t i = 0; i < sched.events.size() && !aborted; ++i) {
@@ -444,7 +586,7 @@ run_result run(std::shared_ptr<run_plan> p) {
     case operation::enqueue_data: {
       if (ep.has_frame) {
         // Pre-built at plan() time (raw literal bits, or a preloadable
-        // source) -- the hot path this asks for: memcpy + send.
+        // source): memcpy + send.
         const std::uint32_t rid = next_request_id++;
         set_request_id(plan.frame_arena.data() + ep.frame_offset, rid);
         rec.first_request_id = rid;
@@ -458,10 +600,7 @@ run_result run(std::shared_ptr<run_plan> p) {
                                   sched.syndrome_arena.begin() + e.syndrome_offset +
                                       e.syndrome_count);
       } else {
-        // JIT source (e.g. a stream_until on the same source_id ran
-        // immediately before this event and the round count it consumed
-        // wasn't known until it finished) -- resolve now, in schedule order,
-        // so the source's state reflects exactly what's already run.
+        // JIT source: resolve now and send
         auto &src = *plan.sources.at(e.source_id);
         auto bits = e.op == operation::enqueue_data ? src.read_data() : src.next_round();
         const auto caps = s.caps();
@@ -504,8 +643,6 @@ run_result run(std::shared_ptr<run_plan> p) {
         }
         set_request_id(plan.frame_arena.data() + ep.frame_offset, rid);
         const frame f{plan.frame_arena.data() + ep.frame_offset, ep.frame_len};
-        // Two statements, not one -- see the identical comment at the
-        // stream_until call site.
         const auto raw_status = s.send_sync(f, reply, reply_len);
         status = reject_truncated_reply(raw_status, reply_len, return_size);
         if (status != RpcStatus::NOT_READY || !plan.params.dispatch.retry_not_ready ||
@@ -527,7 +664,7 @@ run_result run(std::shared_ptr<run_plan> p) {
       break;
     }
     case operation::stream_until:
-      run_stream_until(plan, e, t0, s, rec, result, slack, next_request_id);
+      run_stream_until(plan, e, t0, s, rec, result, slack, next_request_id, *listener);
       break;
     }
 

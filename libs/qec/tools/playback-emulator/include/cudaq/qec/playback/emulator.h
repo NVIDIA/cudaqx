@@ -79,8 +79,8 @@ struct run_plan {
 /// Validate `sched` against `router`'s session capabilities and pre-build
 /// everything run()'s timing loop must not do on the hot path. Throws
 /// std::invalid_argument on any gap. `router` maps decoder_id -> session;
-/// `sources` maps a schedule's `source_id` (event::source_id /
-/// stream_params::source_id) to the syndrome_source instance it reads from.
+/// `sources` maps a schedule's `event::source_id` to the syndrome_source
+/// instance it reads from.
 /// Ownership of both the sessions and the sources stays with the caller for
 /// the lifetime of the returned run_plan.
 std::shared_ptr<run_plan>
