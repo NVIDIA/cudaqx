@@ -175,4 +175,4 @@ See also
 - :ref:`dyn_dem_python_api` — Python API reference
 - :ref:`dyn_dem_cpp_api` — C++ API reference
 - :doc:`/examples_rst/qec/realtime_decoding` — decoder configuration YAML
-- :doc:`/examples_rst/qec/dem_sampling` — sampling from a flat DEM
+- :ref:`DEM Sampling example <dem_sampling_example>` — sampling from a flat DEM

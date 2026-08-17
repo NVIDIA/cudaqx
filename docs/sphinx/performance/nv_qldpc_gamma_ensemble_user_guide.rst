@@ -80,7 +80,7 @@ All experiments below use the same circuit-level noise and decoder settings, and
    * - ``stopping_criterion``
      - ``FirstConv``
 
-.. image:: ../../../../assets/docs/relaybp_gamma_ensemble_perf.png
+.. image:: ../../../assets/docs/relaybp_gamma_ensemble_perf.png
    :align: center
    :alt: Iterations to converge, time per iteration, and mean latency versus ensemble size, for several DEMs
 
@@ -91,7 +91,7 @@ Latency Distribution
 
 One of the benefits of ensembling is that the latency distribution becomes narrower, leading to more consistent latency for hard-to-decode syndromes. Using the same decoders as above, we now focus on the behavior of the decoding latencies at various percentiles, from the median through the extreme tail.
 
-.. image:: ../../../../assets/docs/relaybp_latency_percentiles.png
+.. image:: ../../../assets/docs/relaybp_latency_percentiles.png
    :align: center
    :alt: Latency percentiles (p50, p90, p99.9, p99.99) versus ensemble size N, per code
 
@@ -102,14 +102,21 @@ Logical Error Rate Under Hard Deadlines
 
 The narrower tail can improve logical error rates considerably for decoders under hard deadlines. Suppose each decode must finish within a wall-clock budget ``t``; a decode is a success only if it both finishes within ``t`` and returns the correct logical outcome, so the logical error rate under that deadline is ``LER(t) = P(latency > t or logical error)``. Using the same decoders as above, we record both the per-syndrome latency and whether the decoded logical is correct. The plot below shows the LER versus deadline for un-ensembled Relay BP (i.e. N = 1) and for each ensemble size N; each curve is measured over 150,000 sampled syndromes per configuration at the circuit-level noise strength given above (``p = 0.002``), using the ``FirstConv`` stopping criterion.
 
-.. image:: ../../../../assets/docs/relaybp_hard_deadline_ler.png
+.. image:: ../../../assets/docs/relaybp_hard_deadline_ler.png
    :align: center
    :alt: Deadline vs LER — bicycle codes
 
 Ensembling contracts the latency tail for all three codes, resulting in substantially lower LER for certain deadlines: beyond a crossover at the tightest deadlines (where the higher per-iteration cost makes the larger ensembles slightly worse), a larger ensemble misses fewer deadlines at looser budgets and reaches a lower floor. The regime under which ensembling is beneficial for these codes depends on the code and deadline, and likely requires specific tuning based on the problem. Below is a plot of the factor by which each ensemble size lowers LER relative to un-ensembled Relay BP as a function of the deadline ``t``; values above 1 mean a lower LER than N = 1. 
 
-.. image:: ../../../../assets/docs/relaybp_ler_multiplier.png
+.. image:: ../../../assets/docs/relaybp_ler_multiplier.png
    :align: center
    :alt: LER improvement multiplier over un-ensembled Relay BP versus hard deadline, per code
 
 At the tightest deadlines the larger ensembles are briefly worse (their higher per-iteration cost delays the fastest decodes), but past that crossover a larger ensemble lowers LER substantially — by up to ~41× for ``[[144,12,12]]`` and ~89× for ``[[288,12,18]]`` at deadlines of ~1-5 ms. For those two codes the multiplier then falls back toward N = 1 at loose deadlines, where both the ensemble and N = 1 reach their near-zero logical error floors; for ``[[72,12,6]]`` it settles at ~2×.
+
+See Also
+++++++++
+
+* :ref:`Quantum Low-Density Parity-Check Decoder <qldpc_decoder>` -- the nv-qldpc-decoder overview
+* :ref:`Getting Started with the NVIDIA QLDPC Decoder <examples_rst/qec/decoders:Getting Started with the NVIDIA QLDPC Decoder>` -- runnable example
+* :ref:`C++ <nv_qldpc_decoder_api_cpp>` and :ref:`Python <nv_qldpc_decoder_api_python>` API reference
