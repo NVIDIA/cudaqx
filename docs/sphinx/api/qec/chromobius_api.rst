@@ -1,7 +1,7 @@
 .. class:: chromobius
 
     A decoder for color codes built on the open-source
-    `Chromobius <https://github.com/quantumlib/chromobius>`_ Mobius decoder.
+    `Chromobius <https://github.com/quantumlib/chromobius>`_ Möbius decoder.
     Unlike the matrix-based decoders, Chromobius is *detector-error-model native*:
     it is constructed directly from Stim detector-error-model (DEM) text and
     predicts logical observable flips directly.
