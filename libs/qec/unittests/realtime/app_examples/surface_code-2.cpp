@@ -7,6 +7,12 @@
  ******************************************************************************/
 
 // For full test script: surface_code-2-test.sh
+//
+// Surface-code memory experiment (prep0, Z basis) with a single realtime
+// decoder per logical qubit. Unique to this example: the DEM is characterized
+// from in-kernel SPAM noise (`spam_error` on the data qubits) via
+// `cudaq::dem_from_kernel`, so one kernel and noise model drive both
+// characterization and the decoded shots.
 
 #include "cudaq.h"
 #include "cudaq/qec/code.h"
@@ -169,19 +175,19 @@ se_x_ft(cudaq::qec::patch logicalQubit,
 }
 
 // Runs the stabilizer measurement rounds and returns the last round's
-// combined syndrome so the caller can chain it into a later call. When
-// declare_detectors is set (DEM generation), every round declares detectors:
-// cross-round pairs against the previous round in the same [Z..., X...] order
-// the syndromes are enqueued or, when there is no reference round yet (the
-// lock-in round after prep0), one single-measurement detector per
-// Z-stabilizer, which is deterministic in the prepared basis. prev_syndrome
-// supplies the reference round (pass an empty vector for none).
+// combined syndrome so the caller can chain it into a later call. Every round
+// declares detectors: cross-round pairs against the previous round in the same
+// [Z..., X...] order the syndromes are enqueued or, when there is no reference
+// round yet (the lock-in round after prep0), one single-measurement detector
+// per Z-stabilizer, which is deterministic in the prepared basis. prev_syndrome
+// supplies the reference round (pass an empty vector for none). These detector
+// annotations compile to no-ops on the live decoding path, so they are always
+// emitted rather than gated by a flag.
 __qpu__ std::vector<cudaq::measure_result> custom_memory_circuit_stabs(
     cudaq::qview<> data, cudaq::qview<> xstab_anc, cudaq::qview<> zstab_anc,
     std::size_t numRounds, const std::vector<std::size_t> &cnot_schedX_flat,
     const std::vector<std::size_t> &cnot_schedZ_flat, bool enqueue_syndromes,
     bool do_errors_after_non_last_rounds, double p_spam, int logical_qubit_idx,
-    bool declare_detectors,
     const std::vector<cudaq::measure_result> &prev_syndrome) {
   // Create the logical patch
   patch logical(data, xstab_anc, zstab_anc);
@@ -212,22 +218,17 @@ __qpu__ std::vector<cudaq::measure_result> custom_memory_circuit_stabs(
       cudaq::qec::decoding::enqueue_syndromes(
           /*decoder_id=*/logical_qubit_idx, combined_syndrome);
     }
-    if (declare_detectors) {
-      if (have_prev) {
-        cudaq::detectors(prev, combined_syndrome);
-      } else {
-        // In this Z-basis (prep0) example the Z stabilizers measured by the
-        // very first round are deterministic, so they are detectors on their
-        // own; the X stabilizers only project a random frame.
-        for (std::size_t k = 0; k < zstab_anc.size(); ++k)
-          cudaq::detector(combined_syndrome[k]);
-      }
+    if (have_prev) {
+      cudaq::detectors(prev, combined_syndrome);
+    } else {
+      // In this Z-basis (prep0) example the Z stabilizers measured by the
+      // very first round are deterministic, so they are detectors on their
+      // own; the X stabilizers only project a random frame.
+      for (std::size_t k = 0; k < zstab_anc.size(); ++k)
+        cudaq::detector(combined_syndrome[k]);
     }
     prev = combined_syndrome;
     have_prev = true;
-#if PER_SHOT_DEBUG
-    debug_print_syndromes(syndrome_x_int, syndrome_z_int);
-#endif
     if (do_errors_after_non_last_rounds && round < numRounds - 1) {
       // spam_error(logical, p_spam, p_spam, p_spam);
       spam_error(logical, p_spam, 0.0, 0.0);
@@ -244,14 +245,15 @@ __qpu__ std::vector<cudaq::measure_result> custom_memory_circuit_stabs(
   return prev;
 }
 
-// When declare_detectors is set (only meaningful with numLogical = 1 and
-// allow_device_calls = false), the kernel annotates itself for DEM
-// generation via cudaq::dem_from_kernel: the lock-in round declares the
-// deterministic Z-stabilizer singles, every later round declares cross-round
-// detectors against the previous round, and the Z logical observable is
-// declared over the final data measurements at z_obs_indices.
+// The kernel annotates itself for DEM generation via cudaq::dem_from_kernel:
+// the lock-in round declares the deterministic Z-stabilizer singles, every
+// later round declares cross-round detectors against the previous round, and
+// the Z logical observable is declared over the final data measurements at
+// z_obs_indices. These annotations are no-ops on the live decoding path, so
+// they are always emitted (DEM generation still uses numLogical = 1 and
+// allow_device_calls = false).
 __qpu__ std::int64_t demo_circuit_qpu(
-    bool allow_device_calls, bool declare_detectors,
+    bool allow_device_calls,
     const cudaq::qec::code::one_qubit_encoding &statePrep, std::size_t numData,
     std::size_t numAncx, std::size_t numAncz, std::size_t numRounds,
     std::size_t numLogical, const std::vector<std::size_t> &cnot_schedX_flat,
@@ -282,49 +284,34 @@ __qpu__ std::int64_t demo_circuit_qpu(
     statePrep(logical);
   }
 
-  // Do 1 stabilizer round to lock in the stabilizers. Its syndrome is the
-  // reference round for the first cross-round detectors when
-  // declare_detectors is set (DEM generation always uses numLogical = 1).
-  std::vector<cudaq::measure_result> lockin_syndrome(numAncx + numAncz);
-  {
-    for (int i = 0; i < numLogical; i++) {
-      auto subData = data.slice(i * numData, numData);
-      auto subXstab_anc = xstab_anc.slice(i * numAncx, numAncx);
-      auto subZstab_anc = zstab_anc.slice(i * numAncz, numAncz);
-
-      std::vector<cudaq::measure_result> no_prev(0);
-      auto syndrome = custom_memory_circuit_stabs(
-          subData, subXstab_anc, subZstab_anc,
-          /*numRounds=*/1, cnot_schedX_flat, cnot_schedZ_flat,
-          /*enqueue_syndromes=*/allow_device_calls,
-          /*do_errors_after_non_last_rounds=*/false, p_spam, i,
-          declare_detectors, no_prev);
-      if (i == 0)
-        lockin_syndrome = syndrome;
-    }
-  }
-
-  // Inject errors
+  // For each logical qubit: lock in the stabilizers, inject SPAM, then run the
+  // measurement rounds. Each qubit's own lock-in syndrome is the reference
+  // round for its first cross-round detectors (DEM generation always uses
+  // numLogical = 1).
   for (int i = 0; i < numLogical; i++) {
     auto subData = data.slice(i * numData, numData);
     auto subXstab_anc = xstab_anc.slice(i * numAncx, numAncx);
     auto subZstab_anc = zstab_anc.slice(i * numAncz, numAncz);
+
+    // Lock-in round (no reference round yet).
+    std::vector<cudaq::measure_result> no_prev(0);
+    auto lockin_syndrome = custom_memory_circuit_stabs(
+        subData, subXstab_anc, subZstab_anc,
+        /*numRounds=*/1, cnot_schedX_flat, cnot_schedZ_flat,
+        /*enqueue_syndromes=*/allow_device_calls,
+        /*do_errors_after_non_last_rounds=*/false, p_spam, i, no_prev);
+
+    // Inject errors.
     patch logical(subData, subXstab_anc, subZstab_anc);
     spam_error(logical, /*p_spam_data=*/p_spam, /*p_spam_ancx=*/0.0,
                /*p_spam_ancz=*/0.0);
-  }
 
-  // Do stabilizer rounds
-  for (int i = 0; i < numLogical; i++) {
-    auto subData = data.slice(i * numData, numData);
-    auto subXstab_anc = xstab_anc.slice(i * numAncx, numAncx);
-    auto subZstab_anc = zstab_anc.slice(i * numAncz, numAncz);
-
+    // Measurement rounds, referenced to this qubit's lock-in syndrome.
     custom_memory_circuit_stabs(subData, subXstab_anc, subZstab_anc, numRounds,
                                 cnot_schedX_flat, cnot_schedZ_flat,
                                 /*enqueue_syndromes=*/allow_device_calls,
-                                /*do_errors_after_non_last_rounds=*/true,
-                                p_spam, i, declare_detectors, lockin_syndrome);
+                                /*do_errors_after_non_last_rounds=*/true, p_spam,
+                                i, lockin_syndrome);
   }
 
   if (allow_device_calls && apply_corrections) {
@@ -353,7 +340,7 @@ __qpu__ std::int64_t demo_circuit_qpu(
       ret <<= numData;
     auto subData = data.slice(i * numData, numData);
     auto subMeas = mz(subData);
-    if (declare_detectors && i == 0) {
+    if (i == 0) {
       std::vector<cudaq::measure_result> zlog(z_obs_indices.size());
       for (std::size_t k = 0; k < z_obs_indices.size(); ++k)
         zlog[k] = subMeas[z_obs_indices[k]];
@@ -434,8 +421,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     cudaq::M2OSparseMatrix m2o;
     std::string dem_text = cudaq::dem_from_kernel(
         cudaq::qec::qpu::demo_circuit_qpu, &noise, m2d, m2o,
-        /*allow_device_calls=*/false,
-        /*declare_detectors=*/true, prep, numData, numAncx, numAncz, numRounds,
+        /*allow_device_calls=*/false, prep, numData, numAncx, numAncz,
+        numRounds,
         /*numLogical=*/1, cnot_schedX_flat, cnot_schedZ_flat, p_spam,
         /*apply_corrections=*/false, z_obs_indices);
     dem = cudaq::qec::dem_from_stim_text(dem_text);
@@ -480,20 +467,17 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
   // If this is a remote platform (not local sim nor emulation), don't use the
   // noise model.
-  bool declare_detectors = false;
   bool allow_device_calls = true;
   auto run_result =
       cudaq::get_platform().is_remote()
           ? cudaq::run(numShots, cudaq::qec::qpu::demo_circuit_qpu,
-                       allow_device_calls, declare_detectors, prep, numData,
-                       numAncx, numAncz, numRounds, numLogical,
-                       cnot_schedX_flat, cnot_schedZ_flat, p_spam,
-                       /*apply_corrections=*/true, z_obs_indices)
+                       allow_device_calls, prep, numData, numAncx, numAncz,
+                       numRounds, numLogical, cnot_schedX_flat, cnot_schedZ_flat,
+                       p_spam, /*apply_corrections=*/true, z_obs_indices)
           : cudaq::run(numShots, noise, cudaq::qec::qpu::demo_circuit_qpu,
-                       allow_device_calls, declare_detectors, prep, numData,
-                       numAncx, numAncz, numRounds, numLogical,
-                       cnot_schedX_flat, cnot_schedZ_flat, p_spam,
-                       /*apply_corrections=*/true, z_obs_indices);
+                       allow_device_calls, prep, numData, numAncx, numAncz,
+                       numRounds, numLogical, cnot_schedX_flat, cnot_schedZ_flat,
+                       p_spam, /*apply_corrections=*/true, z_obs_indices);
   printf("Result size: %ld\n", run_result.size());
   std::vector<std::vector<uint8_t>> logical_results;
   int num_non_zero_values = 0;

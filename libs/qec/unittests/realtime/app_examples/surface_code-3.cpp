@@ -7,6 +7,12 @@
  ******************************************************************************/
 
 // For full test script: surface_code-3-test.sh
+//
+// Surface-code memory experiment with two realtime decoders per logical qubit
+// (separate X- and Z-error decoding), runnable in either basis (prep0 or
+// prep+). Unique to this example: it builds a separate DEM per decoder with two
+// `cudaq::dem_from_kernel` passes, selected by the `declare_detectors_z`/`_x`
+// flags that partition the cross-round detectors by stabilizer type.
 
 #include "cudaq.h"
 #include "cudaq/qec/code.h"
@@ -349,40 +355,29 @@ __qpu__ std::int64_t demo_circuit_qpu(
     statePrep(logical);
   }
 
-  // Do 1 stabilizer round to lock in the stabilizers. Its syndrome is the
-  // reference round for the first cross-round detectors when
-  // declare_detectors is set (DEM generation always uses numLogical = 1).
-  std::vector<cudaq::measure_result> lockin_syndrome(numAncx + numAncz);
-  {
-    for (int i = 0; i < numLogical; i++) {
-      auto subData = data.slice(i * numData, numData);
-      auto subXstab_anc = xstab_anc.slice(i * numAncx, numAncx);
-      auto subZstab_anc = zstab_anc.slice(i * numAncz, numAncz);
-      std::vector<cudaq::measure_result> no_prev(0);
-      auto syndrome = custom_memory_circuit_stabs(
-          subData, subXstab_anc, subZstab_anc,
-          /*numRounds=*/1, cnot_schedX_flat, cnot_schedZ_flat,
-          /*enqueue_syndromes=*/allow_device_calls,
-          /*do_errors_after_non_last_rounds=*/false, p_spam, i, is_on_Z_basis,
-          declare_detectors_z, declare_detectors_x, no_prev);
-      if (i == 0)
-        lockin_syndrome = syndrome;
-    }
-  }
-
-  // Inject errors
+  // For each logical qubit: lock in the stabilizers, inject SPAM, then run the
+  // measurement rounds. Each qubit's own lock-in syndrome is the reference
+  // round for its first cross-round detectors (DEM generation always uses
+  // numLogical = 1).
   for (int i = 0; i < numLogical; i++) {
     auto subData = data.slice(i * numData, numData);
     auto subXstab_anc = xstab_anc.slice(i * numAncx, numAncx);
     auto subZstab_anc = zstab_anc.slice(i * numAncz, numAncz);
+
+    // Lock-in round (no reference round yet).
+    std::vector<cudaq::measure_result> no_prev(0);
+    auto lockin_syndrome = custom_memory_circuit_stabs(
+        subData, subXstab_anc, subZstab_anc,
+        /*numRounds=*/1, cnot_schedX_flat, cnot_schedZ_flat,
+        /*enqueue_syndromes=*/allow_device_calls,
+        /*do_errors_after_non_last_rounds=*/false, p_spam, i, is_on_Z_basis,
+        declare_detectors_z, declare_detectors_x, no_prev);
+
+    // Inject errors.
     patch logical(subData, subXstab_anc, subZstab_anc);
     spam_error(logical, p_spam, 0.001, 0.001);
-  }
 
-  for (int i = 0; i < numLogical; i++) {
-    auto subData = data.slice(i * numData, numData);
-    auto subXstab_anc = xstab_anc.slice(i * numAncx, numAncx);
-    auto subZstab_anc = zstab_anc.slice(i * numAncz, numAncz);
+    // Measurement rounds, referenced to this qubit's lock-in syndrome.
     custom_memory_circuit_stabs(
         subData, subXstab_anc, subZstab_anc, numRounds, cnot_schedX_flat,
         cnot_schedZ_flat, /*enqueue_syndromes=*/allow_device_calls,
