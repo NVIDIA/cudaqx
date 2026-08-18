@@ -657,21 +657,21 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
   // If this is a remote platform (not local sim nor emulation), don't use the
   // noise model.
+  bool declare_detectors = false;
+  bool allow_device_calls = true;
   auto run_result =
       cudaq::get_platform().is_remote()
           ? cudaq::run(numShots, cudaq::qec::qpu::demo_circuit_qpu,
-                       /*allow_device_calls=*/true,
-                       /*declare_detectors_z=*/false,
-                       /*declare_detectors_x=*/false, prep, is_on_Z_basis,
-                       numData, numAncx, numAncz, numRounds, numLogical,
-                       cnot_schedX_flat, cnot_schedZ_flat, p_spam,
+                       allow_device_calls, declare_detectors, declare_detectors,
+                       prep, is_on_Z_basis, numData, numAncx, numAncz,
+                       numRounds, numLogical, cnot_schedX_flat,
+                       cnot_schedZ_flat, p_spam,
                        /*apply_corrections=*/true, obs_indices)
           : cudaq::run(numShots, noise, cudaq::qec::qpu::demo_circuit_qpu,
-                       /*allow_device_calls=*/true,
-                       /*declare_detectors_z=*/false,
-                       /*declare_detectors_x=*/false, prep, is_on_Z_basis,
-                       numData, numAncx, numAncz, numRounds, numLogical,
-                       cnot_schedX_flat, cnot_schedZ_flat, p_spam,
+                       allow_device_calls, declare_detectors, declare_detectors,
+                       prep, is_on_Z_basis, numData, numAncx, numAncz,
+                       numRounds, numLogical, cnot_schedX_flat,
+                       cnot_schedZ_flat, p_spam,
                        /*apply_corrections=*/true, obs_indices);
 
   // ------------------------------------------------------------------------

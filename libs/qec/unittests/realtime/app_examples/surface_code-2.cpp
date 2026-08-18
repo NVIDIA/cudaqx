@@ -480,20 +480,20 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
   // If this is a remote platform (not local sim nor emulation), don't use the
   // noise model.
+  bool declare_detectors = false;
+  bool allow_device_calls = true;
   auto run_result =
       cudaq::get_platform().is_remote()
           ? cudaq::run(numShots, cudaq::qec::qpu::demo_circuit_qpu,
-                       /*allow_device_calls=*/true,
-                       /*declare_detectors=*/false, prep, numData, numAncx,
-                       numAncz, numRounds, numLogical, cnot_schedX_flat,
-                       cnot_schedZ_flat, p_spam, /*apply_corrections=*/true,
-                       z_obs_indices)
+                       allow_device_calls, declare_detectors, prep, numData,
+                       numAncx, numAncz, numRounds, numLogical,
+                       cnot_schedX_flat, cnot_schedZ_flat, p_spam,
+                       /*apply_corrections=*/true, z_obs_indices)
           : cudaq::run(numShots, noise, cudaq::qec::qpu::demo_circuit_qpu,
-                       /*allow_device_calls=*/true,
-                       /*declare_detectors=*/false, prep, numData, numAncx,
-                       numAncz, numRounds, numLogical, cnot_schedX_flat,
-                       cnot_schedZ_flat, p_spam, /*apply_corrections=*/true,
-                       z_obs_indices);
+                       allow_device_calls, declare_detectors, prep, numData,
+                       numAncx, numAncz, numRounds, numLogical,
+                       cnot_schedX_flat, cnot_schedZ_flat, p_spam,
+                       /*apply_corrections=*/true, z_obs_indices);
   printf("Result size: %ld\n", run_result.size());
   std::vector<std::vector<uint8_t>> logical_results;
   int num_non_zero_values = 0;
