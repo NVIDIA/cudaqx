@@ -310,8 +310,8 @@ __qpu__ std::int64_t demo_circuit_qpu(
     custom_memory_circuit_stabs(subData, subXstab_anc, subZstab_anc, numRounds,
                                 cnot_schedX_flat, cnot_schedZ_flat,
                                 /*enqueue_syndromes=*/allow_device_calls,
-                                /*do_errors_after_non_last_rounds=*/true, p_spam,
-                                i, lockin_syndrome);
+                                /*do_errors_after_non_last_rounds=*/true,
+                                p_spam, i, lockin_syndrome);
   }
 
   if (allow_device_calls && apply_corrections) {
@@ -472,12 +472,14 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
       cudaq::get_platform().is_remote()
           ? cudaq::run(numShots, cudaq::qec::qpu::demo_circuit_qpu,
                        allow_device_calls, prep, numData, numAncx, numAncz,
-                       numRounds, numLogical, cnot_schedX_flat, cnot_schedZ_flat,
-                       p_spam, /*apply_corrections=*/true, z_obs_indices)
+                       numRounds, numLogical, cnot_schedX_flat,
+                       cnot_schedZ_flat, p_spam, /*apply_corrections=*/true,
+                       z_obs_indices)
           : cudaq::run(numShots, noise, cudaq::qec::qpu::demo_circuit_qpu,
                        allow_device_calls, prep, numData, numAncx, numAncz,
-                       numRounds, numLogical, cnot_schedX_flat, cnot_schedZ_flat,
-                       p_spam, /*apply_corrections=*/true, z_obs_indices);
+                       numRounds, numLogical, cnot_schedX_flat,
+                       cnot_schedZ_flat, p_spam, /*apply_corrections=*/true,
+                       z_obs_indices);
   printf("Result size: %ld\n", run_result.size());
   std::vector<std::vector<uint8_t>> logical_results;
   int num_non_zero_values = 0;
