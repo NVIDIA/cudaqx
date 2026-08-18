@@ -33,7 +33,9 @@ cudaqx_add_pymodule(${MODULE_NAME}
   bindings/py_decoder.cpp
   bindings/py_decoding_config.cpp
   bindings/py_decoding.cpp
+  bindings/py_dem_construction.cpp
   bindings/py_dem_sampling.cpp
+  bindings/py_extended_dem.cpp
   bindings/py_surface_code.cpp
   bindings/py_patch.cpp
 )

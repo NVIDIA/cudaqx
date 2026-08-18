@@ -4,9 +4,11 @@ CUDA-Q Solvers C++ API
 .. doxygenclass:: cudaq::solvers::operator_pool 
     :members:
 
-.. doxygenclass:: cudaq::solvers::spin_complement_gsd 
-.. doxygenclass:: cudaq::solvers::uccsd 
-.. doxygenclass:: cudaq::solvers::uccgsd 
+.. doxygenclass:: cudaq::solvers::spin_complement_gsd
+.. doxygenclass:: cudaq::solvers::uccsd
+.. doxygenclass:: cudaq::solvers::uccgsd
+.. doxygenclass:: cudaq::solvers::ceo
+.. doxygenclass:: cudaq::solvers::upccgsd
 
 .. doxygenclass:: cudaq::solvers::qaoa_pool 
 
@@ -75,8 +77,8 @@ CUDA-Q Solvers C++ API
 
 .. doxygenstruct:: cudaq::solvers::qaoa_result
     :members:
-.. doxygenfunction:: cudaq::solvers::qaoa(const cudaq::spin_op &, const cudaq::spin_op &, const optim::optimizer &, std::size_t, const std::vector<double> &, const heterogeneous_map)
-.. doxygenfunction:: cudaq::solvers::qaoa(const cudaq::spin_op &, const optim::optimizer &, std::size_t, const std::vector<double> &, const heterogeneous_map)
+.. doxygenfunction:: cudaq::solvers::qaoa(const cudaq::spin_op &, const cudaq::spin_op &, optim::optimizer &, std::size_t, const std::vector<double> &, const heterogeneous_map)
+.. doxygenfunction:: cudaq::solvers::qaoa(const cudaq::spin_op &, optim::optimizer &, std::size_t, const std::vector<double> &, const heterogeneous_map)
 .. doxygenfunction:: cudaq::solvers::qaoa(const cudaq::spin_op &, std::size_t, const std::vector<double> &, const heterogeneous_map)
 .. doxygenfunction:: cudaq::solvers::qaoa(const cudaq::spin_op &, const cudaq::spin_op &, std::size_t, const std::vector<double> &, const heterogeneous_map)
 .. doxygenfunction:: cudaq::solvers::get_num_qaoa_parameters(const cudaq::spin_op &, const cudaq::spin_op &, std::size_t, const heterogeneous_map)

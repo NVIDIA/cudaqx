@@ -117,7 +117,7 @@ jobs:
           # Install the correct torch first.
           cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
           pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
-          pip install numpy pytest onnxscript cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum cotengra nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
+          pip install numpy pytest onnxscript cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
           # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
           if [ "$(uname -m)" == "x86_64" ]; then
               # Stim is not currently available on manylinux ARM wheels, so only
@@ -134,6 +134,37 @@ jobs:
 
       - name: Run example tests
         run: bash scripts/ci/test_examples.sh qec
+
+      # ========================================================================
+      # Realtime decoding demo example
+      #
+      # Build the two example binaries against the INSTALLED SDK -- this is what
+      # enforces the installed-headers-only rule: a build-tree-only include
+      # would fail to compile here. Then drive the delivered decoding_server
+      # over UDP loopback with a real pymatching decode (the qpu-kernel source).
+      # No hardware: the FPGA source needs a ConnectX NIC and is not run in CI.
+      # ========================================================================
+      - name: Build & run realtime_decoding_demo (qpu-kernel, UDP loopback)
+        shell: bash
+        run: |
+          export PATH=/cudaq-install/bin:$PATH
+          # Mirror build_qec.sh: it builds+installs cudaq-realtime to
+          # $CUDAQ_REALTIME_ROOT, defaulting to /tmp/cudaq-realtime when unset
+          # (the case for this workflow). Track the same value so this step
+          # stays correct if the job ever sets CUDAQ_REALTIME_ROOT.
+          RT="${CUDAQ_REALTIME_ROOT:-/tmp/cudaq-realtime}"
+          EX=docs/sphinx/examples/qec/realtime_decoding_demo
+          cmake -S "$EX" -B /tmp/rtdemo-build -G Ninja \
+            -DCUDAQ_INSTALL_DIR=/cudaq-install \
+            -DCUDAQX_INSTALL_DIR="$HOME/.cudaqx" \
+            -DCUDAQ_REALTIME_DIR="$RT"
+          cmake --build /tmp/rtdemo-build -j
+          bash "$EX/run_realtime_decoding.sh" \
+            --source qpu-kernel --decoder pymatching \
+            --install-prefix "$HOME/.cudaqx" \
+            --cudaq-prefix /cudaq-install \
+            --realtime-lib-dir "$RT" \
+            --example-build-dir /tmp/rtdemo-build
 
       # ========================================================================
       # Upload build artifacts for GPU tests
@@ -228,7 +259,7 @@ jobs:
         run: |
           cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
           pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
-          pip install numpy pytest cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum cotengra nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0" "custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0"
+          pip install numpy pytest cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0" "custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0"
 
       - name: Run GPU C++ tests
         run: |

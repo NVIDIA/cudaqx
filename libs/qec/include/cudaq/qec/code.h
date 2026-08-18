@@ -252,6 +252,7 @@ public:
 
 /// Factory function to create a code instance with specified stabilizers
 /// @param name Name of the code
+/// @param options Optional code-specific configuration parameters
 /// @return Unique pointer to the created code instance
 std::unique_ptr<code> get_code(const std::string &name,
                                const heterogeneous_map options = {});
@@ -259,6 +260,7 @@ std::unique_ptr<code> get_code(const std::string &name,
 /// Factory function to create a code instance with specified stabilizers
 /// @param name Name of the code
 /// @param stab stabilizers
+/// @param options Optional code-specific configuration parameters
 /// @return Unique pointer to the created code instance
 std::unique_ptr<code> get_code(const std::string &name,
                                const std::vector<cudaq::spin_op_term> &stab,

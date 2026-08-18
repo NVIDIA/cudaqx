@@ -1,7 +1,4 @@
-.. _python_realtime_decoding_api:
-
-
-The Real-Time Decoding API enables low-latency error correction on quantum hardware by allowing CUDA-Q quantum kernels to interact with decoders during circuit execution. This API is designed for use cases where corrections must be calculated and applied within qubit coherence times.
+The Realtime Decoding API enables low-latency error correction on quantum hardware by allowing CUDA-Q quantum kernels to interact with decoders during circuit execution. This API is designed for use cases where corrections must be calculated and applied within qubit coherence times.
 
 The real-time decoding system supports simulation environments for local testing and hardware integration (e.g., on
 `Quantinuum's Helios QPU
@@ -180,7 +177,7 @@ Configuration Functions
 Helper Functions
 ----------------
 
-Real-time decoding requires converting matrices to sparse format for efficient decoder configuration. The following utility functions are essential:
+Realtime decoding requires converting matrices to sparse format for efficient decoder configuration. The following utility functions are essential:
 
 .. py:function:: cudaq_qec.pcm_to_sparse_vec(pcm)
 
@@ -205,20 +202,23 @@ Real-time decoding requires converting matrices to sparse format for efficient d
    :param num_cols: Number of columns in the output matrix
    :returns: Dense binary matrix as numpy array
 
-.. py:function:: cudaq_qec.generate_timelike_sparse_detector_matrix(num_syndromes_per_round, num_rounds, include_first_round)
+.. py:function:: cudaq_qec.d_sparse(m2d)
 
-   Generate the D_sparse matrix that encodes how detectors relate across syndrome measurement rounds.
+   Flatten a measurement-to-detector map into the ``-1``-terminated sparse vector a
+   realtime decoder config expects for its ``D_sparse``.
 
-   :param num_syndromes_per_round: Number of syndrome measurements per round (typically code distance squared)
-   :param num_rounds: Total number of syndrome measurement rounds
-   :param include_first_round: Boolean (False for standard memory experiments) or list for custom first round
-   :returns: Sparse matrix encoding detector relationships
+   :param m2d: List of lists of measurement indices. ``m2d[d]`` contains the measurement
+               indices whose XOR forms detector ``d``. Obtain this from the second element
+               of the tuple returned by :meth:`DecoderContext.x_component`,
+               :meth:`DecoderContext.z_component`, or :meth:`DecoderContext.full_component`.
+   :returns: ``-1``-terminated sparse vector suitable for ``decoder_config.D_sparse``
 
    **Usage in real-time decoding:**
 
    .. code-block:: python
 
-      config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
-          numSyndromesPerRound, numRounds, False)
+      ctx = qec.decoder_context_from_memory_circuit(code, statePrep, num_rounds, noise)
+      dem, m2d, m2o = ctx.z_component()  # or x_component() / full_component()
+      config.D_sparse = qec.d_sparse(m2d)
 
-See also :ref:`Parity Check Matrix Utilities <python_api:Parity Check Matrix Utilities>` for additional PCM manipulation functions.
+See also :ref:`parity_check_matrix_utilities_python` for additional PCM manipulation functions.
