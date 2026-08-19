@@ -8,9 +8,9 @@
 
 /// @file emulator.cpp
 /// @brief plan() and run(): pre-serialize every
-/// static frame before t0, validate capabilities before t0, then run a
-/// single timing thread that does nothing between deadlines but wait and
-/// dispatch. 
+/// static frame before t0, validate capabilities before t0, then run one
+/// timing thread per decoder_id, each doing nothing between its own
+/// deadlines but wait and dispatch -- decoders never block on each other.
 
 #include "cudaq/qec/playback/emulator.h"
 
@@ -172,9 +172,12 @@ std::vector<std::uint8_t> build_get_corrections_frame(std::uint64_t decoder_id,
   return build_frame(wire::kGetCorrectionsFunctionId, rid, &p, sizeof(p));
 }
 
-/// The return_size a get_corrections/stream_until call requests: the width
-/// of the operand's expected-bits string, when given. 0 (request nothing) when omitted
-std::uint32_t return_size_for(const event &e) { return e.expected_count; }
+/// The return_size a get_corrections/stream_until call requests.
+/// Explicit return_size=N takes precedence; falls back to the expected-bits
+/// width; 0 (request nothing) when neither is given.
+std::uint32_t return_size_for(const event &e) {
+  return std::max(e.return_size, e.expected_count);
+}
 
 /// A session that returns OK but hands back fewer bytes than `return_size`
 /// bits requires is indistinguishable from "the correction happens to be
@@ -195,12 +198,15 @@ bool mismatches_expected(const schedule &sched, const event &e, const std::uint8
         !std::equal(bits, bits + n, sched.expected_arena.begin() + e.expected_offset);
 }
 
-/// Records the warning and flips `aborted` for the caller to stop dispatching further events.
+/// Records the warning and flips `aborted` for every decoder thread to stop
+/// dispatching further events.
 void abort_on_hard_error(RpcStatus status, std::size_t event_index, const char *op_name,
-                         std::uint64_t decoder_id, run_result &result, bool &aborted) {
+                         std::uint64_t decoder_id, run_result &result,
+                         std::atomic<bool> &aborted, std::mutex &logs_mu) {
   if (status == RpcStatus::OK || status == RpcStatus::NOT_READY)
     return;
-  aborted = true;
+  aborted.store(true, std::memory_order_relaxed);
+  std::lock_guard<std::mutex> lock(logs_mu);
   result.warnings.push_back("event " + std::to_string(event_index) + " (" + op_name +
                             ", decoder_id=" + std::to_string(decoder_id) +
                             ") returned status " + std::to_string(static_cast<int>(status)) +
@@ -306,6 +312,44 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
     }
   }
 
+  // -- Group event indices by decoder_id, first-seen order, preserving each
+  // group's existing relative order -- run() gives each decoder_id its own
+  // dispatch thread over exactly its bucket here.
+  {
+    std::unordered_map<std::uint64_t, std::size_t> bucket_of;
+    for (std::size_t i = 0; i < sched.events.size(); ++i) {
+      const auto id = sched.events[i].decoder_id;
+      auto it = bucket_of.find(id);
+      std::size_t bucket;
+      if (it == bucket_of.end()) {
+        bucket = impl->events_by_decoder.size();
+        impl->events_by_decoder.push_back({id, {}});
+        bucket_of.emplace(id, bucket);
+      } else {
+        bucket = it->second;
+      }
+      impl->events_by_decoder[bucket].second.push_back(static_cast<std::uint32_t>(i));
+    }
+  }
+
+  // -- One session per decoder_id, unconditionally: with each decoder_id
+  // now dispatching on its own thread, two decoder_ids sharing a session
+  // would call into it concurrently, which no backend is safe against (see
+  // backends.h's "one session per decoder" topology).
+  {
+    std::unordered_map<session *, std::uint64_t> owner;
+    for (auto &[decoder_id, indices] : impl->events_by_decoder) {
+      session *s = router.at(decoder_id);
+      auto [it, inserted] = owner.emplace(s, decoder_id);
+      if (!inserted)
+        throw std::invalid_argument(
+            "decoder_id=" + std::to_string(decoder_id) + " and decoder_id=" +
+            std::to_string(it->second) +
+            " share one session instance -- each decoder_id must have its "
+            "own, since decoders now dispatch on independent threads");
+    }
+  }
+
   return impl;
 }
 
@@ -317,8 +361,10 @@ struct listener_reply {
   std::vector<std::uint8_t> bits; // valid only when status == OK
 };
 
-/// Runs stream_until's blocking get_corrections calls off the main thread.
-/// Created once per run() and reused by every stream_until event
+/// Runs stream_until's blocking get_corrections calls off its decoder's
+/// dispatch thread. Created lazily, once per decoder thread that actually
+/// has a stream_until event, and reused by every stream_until event on
+/// that same decoder -- never shared across decoders.
 class listener_worker {
 public:
   listener_worker() : thread_([this] { loop(); }) {}
@@ -388,12 +434,12 @@ private:
 constexpr std::uint64_t kMinYieldGapNs = 50'000;
 
 /// One stream_until event. Returns once a terminal status is reached; `rec`
-/// and `result` are updated in place. 
-/// 
-/// `next_request_id` is run()'s single global counter, shared across every event 
-/// -- each RPC sent here increments it by 1. The listener claims ids from it too, 
-/// which is safe precisely because this thread never touches it between submitting 
-/// the job and collecting its result.
+/// and `result` are updated in place.
+///
+/// `next_request_id` is run()'s single atomic counter, shared across every
+/// decoder's thread and every event -- each RPC sent here claims the next
+/// id from it. `logs_mu` guards `result`'s shared syndrome/correction logs,
+/// which every decoder thread appends to.
 ///
 /// The server dispatches every request for a decoder -- enqueue and
 /// get_corrections alike -- inline on one thread, strictly in arrival order
@@ -412,21 +458,23 @@ constexpr std::uint64_t kMinYieldGapNs = 50'000;
 /// hand: DecodingSession::enqueue_core resets shot_state unconditionally,
 /// so sending a round before the outcome is known could clobber a
 /// correction that became ready in the meantime.
-void run_stream_until(run_plan &plan, const event &e, std::uint64_t t0, session &s,
+void run_stream_until(run_plan &plan, const event &e, std::uint64_t deadline_abs_ns, session &s,
                       record &rec, run_result &result, std::uint64_t slack,
-                      std::uint32_t &next_request_id, listener_worker &worker) {
+                      std::atomic<std::uint32_t> &next_request_id, listener_worker &worker,
+                      std::mutex &logs_mu) {
   auto &source = *plan.sources.at(e.source_id);
   const std::uint32_t return_size = return_size_for(e);
   const auto caps = s.caps();
 
   std::atomic<bool> abort_listener{false};
-  const std::uint32_t rid_gc = next_request_id++;
+  const std::uint32_t rid_gc = next_request_id.fetch_add(1, std::memory_order_relaxed);
 
   // Submit the listener job to the background thread and await response
   auto future = worker.submit([&s, &e, &abort_listener, &next_request_id, return_size,
                                rid_gc] {
     std::vector<std::uint8_t> bits(wire::bit_packed_bytes(return_size));
-    for (std::uint32_t rid = rid_gc;; rid = next_request_id++) {
+    for (std::uint32_t rid = rid_gc;;
+        rid = next_request_id.fetch_add(1, std::memory_order_relaxed)) {
       auto gc_frame =
           build_get_corrections_frame(e.decoder_id, return_size, /*reset=*/true, rid);
       std::size_t reply_len = 0;
@@ -448,7 +496,7 @@ void run_stream_until(run_plan &plan, const event &e, std::uint64_t t0, session 
   });
 
   // Always generate one round before first checking the listener
-  std::uint64_t next = t0 + e.deadline_ns;
+  std::uint64_t next = deadline_abs_ns;
   std::uint32_t rounds = 0;
   std::vector<std::vector<std::uint8_t>> cached;
   std::optional<stream_terminate> local_give_up;
@@ -489,16 +537,22 @@ void run_stream_until(run_plan &plan, const event &e, std::uint64_t t0, session 
   abort_listener.store(true, std::memory_order_release);
   const listener_reply reply = future.get();
 
-  // Submit all cached syndromes
+  // Submit all cached syndromes. send_async itself is unlocked (each
+  // decoder thread's session calls never overlap with another decoder's) --
+  // only the shared syndrome_log append needs logs_mu.
   for (auto &bits : cached) {
-    const std::uint32_t rid_enqueue = next_request_id++;
+    const std::uint32_t rid_enqueue =
+        next_request_id.fetch_add(1, std::memory_order_relaxed);
     auto enqueue_frame = build_enqueue_frame(e.decoder_id, rid_enqueue, bits.data(), bits.size());
     s.send_async({enqueue_frame.data(), enqueue_frame.size()});
-    if (rounds == 0) {
-      rec.first_request_id = rid_enqueue;
-      rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
+    {
+      std::lock_guard<std::mutex> lock(logs_mu);
+      if (rounds == 0) {
+        rec.first_request_id = rid_enqueue;
+        rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
+      }
+      result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
     }
-    result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
     rec.syndrome_count += static_cast<std::uint32_t>(bits.size());
     ++rounds;
   }
@@ -507,9 +561,10 @@ void run_stream_until(run_plan &plan, const event &e, std::uint64_t t0, session 
 
   stream_terminate term;
   if (reply.status == RpcStatus::OK) { // everything went well
-    term = stream_terminate::READY;
+    term = stream_terminate::OK;
     // Load corrections into the correction log
     rec.read_completed = true;
+    std::lock_guard<std::mutex> lock(logs_mu);
     rec.correction_offset = static_cast<std::uint32_t>(result.correction_log.size());
     rec.correction_count = return_size;
     append_unpacked_bits(result.correction_log, reply.bits.data(), return_size);
@@ -527,59 +582,53 @@ void run_stream_until(run_plan &plan, const event &e, std::uint64_t t0, session 
 
 } // namespace
 
-run_result run(std::shared_ptr<run_plan> p) {
-  auto &plan = *p;
+/// One decoder_id's whole timeline: waits on its own deadlines, dispatches
+/// its own events, in schedule order, on its own thread -- entirely
+/// independent of every other decoder's thread except for the handful of
+/// explicitly shared, synchronized bits threaded in (`next_request_id`,
+/// `aborted`, `logs_mu`, `result.records` -- each index of which belongs to
+/// exactly one decoder, so needs no lock).
+void run_decoder(run_plan &plan, run_result &result, std::uint64_t t0, std::uint64_t slack,
+                 std::atomic<std::uint32_t> &next_request_id, std::atomic<bool> &aborted,
+                 std::mutex &logs_mu, std::uint64_t decoder_id,
+                 const std::vector<std::uint32_t> &indices) {
   auto &sched = plan.sched;
+  session &s = *plan.router.at(decoder_id);
 
-  run_result result;
-  result.records.resize(sched.events.size());
-  result.syndrome_log.reserve(sched.syndrome_arena.size());
-  result.correction_log.reserve(sched.expected_arena.size());
-
-  std::uint64_t slack = plan.params.spin_slack_ns;
-  if (slack == 0)
-    slack = calibrate_spin_slack_ns();
-
-  for (auto &[id, s] : plan.router)
-    s->warm_up();
-
-  const std::uint64_t t0 = now_ns() + plan.params.lead_in_ns;
-  wait_until(t0, slack);
-
-  // Single global counter, incremented once per RPC actually sent to a session
-  std::uint32_t next_request_id = 1;
-
-  // Spawned listener thread (if needed)
+  // Lazily created: only decoders with at least one stream_until need one,
+  // and it must never be shared with another decoder's thread.
   std::optional<listener_worker> listener;
-  if (std::any_of(sched.events.begin(), sched.events.end(),
-                  [](const event &e) { return e.op == operation::stream_until; }))
-    listener.emplace();
 
-  bool aborted = false;
-  for (std::size_t i = 0; i < sched.events.size() && !aborted; ++i) {
+  // This decoder's own previous event's actual completion, for resolving a
+  // relative-tick deadline -- t0 (0) until this decoder has dispatched
+  // anything.
+  std::uint64_t prev_return_ns = 0;
+
+  for (std::size_t k = 0; k < indices.size() && !aborted.load(std::memory_order_relaxed);
+      ++k) {
+    const std::uint32_t i = indices[k];
     const auto &e = sched.events[i];
     const auto &ep = plan.event_plans[i];
     auto &rec = result.records[i];
-    rec.event_index = static_cast<std::uint32_t>(i);
-    rec.decoder_id = e.decoder_id;
-    rec.op = e.op;
-    rec.deadline_ns = e.deadline_ns;
 
-    wait_until(t0 + e.deadline_ns, slack);
+    const std::uint64_t deadline_ns =
+        e.relative_deadline ? prev_return_ns + e.deadline_ns : e.deadline_ns;
+    rec.deadline_ns = deadline_ns;
+
+    wait_until(t0 + deadline_ns, slack);
     rec.call_ns = now_ns() - t0;
-
-    session &s = *plan.router.at(e.decoder_id);
+    rec.dispatched = true;
 
     switch (e.op) {
     case operation::reset: {
-      const std::uint32_t rid = next_request_id++;
+      const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
       set_request_id(plan.frame_arena.data() + ep.frame_offset, rid);
       const frame f{plan.frame_arena.data() + ep.frame_offset, ep.frame_len};
       std::size_t reply_len = 0;
       const auto status = s.send_sync(f, {}, reply_len);
       rec.status = static_cast<std::int32_t>(status);
       rec.first_request_id = rid;
-      abort_on_hard_error(status, i, "reset", e.decoder_id, result, aborted);
+      abort_on_hard_error(status, i, "reset", decoder_id, result, aborted, logs_mu);
       break;
     }
     case operation::enqueue:
@@ -587,37 +636,43 @@ run_result run(std::shared_ptr<run_plan> p) {
       if (ep.has_frame) {
         // Pre-built at plan() time (raw literal bits, or a preloadable
         // source): memcpy + send.
-        const std::uint32_t rid = next_request_id++;
+        const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
         set_request_id(plan.frame_arena.data() + ep.frame_offset, rid);
         rec.first_request_id = rid;
         const frame f{plan.frame_arena.data() + ep.frame_offset, ep.frame_len};
         s.send_async(f);
         rec.status = static_cast<std::int32_t>(RpcStatus::OK);
-        rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
         rec.syndrome_count = e.syndrome_count;
-        result.syndrome_log.insert(result.syndrome_log.end(),
-                                  sched.syndrome_arena.begin() + e.syndrome_offset,
-                                  sched.syndrome_arena.begin() + e.syndrome_offset +
-                                      e.syndrome_count);
+        {
+          std::lock_guard<std::mutex> lock(logs_mu);
+          rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
+          result.syndrome_log.insert(result.syndrome_log.end(),
+                                    sched.syndrome_arena.begin() + e.syndrome_offset,
+                                    sched.syndrome_arena.begin() + e.syndrome_offset +
+                                        e.syndrome_count);
+        }
       } else {
         // JIT source: resolve now and send
         auto &src = *plan.sources.at(e.source_id);
         auto bits = e.op == operation::enqueue_data ? src.read_data() : src.next_round();
         const auto caps = s.caps();
-        const std::uint32_t rid = next_request_id++;
+        const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
         rec.first_request_id = rid;
-        auto f_bytes = build_enqueue_frame(e.decoder_id, rid, bits.data(), bits.size());
+        auto f_bytes = build_enqueue_frame(decoder_id, rid, bits.data(), bits.size());
         if (caps.max_frame_bytes != 0 && f_bytes.size() > caps.max_frame_bytes) {
           rec.status = static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR);
-          abort_on_hard_error(RpcStatus::INTERNAL_ERROR, i, to_string(e.op), e.decoder_id,
-                              result, aborted);
+          abort_on_hard_error(RpcStatus::INTERNAL_ERROR, i, to_string(e.op), decoder_id,
+                              result, aborted, logs_mu);
           break;
         }
         s.send_async({f_bytes.data(), f_bytes.size()});
         rec.status = static_cast<std::int32_t>(RpcStatus::OK);
-        rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
         rec.syndrome_count = static_cast<std::uint32_t>(bits.size());
-        result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
+        {
+          std::lock_guard<std::mutex> lock(logs_mu);
+          rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
+          result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
+        }
       }
       break;
     }
@@ -636,7 +691,7 @@ run_result run(std::shared_ptr<run_plan> p) {
         // Each retry is its own RPC send, so it gets its own fresh
         // request_id -- reusing one across retries would let a stale reply
         // to an earlier attempt be mistaken for the current one.
-        const std::uint32_t rid = next_request_id++;
+        const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
         if (first_attempt) {
           first_rid = rid;
           first_attempt = false;
@@ -653,25 +708,76 @@ run_result run(std::shared_ptr<run_plan> p) {
       rec.first_request_id = first_rid;
       if (status == RpcStatus::OK) {
         rec.read_completed = true;
-        rec.correction_offset = static_cast<std::uint32_t>(result.correction_log.size());
         rec.correction_count = return_size;
+        std::lock_guard<std::mutex> lock(logs_mu);
+        rec.correction_offset = static_cast<std::uint32_t>(result.correction_log.size());
         append_unpacked_bits(result.correction_log, reply.data(), return_size);
         rec.correction_mismatch = mismatches_expected(
             sched, e, result.correction_log.data() + rec.correction_offset, return_size);
       } else {
-        abort_on_hard_error(status, i, "get_corrections", e.decoder_id, result, aborted);
+        abort_on_hard_error(status, i, "get_corrections", decoder_id, result, aborted,
+                            logs_mu);
       }
       break;
     }
     case operation::stream_until:
-      run_stream_until(plan, e, t0, s, rec, result, slack, next_request_id, *listener);
+      if (!listener)
+        listener.emplace();
+      run_stream_until(plan, e, t0 + deadline_ns, s, rec, result, slack, next_request_id,
+                       *listener, logs_mu);
       break;
     }
 
     rec.return_ns = now_ns() - t0;
-    if (aborted)
-      result.records.resize(i + 1);
+    prev_return_ns = rec.return_ns;
   }
+}
+
+run_result run(std::shared_ptr<run_plan> p) {
+  auto &plan = *p;
+  auto &sched = plan.sched;
+
+  run_result result;
+  result.records.resize(sched.events.size());
+  // Every event gets an identified slot up front, dispatched or not -- a
+  // hard error can abort the run before some decoders' threads reach their
+  // later events, and record::dispatched is how a caller tells "ran" from
+  // "pre-empted by the abort."
+  for (std::size_t i = 0; i < sched.events.size(); ++i) {
+    auto &rec = result.records[i];
+    rec.event_index = static_cast<std::uint32_t>(i);
+    rec.decoder_id = sched.events[i].decoder_id;
+    rec.op = sched.events[i].op;
+  }
+  result.syndrome_log.reserve(sched.syndrome_arena.size());
+  result.correction_log.reserve(sched.expected_arena.size());
+
+  std::uint64_t slack = plan.params.spin_slack_ns;
+  if (slack == 0)
+    slack = calibrate_spin_slack_ns();
+
+  for (auto &[id, s] : plan.router)
+    s->warm_up();
+
+  const std::uint64_t t0 = now_ns() + plan.params.lead_in_ns;
+  wait_until(t0, slack);
+
+  // Shared across every decoder's thread: one global id space (uniqueness
+  // is all correlation needs -- ordering across decoders isn't meaningful
+  // once they dispatch independently), one whole-run abort flag, and one
+  // mutex for the few shared result vectors every thread appends to.
+  std::atomic<std::uint32_t> next_request_id{1};
+  std::atomic<bool> aborted{false};
+  std::mutex logs_mu;
+
+  std::vector<std::thread> threads;
+  threads.reserve(plan.events_by_decoder.size());
+  for (auto &[decoder_id, indices] : plan.events_by_decoder)
+    threads.emplace_back(run_decoder, std::ref(plan), std::ref(result), t0, slack,
+                         std::ref(next_request_id), std::ref(aborted), std::ref(logs_mu),
+                         decoder_id, std::cref(indices));
+  for (auto &t : threads)
+    t.join();
 
   result.meta.t0_ns = t0;
   result.meta.tick_ns = sched.tick_ns;
@@ -720,7 +826,8 @@ safe_bit_span(const std::vector<std::uint8_t> &arena, std::uint32_t offset,
 void write_csv(const run_result &result, std::ostream &out) {
   out << "event_index,decoder_id,op,deadline_ns,call_ns,return_ns,"
          "lateness_ns,latency_ns,status,rounds_streamed,read_completed,"
-         "syndrome_hex,correction_hex,correction_mismatch,first_request_id\n";
+         "syndrome_hex,correction_hex,correction_mismatch,first_request_id,"
+         "dispatched\n";
   for (const auto &r : result.records) {
     const auto [syndrome_bits, syndrome_n] =
         safe_bit_span(result.syndrome_log, r.syndrome_offset, r.syndrome_count);
@@ -734,7 +841,8 @@ void write_csv(const run_result &result, std::ostream &out) {
         << ',' << r.status << ',' << r.rounds_streamed << ',' << (r.read_completed ? 1 : 0)
         << ',' << hex_encode_bits(syndrome_bits, syndrome_n) << ','
         << hex_encode_bits(correction_bits, correction_n) << ','
-        << (r.correction_mismatch ? 1 : 0) << ',' << r.first_request_id << '\n';
+        << (r.correction_mismatch ? 1 : 0) << ',' << r.first_request_id << ','
+        << (r.dispatched ? 1 : 0) << '\n';
   }
 }
 

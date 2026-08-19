@@ -16,7 +16,10 @@
 
 #include "py_playback_emulator.h"
 
+#include "cudaq/qec/code.h"
+#include "cudaq/qec/experiments.h"
 #include "cudaq/qec/playback/backends.h"
+#include "cudaq/qec/playback/cudaq_memory_source.h"
 #include "cudaq/qec/playback/emulator.h"
 #include "cudaq/qec/playback/syndrome_source.h"
 
@@ -71,10 +74,14 @@ run_result run_schedule(
   } else if (udp_endpoints) {
     adopt(make_udp_sessions(*udp_endpoints, udp_timeout_ms));
   } else {
-    auto null_sess = make_null_session();
-    for (auto id : *null_decoder_ids)
+    // One session per decoder_id, same as the other backends -- each
+    // decoder now dispatches on its own thread, so sharing one instance
+    // across decoder_ids is never safe.
+    for (auto id : *null_decoder_ids) {
+      auto null_sess = make_null_session();
       router[id] = null_sess.get();
-    owned_sessions.push_back(std::move(null_sess));
+      owned_sessions.push_back(std::move(null_sess));
+    }
   }
 
   std::vector<std::uint64_t> known_decoder_ids;
@@ -109,19 +116,44 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .value("stream_until", operation::stream_until);
 
   nb::enum_<stream_terminate>(m, "stream_terminate")
-      .value("READY", stream_terminate::READY)
+      .value("OK", stream_terminate::OK)
       .value("SOURCE_EXHAUSTED", stream_terminate::SOURCE_EXHAUSTED)
       .value("EXHAUSTED_ROUNDS", stream_terminate::EXHAUSTED_ROUNDS)
       .value("ERROR", stream_terminate::ERROR);
+
+  nb::enum_<RpcStatus>(m, "RpcStatus")
+      .value("OK", RpcStatus::OK)
+      .value("INVALID_DECODER", RpcStatus::INVALID_DECODER)
+      .value("BAD_REQUEST", RpcStatus::BAD_REQUEST)
+      .value("INTERNAL_ERROR", RpcStatus::INTERNAL_ERROR)
+      .value("NOT_READY", RpcStatus::NOT_READY)
+      .value("BUSY", RpcStatus::BUSY)
+      .value("SYNDROMES_DROPPED", RpcStatus::SYNDROMES_DROPPED);
 
   nb::class_<record>(m, "record")
       .def_ro("event_index", &record::event_index)
       .def_ro("decoder_id", &record::decoder_id)
       .def_ro("op", &record::op)
+      .def_ro("dispatched", &record::dispatched,
+             "True once this event's decoder thread actually reached and "
+             "dispatched it; false if a hard error elsewhere aborted the "
+             "run first, in which case every other field is left default.")
       .def_ro("deadline_ns", &record::deadline_ns)
       .def_ro("call_ns", &record::call_ns)
       .def_ro("return_ns", &record::return_ns)
-      .def_ro("status", &record::status)
+      .def_prop_ro("status",
+                   [](const record &r) {
+                     // record::status is the wire RpcStatus for every op
+                     // except stream_until, which has no wire RPC of its own
+                     // and instead uses the disjoint stream_terminate range
+                     // (see types.h's `record::status` comment).
+                     return r.op == operation::stream_until
+                                ? to_string(static_cast<stream_terminate>(r.status))
+                                : to_string(static_cast<RpcStatus>(r.status));
+                   },
+                   "status as a human-readable string: an RpcStatus name for "
+                   "every op except stream_until, whose status is a "
+                   "stream_terminate name instead.")
       .def_ro("rounds_streamed", &record::rounds_streamed)
       .def_ro("read_completed", &record::read_completed)
       .def_ro("syndrome_offset", &record::syndrome_offset)
@@ -162,6 +194,32 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def("is_streamed", &stim_memory_source::is_streamed)
       .def("round_width", &stim_memory_source::round_width)
       .def("data_width", &stim_memory_source::data_width);
+
+  nb::class_<cudaq_memory_source, syndrome_source>(m, "cudaq_memory_source")
+      .def(
+          "__init__",
+          [](cudaq_memory_source *self, const cudaq::qec::code &code,
+             cudaq::qec::operation statePrep, std::size_t max_rounds,
+             std::uint64_t seed,
+             std::optional<cudaq::noise_model> noise) {
+            new (self) cudaq_memory_source(
+                code, statePrep, max_rounds,
+                noise ? *noise : cudaq::noise_model(), seed);
+          },
+          nb::arg("code"), nb::arg("state_prep"), nb::arg("max_rounds"),
+          nb::arg("seed"), nb::arg("noise") = nb::none(),
+          "Streams syndrome rounds from CUDA-Q's own memory_circuit kernel "
+          "(run under the stim target) rather than a Stim circuit -- see "
+          "the C++ class doc comment for how it emulates round-by-round "
+          "streaming despite the stim backend having no way to carry "
+          "quantum state across separate kernel launches.")
+      .def("next_round", &cudaq_memory_source::next_round)
+      .def("read_data", &cudaq_memory_source::read_data)
+      .def("reset", &cudaq_memory_source::reset)
+      .def("is_streamed", &cudaq_memory_source::is_streamed)
+      .def("max_rounds", &cudaq_memory_source::max_rounds)
+      .def("round_width", &cudaq_memory_source::round_width)
+      .def("data_width", &cudaq_memory_source::data_width);
 
   m.def(
       "run", &run_schedule, nb::arg("schedule"), nb::arg("tick_ns"),

@@ -30,7 +30,13 @@ namespace cudaq::qec::playback {
 /// `schedule`. `known_decoder_ids` is the set of decoder_ids the config
 /// declares; a decoder_id on a schedule line that is absent from this set is
 /// a parse error. `tick_ns` resolves each line's `<tick>` to
-/// `deadline_ns = tick * tick_ns`. Throws std::invalid_argument 
+/// `deadline_ns = tick * tick_ns`. A `<tick>` written as `+N` is relative
+/// instead: it's resolved at run time to `N` ticks after the *previous*
+/// line's actual completion (its `return_ns`), not an absolute offset from
+/// t0 -- useful for lines that follow a `stream_until`, whose duration isn't
+/// known until it actually finishes. A schedule with any relative line is
+/// dispatched in file order (the deadline-sort applied to purely absolute
+/// schedules is skipped). Throws std::invalid_argument
 /// naming the offending line on any parse error
 schedule parse(std::string_view text,
                const std::vector<std::uint64_t> &known_decoder_ids,
@@ -74,13 +80,20 @@ struct run_plan {
   std::unordered_map<std::uint64_t, session *> router;
   std::unordered_map<std::uint32_t, syndrome_source *> sources;
   run_params params;
+  // sched.events' indices, grouped by decoder_id (first-seen order),
+  // preserving each group's existing relative order. One entry per
+  // decoder_id that has at least one event; run() gives each its own
+  // dispatch thread.
+  std::vector<std::pair<std::uint64_t, std::vector<std::uint32_t>>> events_by_decoder;
 };
 
 /// Validate `sched` against `router`'s session capabilities and pre-build
 /// everything run()'s timing loop must not do on the hot path. Throws
 /// std::invalid_argument on any gap. `router` maps decoder_id -> session;
 /// `sources` maps a schedule's `event::source_id` to the syndrome_source
-/// instance it reads from.
+/// instance it reads from. Also enforces one session instance per
+/// decoder_id -- decoders dispatch on independent threads in run(), so two
+/// decoder_ids sharing a session would race.
 /// Ownership of both the sessions and the sources stays with the caller for
 /// the lifetime of the returned run_plan.
 std::shared_ptr<run_plan>
@@ -88,9 +101,13 @@ plan(const schedule &sched, const std::unordered_map<std::uint64_t, session *> &
      const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
      const run_params &params = {});
 
-/// Run the plan: for each event, wait_until(t0 + deadline), dispatch,
-/// record. Single timing thread, blocking. Returns when every event has
-/// been dispatched and every record finalized.
+/// Run the plan: one dispatch thread per decoder_id, each independently
+/// doing wait_until(t0 + deadline), dispatch, record for its own events in
+/// schedule order -- decoders never block on each other. A hard error on
+/// any decoder still aborts the whole run (every thread stops dispatching
+/// further events), but `result.records` is never truncated: every event
+/// gets a slot, and `record::dispatched` distinguishes what actually ran
+/// from what the abort pre-empted. Returns once every thread has stopped.
 run_result run(std::shared_ptr<run_plan> plan);
 
 /// Downstream analysis writes CSV.One row per record: identity, timings, derived lateness/latency, status,

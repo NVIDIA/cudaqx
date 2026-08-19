@@ -9,11 +9,15 @@
 #pragma once
 
 /// @file syndrome_source.h
-/// @brief `syndrome_source` and its two 
-/// implementations: `static_source` (replay pre-supplied rounds) and
-/// `stim_memory_source` (JIT round generation from a Stim memory circuit,
-/// produced strictly on demand so the persistent simulator's state never 
-/// advances further than what has actually been consumed. 
+/// @brief `syndrome_source` and two of its implementations: `static_source`
+/// (replay pre-supplied rounds) and `stim_memory_source` (JIT round
+/// generation from a Stim memory circuit, produced strictly on demand so
+/// the persistent simulator's state never advances further than what has
+/// actually been consumed). A third implementation,
+/// `cudaq_memory_source` -- syndrome streams derived from CUDA-Q's own
+/// `memory_circuit` kernel -- lives in the sibling header
+/// `cudaq_memory_source.h`, since it depends on the QEC `code`/experiments
+/// API rather than just Stim.
 
 #include <cstdint>
 #include <memory>

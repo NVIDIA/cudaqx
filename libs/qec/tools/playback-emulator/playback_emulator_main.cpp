@@ -160,14 +160,18 @@ int main(int argc, char **argv) {
     for (const auto &d : config.decoders)
       decoder_ids.push_back(static_cast<std::uint64_t>(d.id));
 
-    std::unique_ptr<session> owned_null_session;
     std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> owned_sessions;
     std::unordered_map<std::uint64_t, session *> router;
 
     if (backend_name == "null") {
-      owned_null_session = make_null_session();
-      for (auto id : decoder_ids)
-        router[id] = owned_null_session.get();
+      // One session per decoder_id, same as every other backend -- each
+      // decoder now dispatches on its own thread, so sharing one instance
+      // across decoder_ids is never safe.
+      for (auto id : decoder_ids) {
+        auto s = make_null_session();
+        router[id] = s.get();
+        owned_sessions.emplace_back(id, std::move(s));
+      }
     } else if (backend_name == "inproc") {
       owned_sessions = make_inproc_sessions(config);
       for (auto &[id, sess] : owned_sessions)

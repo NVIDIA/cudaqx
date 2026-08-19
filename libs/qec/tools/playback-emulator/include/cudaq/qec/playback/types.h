@@ -61,7 +61,7 @@ inline const char *to_string(operation op) {
 /// occupies 0..7) so a reader can tell which one a given record used from
 /// `record::op` alone.
 enum class stream_terminate : std::int32_t {
-  READY = 100,
+  OK = 100,
   SOURCE_EXHAUSTED = 101,
   EXHAUSTED_ROUNDS = 102,
   ERROR = 103,
@@ -69,8 +69,8 @@ enum class stream_terminate : std::int32_t {
 
 inline const char *to_string(stream_terminate t) {
   switch (t) {
-  case stream_terminate::READY:
-    return "READY";
+  case stream_terminate::OK:
+    return "OK";
   case stream_terminate::SOURCE_EXHAUSTED:
     return "SOURCE_EXHAUSTED";
   case stream_terminate::EXHAUSTED_ROUNDS:
@@ -85,7 +85,14 @@ inline const char *to_string(stream_terminate t) {
 /// blocking/retry/result-size semantics, which are properties of the
 /// operation's wire mapping (op_traits), derived once, not stored per event.
 struct event {
-  std::uint64_t deadline_ns = 0; // absolute offset from t0, resolved at parse
+  std::uint64_t deadline_ns = 0; // meaning depends on relative_deadline:
+                                 // absolute offset from t0 (resolved at
+                                 // parse) when false, or a delta to resolve
+                                 // at run time against the previous event's
+                                 // return_ns when true
+  bool relative_deadline = false; // tick was written as '+N' (a delta from
+                                  // the previous event's actual completion)
+                                  // rather than an absolute tick from t0
   std::uint64_t decoder_id = 0;  // routing key -- required on every event
   operation op = operation::reset;
   // syndrome source for enqueue/enqueue_data/stream_until (one op per
@@ -95,6 +102,9 @@ struct event {
   std::uint32_t syndrome_count = 0;
   std::uint32_t expected_offset = 0; // into schedule::expected_arena
   std::uint32_t expected_count = 0;
+  std::uint32_t return_size = 0; // explicit correction-bit width; overrides
+                                 // expected_count when larger (get_corrections /
+                                 // stream_until only)
 
   // -- stream_until only; meaningless (left default) for every other op --
   /// Pacing, in ticks. 0 means unpaced (rounds fire as fast as the decoder
@@ -121,6 +131,10 @@ struct record {
   std::uint32_t event_index = 0;
   std::uint64_t decoder_id = 0;
   operation op = operation::reset;
+  // True once this event's decoder thread actually reached and dispatched
+  // it. False means a hard error elsewhere aborted the run before this
+  // decoder's thread got to it -- every other field is left at its default.
+  bool dispatched = false;
 
   // -- timing (ns, relative to t0) --
   std::uint64_t deadline_ns = 0; // where it was supposed to fire

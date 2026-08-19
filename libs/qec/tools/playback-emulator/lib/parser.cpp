@@ -119,13 +119,17 @@ schedule parse(std::string_view text,
             "expected '<tick> <decoder_id> <operation> [operands...]', got '" +
             raw_line + "'");
 
-      const std::uint64_t tick = parse_u64(tokens[0], "tick");
-      if (have_last_tick && tick < last_tick)
-        throw std::invalid_argument(
-            "ticks must be non-decreasing (saw " + std::to_string(tick) +
-            " after " + std::to_string(last_tick) + ")");
-      last_tick = tick;
-      have_last_tick = true;
+      const bool relative = !tokens[0].empty() && tokens[0][0] == '+';
+      const std::uint64_t tick =
+          parse_u64(relative ? tokens[0].substr(1) : tokens[0], "tick");
+      if (!relative) {
+        if (have_last_tick && tick < last_tick)
+          throw std::invalid_argument(
+              "ticks must be non-decreasing (saw " + std::to_string(tick) +
+              " after " + std::to_string(last_tick) + ")");
+        last_tick = tick;
+        have_last_tick = true;
+      }
 
       std::uint64_t deadline_ns = 0;
       if (tick != 0 && __builtin_mul_overflow(tick, tick_ns, &deadline_ns))
@@ -140,6 +144,7 @@ schedule parse(std::string_view text,
 
       event e;
       e.deadline_ns = deadline_ns;
+      e.relative_deadline = relative;
       e.decoder_id = decoder_id;
 
       const std::string &op_name = tokens[2];
@@ -172,14 +177,35 @@ schedule parse(std::string_view text,
         e.source_id = parse_u32(value, "source");
       } else if (op_name == "get_corrections") {
         e.op = operation::get_corrections;
-        if (operands.size() > 1)
+        if (operands.size() > 2)
           throw std::invalid_argument(
-              "'get_corrections' takes at most one operand (expected bits)");
-        if (!operands.empty()) {
-          e.expected_offset = static_cast<std::uint32_t>(sched.expected_arena.size());
-          append_bits(sched.expected_arena, operands[0], "get_corrections expected");
-          e.expected_count = static_cast<std::uint32_t>(operands[0].size());
+              "'get_corrections' takes at most two operands "
+              "(return_size=N and/or expected bits)");
+        bool have_return_size = false, have_expected = false;
+        for (const auto &tok : operands) {
+          std::string value;
+          if (key_is(tok, "return_size", value)) {
+            if (have_return_size)
+              throw std::invalid_argument(
+                  "'get_corrections' takes at most one 'return_size=' operand");
+            e.return_size = parse_u32(value, "return_size");
+            have_return_size = true;
+          } else {
+            if (have_expected)
+              throw std::invalid_argument(
+                  "'get_corrections' takes at most one expected-bits operand");
+            e.expected_offset = static_cast<std::uint32_t>(sched.expected_arena.size());
+            append_bits(sched.expected_arena, tok, "get_corrections expected");
+            e.expected_count = static_cast<std::uint32_t>(tok.size());
+            have_expected = true;
+          }
         }
+        if (have_return_size && e.expected_count != 0 &&
+            e.return_size != e.expected_count)
+          throw std::invalid_argument(
+              "'get_corrections' return_size=" + std::to_string(e.return_size) +
+              " does not match the width of the expected bits (" +
+              std::to_string(e.expected_count) + ")");
       } else if (op_name == "stream_until") {
         e.op = operation::stream_until;
         bool have_source = false;
@@ -195,6 +221,8 @@ schedule parse(std::string_view text,
             e.stream_every_ticks = parse_u64(value, "every");
           } else if (key_is(tok, "max_rounds", value)) {
             e.stream_max_rounds = parse_u32(value, "max_rounds");
+          } else if (key_is(tok, "return_size", value)) {
+            e.return_size = parse_u32(value, "return_size");
           } else if (std::all_of(tok.begin(), tok.end(), [](unsigned char c) {
                        return c == '0' || c == '1';
                      })) {
@@ -208,6 +236,12 @@ schedule parse(std::string_view text,
         }
         if (!have_source)
           throw std::invalid_argument("'stream_until' requires 'source=N'");
+        if (e.return_size != 0 && e.expected_count != 0 &&
+            e.return_size != e.expected_count)
+          throw std::invalid_argument(
+              "'stream_until' return_size=" + std::to_string(e.return_size) +
+              " does not match the width of the expected bits (" +
+              std::to_string(e.expected_count) + ")");
       } else {
         throw std::invalid_argument("unknown operation '" + op_name + "'");
       }
@@ -219,10 +253,19 @@ schedule parse(std::string_view text,
     }
   }
 
-  std::stable_sort(sched.events.begin(), sched.events.end(),
-                   [](const event &a, const event &b) {
-                     return a.deadline_ns < b.deadline_ns;
-                   });
+  // A relative event's deadline_ns is a delta, not an absolute offset, and
+  // is only meaningful relative to whatever precedes it in file order --
+  // sorting by deadline_ns would scatter it away from that predecessor. A
+  // schedule containing any relative tick must already be written in
+  // intended dispatch order.
+  const bool has_relative =
+      std::any_of(sched.events.begin(), sched.events.end(),
+                 [](const event &e) { return e.relative_deadline; });
+  if (!has_relative)
+    std::stable_sort(sched.events.begin(), sched.events.end(),
+                     [](const event &a, const event &b) {
+                       return a.deadline_ns < b.deadline_ns;
+                     });
 
   return sched;
 }
