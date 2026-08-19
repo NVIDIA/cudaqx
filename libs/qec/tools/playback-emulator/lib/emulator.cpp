@@ -12,7 +12,7 @@
 /// timing thread per decoder_id, each doing nothing between its own
 /// deadlines but wait and dispatch -- decoders never block on each other.
 
-#include "cudaq/qec/playback/emulator.h"
+#include "emulator.h"
 
 #include <algorithm>
 #include <atomic>

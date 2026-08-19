@@ -10,7 +10,7 @@
 /// @brief parse(): Line-oriented. Unknown operation, malformed bit string,
 /// or decoder_id absent from the config is a parse error 
 
-#include "cudaq/qec/playback/emulator.h"
+#include "emulator.h"
 
 #include <algorithm>
 #include <charconv>

@@ -13,9 +13,9 @@
 /// tools/decoding-server/decoding_server.cpp) rather than pulling in a CLI
 /// argument-parsing dependency.
 
-#include "cudaq/qec/playback/backends.h"
-#include "cudaq/qec/playback/emulator.h"
-#include "cudaq/qec/playback/syndrome_source.h"
+#include "backends.h"
+#include "emulator.h"
+#include "syndrome_source.h"
 
 #include <fstream>
 #include <iostream>

@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "cudaq/qec/playback/syndrome_source.h"
+#include "syndrome_source.h"
 
 #include "stim.h"
 

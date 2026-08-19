@@ -11,7 +11,7 @@
 /// and elide the serialization work the real backends would also have to pay
 /// for.
 
-#include "cudaq/qec/playback/backends.h"
+#include "backends.h"
 
 #include <algorithm>
 #include <atomic>

@@ -57,7 +57,12 @@ cudaqx_add_pymodule(${MODULE_NAME} ${_qec_pymodule_sources})
 if(TARGET cudaq-qec-playback-emulator)
   target_compile_definitions(${MODULE_NAME} PRIVATE CUDAQX_QEC_HAS_PLAYBACK_EMULATOR)
   target_include_directories(${MODULE_NAME} PRIVATE ${_playback_emulator_python_dir})
-  target_link_libraries(${MODULE_NAME} PRIVATE cudaq-qec-playback-emulator)
+  # cudaq_memory_source is its own small static library (see
+  # tools/playback-emulator/lib/CMakeLists.txt) -- py_playback_emulator.cpp
+  # binds cudaq_memory_source, so it needs both.
+  target_link_libraries(${MODULE_NAME} PRIVATE
+    cudaq-qec-playback-emulator
+    cudaq-qec-playback-emulator-cudaq-memory-source)
 endif()
 
 target_link_libraries(${MODULE_NAME}

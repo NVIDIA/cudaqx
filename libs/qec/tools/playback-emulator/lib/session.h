@@ -23,6 +23,26 @@ namespace cudaq::qec::playback {
 
 using cudaq::qec::decoding::rpc::RpcStatus;
 
+inline const char *to_string(RpcStatus status) {
+  switch (status) {
+  case RpcStatus::OK:
+    return "OK";
+  case RpcStatus::INVALID_DECODER:
+    return "INVALID_DECODER";
+  case RpcStatus::BAD_REQUEST:
+    return "BAD_REQUEST";
+  case RpcStatus::INTERNAL_ERROR:
+    return "INTERNAL_ERROR";
+  case RpcStatus::NOT_READY:
+    return "NOT_READY";
+  case RpcStatus::BUSY:
+    return "BUSY";
+  case RpcStatus::SYNDROMES_DROPPED:
+    return "SYNDROMES_DROPPED";
+  }
+  return "unknown";
+}
+
 /// A pre-serialized RPC request: RPCHeader + payload (+ trailing bit-packed
 /// syndrome bytes for `enqueue`). Non-owning -- the bytes live in the
 /// run_plan's frame arena, built once before t0.

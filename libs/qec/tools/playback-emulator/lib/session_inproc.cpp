@@ -11,15 +11,15 @@
 /// cores, skipping shared-memory rings and CUDA graph dispatch entirely --
 /// the emulator only needs the decoder's answer, not the GPU dispatch path.
 /// A decoder's own decode work may run on its own thread internally (e.g.
-/// dummy_sifl_decoder's background "decode" sleep); that is the decoder
-/// implementation's business, not this class's -- an inproc_session is a
+/// a background "decode" sleep); that is the decoder implementation's
+/// business, not this class's -- an inproc_session is a
 /// thin, synchronous dispatcher to one already-resolved DecodingSession,
 /// mirroring how a udp_session is bound to exactly one remote decoder
 /// (a session always corresponds to exactly one decoder).
 
 #include "RpcSlot.h"
 #include "SessionRegistry.h"
-#include "cudaq/qec/playback/backends.h"
+#include "backends.h"
 
 #include <cassert>
 

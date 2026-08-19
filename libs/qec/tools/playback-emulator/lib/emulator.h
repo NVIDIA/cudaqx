@@ -12,9 +12,9 @@
 /// @brief Top-level entry points: parse() -> plan() -> run() 
 /// Callable identically from the CLI tool and the Python binding.
 
-#include "cudaq/qec/playback/session.h"
-#include "cudaq/qec/playback/syndrome_source.h"
-#include "cudaq/qec/playback/types.h"
+#include "session.h"
+#include "syndrome_source.h"
+#include "types.h"
 
 #include <memory>
 #include <span>

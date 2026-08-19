@@ -14,7 +14,7 @@
 /// generic RPCHeader/RPCResponse framing needed to match a reply to its
 /// request. It has no notion of which RPC a frame holds.
 
-#include "cudaq/qec/playback/backends.h"
+#include "backends.h"
 
 #include <algorithm>
 #include <arpa/inet.h>

@@ -15,7 +15,7 @@
 /// hand-supplied or independently-derived Stim circuit (see
 /// `stim_memory_source` for that).
 
-#include "cudaq/qec/playback/syndrome_source.h"
+#include "syndrome_source.h"
 
 #include <cstdint>
 #include <memory>

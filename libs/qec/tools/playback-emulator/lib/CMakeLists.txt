@@ -37,11 +37,12 @@ target_compile_features(cudaq-qec-playback-emulator PUBLIC cxx_std_20)
 
 target_include_directories(cudaq-qec-playback-emulator
   PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-    $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${_playback_core_include_dir}>
-    $<BUILD_INTERFACE:${CUDAQ_REALTIME_INCLUDE_DIR}>
-    $<INSTALL_INTERFACE:include>
+    # No installed SDK to export: this tool's headers live right here in
+    # lib/, next to the .cpp files that implement them.
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDAQX_QEC_INCLUDE_DIR}
+    ${_playback_core_include_dir}
+    ${CUDAQ_REALTIME_INCLUDE_DIR}
   PRIVATE
     # RpcSlot.h / SessionRegistry.h / DecodingSession.h: the in-process and
     # UDP backends dispatch straight to these payload-level cores rather
@@ -85,10 +86,9 @@ target_compile_features(cudaq-qec-playback-emulator-cudaq-memory-source PUBLIC c
 
 target_include_directories(cudaq-qec-playback-emulator-cudaq-memory-source
   PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-    $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
-    $<BUILD_INTERFACE:${_playback_core_include_dir}>
-    $<INSTALL_INTERFACE:include>
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDAQX_QEC_INCLUDE_DIR}
+    ${_playback_core_include_dir}
   PRIVATE
     # device/memory_circuit.h: the actual kernel this source streams from,
     # an internal (not installed) header -- same in-tree-only access

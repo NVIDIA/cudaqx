@@ -14,7 +14,7 @@
 /// straight to DecodingSession cores), and UDP (connected datagram sockets to
 /// a decoding server). Only factory functions are public
 
-#include "cudaq/qec/playback/session.h"
+#include "session.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
 #include <memory>

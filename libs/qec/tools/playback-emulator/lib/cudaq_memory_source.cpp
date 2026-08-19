@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "cudaq/qec/playback/cudaq_memory_source.h"
+#include "cudaq_memory_source.h"
 
 #include "cudaq.h"
 #include "cuda-qx/core/tensor.h"

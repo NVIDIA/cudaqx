@@ -18,10 +18,10 @@
 
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/experiments.h"
-#include "cudaq/qec/playback/backends.h"
-#include "cudaq/qec/playback/cudaq_memory_source.h"
-#include "cudaq/qec/playback/emulator.h"
-#include "cudaq/qec/playback/syndrome_source.h"
+#include "backends.h"
+#include "cudaq_memory_source.h"
+#include "emulator.h"
+#include "syndrome_source.h"
 
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
