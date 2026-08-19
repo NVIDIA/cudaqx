@@ -26,11 +26,14 @@
 // provides the strong definition of this factory; anywhere else the weak
 // reference is null and make_transport throws.
 extern "C" __attribute__((weak)) cudaq::qec::decoding_server::ITransceiver *
-cudaqx_qec_make_device_graph_transceiver(int pinned_cuda_device);
+cudaqx_qec_make_device_graph_transceiver(
+    int pinned_cuda_device,
+    const cudaq::qec::decoding::config::transport_shape_override *transport);
 
 namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::DecoderDispatch;
+using cudaq::qec::decoding::config::transport_shape_override;
 
 /// Resolve the CUDA device a decode pipeline runs on from the decoder's
 /// cuda_device_id pin; an unpinned decoder (-1) defaults to device 0. The
@@ -43,8 +46,8 @@ int resolve_decode_device(int decoder_pin) {
 }
 
 std::unique_ptr<ITransceiver>
-DecodingServer::make_transport(DecoderDispatch dispatch,
-                               int pinned_cuda_device) {
+DecodingServer::make_transport(DecoderDispatch dispatch, int pinned_cuda_device,
+                               const transport_shape_override &transport) {
   switch (dispatch) {
   case DecoderDispatch::device_graph:
     // device_graph lives in the cudaq-qec-decoding-server-device-graph
@@ -53,7 +56,8 @@ DecodingServer::make_transport(DecoderDispatch dispatch,
     // transceiver config lives; we just thread the pin to it.
     if (cudaqx_qec_make_device_graph_transceiver)
       return std::unique_ptr<ITransceiver>(
-          cudaqx_qec_make_device_graph_transceiver(pinned_cuda_device));
+          cudaqx_qec_make_device_graph_transceiver(pinned_cuda_device,
+                                                   &transport));
     throw std::runtime_error(
         "device_graph dispatch requested but the device-graph component is "
         "not linked into this binary. Link "
@@ -95,7 +99,8 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
       boot_sessions.size() == 1
           ? boot_sessions.begin()->second->dec->get_cuda_device_id()
           : -1;
-  auto t = make_transport(dispatch, pinned_cuda_device);
+  auto t = make_transport(dispatch, pinned_cuda_device,
+                          config.transport.resolve_device_graph());
   ITransceiver *raw = t.get();
   owned_transports_.push_back(std::move(t));
 

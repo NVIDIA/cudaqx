@@ -223,7 +223,7 @@ Run options:
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
   --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
-                         gpu_roce uses page-size as QEC_DEVICE_GRAPH_FRAME_SIZE)
+                         gpu_roce derives payload size from page-size in YAML)
   --gpu N                GPU device id for gpu_roce (default: 0)
   --gpu-roce-num-pages N Server GPU RoCE ring slots (default: the HSB 64-WQE
                          depth; values above it are clamped, since a ring with
@@ -356,15 +356,27 @@ if [[ "$TRANSPORT" == "gpu_roce" ]]; then
              "depth ($HSB_WQE_DEPTH); clamping to $HSB_WQE_DEPTH to avoid dropped frames" >&2
         GPU_ROCE_NUM_PAGES="$HSB_WQE_DEPTH"
     fi
+
+    # gpu_roce requires a 128-byte-aligned server stride and a host-page-
+    # aligned ring allocation. The playback frame retains the requested page
+    # size, while the provider receives the aligned server stride and the
+    # payload size after the 24-byte RPC header.
+    SERVER_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
+    GPU_ROCE_PAYLOAD_SIZE=$((PAGE_SIZE - 24))
+    if (( GPU_ROCE_PAYLOAD_SIZE <= 0 )); then
+        echo "ERROR: gpu_roce page-size must exceed the 24-byte RPC header" >&2
+        exit 1
+    fi
+
     # DOCA requires the gpu_roce ring allocation (num_pages * page size) to be
     # a multiple of the HOST page size (GpuRoceTransceiver rejects it at
     # startup otherwise). 64 x 384 B = 24 KiB satisfies 4K/8K-page kernels;
     # 16K/64K-page hosts (some aarch64 configs) need a larger stride.
-    host_page=$(getconf PAGESIZE)
-    if (( (GPU_ROCE_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
-        echo "ERROR: gpu_roce ring ($GPU_ROCE_NUM_PAGES pages x $PAGE_SIZE B) is not a multiple of" >&2
-        echo "       this host's page size ($host_page B). Pass --page-size <multiple of" >&2
-        echo "       $(( host_page / GPU_ROCE_NUM_PAGES ))> so the WQE-depth ring stays host-page aligned." >&2
+    HOST_PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
+    if (( (GPU_ROCE_NUM_PAGES * SERVER_PAGE_SIZE) % HOST_PAGE_SIZE != 0 )); then
+        echo "ERROR: gpu_roce ring ($GPU_ROCE_NUM_PAGES pages x $SERVER_PAGE_SIZE B) is not a multiple of" >&2
+        echo "       this host's page size ($HOST_PAGE_SIZE B). Pass --page-size so its" >&2
+        echo "       128-byte-aligned server stride keeps the WQE-depth ring host-page aligned." >&2
         exit 1
     fi
 fi
@@ -886,27 +898,6 @@ generate_data_files() {
         _info "Config carries the trt_decoder entry (onnx_load_path set)"
     fi
 
-    # The server selects the dispatch shape from the per-decoder `dispatch:`
-    # YAML key (default host). For device_graph, `cuda_device_id` pins graph
-    # capture and worker-thread execution to the selected GPU. The generator
-    # doesn't emit these non-default optional fields, so inject them into our
-    # generated config directly under the decoder's `type:` line.
-    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
-        _info "Injecting 'dispatch: device_graph' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
-        awk -v gpu_id="$GPU_ID" '{ print }
-             /^[[:space:]]*type:/ && !done {
-                 print "    dispatch:        device_graph"
-                 print "    cuda_device_id:  " gpu_id
-                 done = 1
-             }' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" \
-            && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-        if ! grep -q "dispatch:.*device_graph" "$CONFIG_FILE" || \
-           ! grep -q "cuda_device_id:.*$GPU_ID" "$CONFIG_FILE"; then
-            _err "Failed to inject device_graph dispatch/cuda_device_id into $CONFIG_FILE"
-            return 1
-        fi
-    fi
-
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
           "--p_spam $GEN_P_SPAM --num_shots $GEN_SHOTS --yaml $(basename "$CONFIG_FILE")" \
           "--save_syndrome $(basename "$SYNDROMES_FILE")"
@@ -1045,6 +1036,136 @@ extract_hex() {
 
 # Start the decoding server against $1=peer_ip $2=remote_qp; scrape its
 # endpoint line into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
+prepare_gpu_roce_config() {
+    local peer_ip="$1" remote_qp="$2"
+    local source_config="$CONFIG_FILE" runtime_config
+
+    if ! python3 -c 'import yaml' 2>/dev/null; then
+        _err "python3 module 'yaml' (PyYAML) is required to prepare the gpu_roce launch config"
+        return 1
+    fi
+    runtime_config=$(mktemp /tmp/hsb_decoding_server_config.XXXXXX.yml)
+    TEMP_FILES+=("$runtime_config")
+    if ! python3 - "$source_config" "$runtime_config" "$GPU_ID" \
+            "$BRIDGE_DEVICE" "$peer_ip" "$remote_qp" "$SERVER_PAGE_SIZE" \
+            "$GPU_ROCE_NUM_PAGES" "$GPU_ROCE_PAYLOAD_SIZE" <<'PY'
+import sys
+
+import yaml
+
+runtime_options = {"--device", "--peer-ip", "--remote-qp", "--page-size",
+                   "--num-pages", "--payload-size"}
+
+
+def launch_args(section, location):
+    if "args" not in section:
+        return []
+    args = section["args"]
+    if not isinstance(args, list) or not all(isinstance(arg, str)
+                                              for arg in args):
+        raise ValueError(f"{location}.args must be a list of strings")
+    result = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        option = arg.split("=", 1)[0]
+        if option == "--gpu":
+            raise ValueError(f"{location}.args must not set --gpu; "
+                             "use decoder.cuda_device_id")
+        if option not in runtime_options:
+            result.append(arg)
+            index += 1
+            continue
+        if arg == option:
+            if index + 1 >= len(args) or args[index + 1].startswith("--"):
+                raise ValueError(f"{location}.args has no value for {option}")
+            index += 2
+        else:
+            index += 1
+    return result
+
+
+source_path, output_path, gpu_text, device, peer_ip, remote_qp, page_size, \
+    num_pages, payload_size = sys.argv[1:]
+
+try:
+    try:
+        gpu_id = int(gpu_text, 10)
+    except ValueError as error:
+        raise ValueError(
+            f"requested cuda_device_id {gpu_text!r} is not an integer") from error
+    if gpu_id < 0:
+        raise ValueError("requested cuda_device_id must be non-negative")
+
+    with open(source_path, encoding="utf-8") as source:
+        config = yaml.safe_load(source)
+    if not isinstance(config, dict):
+        raise ValueError("configuration root must be a YAML mapping")
+
+    decoders = config.get("decoders")
+    if not isinstance(decoders, list) or len(decoders) != 1:
+        count = len(decoders) if isinstance(decoders, list) else "non-list"
+        raise ValueError(
+            "gpu_roce HSB helper supports exactly one decoder "
+            f"(found {count})")
+    decoder = decoders[0]
+    if not isinstance(decoder, dict):
+        raise ValueError("decoders[0] must be a YAML mapping")
+
+    if "dispatch" not in decoder:
+        decoder["dispatch"] = "device_graph"
+    elif decoder["dispatch"] != "device_graph":
+        raise ValueError(
+            "decoders[0].dispatch must be device_graph for gpu_roce "
+            f"(found {decoder['dispatch']!r})")
+
+    if "cuda_device_id" not in decoder:
+        decoder["cuda_device_id"] = gpu_id
+    elif (type(decoder["cuda_device_id"]) is not int or
+          decoder["cuda_device_id"] != gpu_id):
+        raise ValueError(
+            "decoders[0].cuda_device_id contradicts --gpu "
+            f"(YAML {decoder['cuda_device_id']!r}, requested {gpu_id})")
+
+    transport = config.get("transport", {})
+    if not isinstance(transport, dict):
+        raise ValueError("transport must be a YAML mapping")
+    if transport.get("provider", "gpu_roce") != "gpu_roce":
+        raise ValueError(
+            "transport.provider must be gpu_roce "
+            f"(found {transport['provider']!r})")
+    device_graph = transport.get("device_graph", {})
+    if not isinstance(device_graph, dict):
+        raise ValueError("transport.device_graph must be a YAML mapping")
+    if device_graph.get("provider", "gpu_roce") != "gpu_roce":
+        raise ValueError(
+            "transport.device_graph.provider must be gpu_roce "
+            f"(found {device_graph['provider']!r})")
+    args = launch_args(transport, "transport")
+    args += launch_args(device_graph, "transport.device_graph")
+    config["transport"] = {"provider": "gpu_roce", "args": args + [
+        f"--device={device}",
+        f"--peer-ip={peer_ip}",
+        f"--remote-qp={remote_qp}",
+        f"--page-size={page_size}",
+        f"--num-pages={num_pages}",
+        f"--payload-size={payload_size}",
+    ]}
+
+    with open(output_path, "w", encoding="utf-8") as output:
+        yaml.safe_dump(config, output, explicit_end=True, sort_keys=False)
+except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
+    print(f"ERROR: invalid gpu_roce launch config {source_path}: {error}",
+          file=sys.stderr)
+    sys.exit(1)
+PY
+    then
+        return 1
+    fi
+    CONFIG_FILE="$runtime_config"
+    _info "Authoritative GPU RoCE launch YAML written to $CONFIG_FILE (source unchanged: $source_config)"
+}
+
 start_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
 
@@ -1066,19 +1187,13 @@ start_server() {
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
         # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
         # on the GPU and the captured RelayBP decode graph fires device-side.
-        # The device-graph transceiver is configured via QEC_DEVICE_GRAPH_*
-        # env (the server's device_graph mode ignores the cpu_roce CLI
-        # flags); dispatch-shape selection comes from the config's
-        # `dispatch: device_graph` key, injected at config-generation time.
+        # The temporary launch YAML prepared below makes the gpu_roce provider,
+        # device_graph dispatch, GPU, and runtime endpoint authoritative.
         # Eager module loading avoids lazy-load stalls inside the persistent
         # scheduler (same as the old bridge launcher).
+        prepare_gpu_roce_config "$peer_ip" "$remote_qp" || return 1
         CUDA_MODULE_LOADING=EAGER \
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
-        QEC_DEVICE_GRAPH_DEVICE="$BRIDGE_DEVICE" \
-        QEC_DEVICE_GRAPH_PEER_IP="$peer_ip" \
-        QEC_DEVICE_GRAPH_REMOTE_QP="$((remote_qp))" \
-        QEC_DEVICE_GRAPH_FRAME_SIZE="$PAGE_SIZE" \
-        QEC_DEVICE_GRAPH_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
             --timeout="$TIMEOUT" \
@@ -1256,7 +1371,7 @@ run_fpga() {
 main() {
     _banner "HSB FPGA Decoding Server Test"
 
-    _info "Decoder: $DECODER (decoding server, CPU HOST_CALL path)"
+    _info "Decoder: $DECODER (decoding server, transport=$TRANSPORT)"
     if $EMULATE; then
         _info "Mode: FPGA Emulation (3-tool)"
     else
