@@ -92,6 +92,49 @@ decoders:
       std::runtime_error);
 }
 
+TEST(DecoderYAMLTest, AcceptsBlockStyleSparseMatrices) {
+  const std::string yaml = R"(
+decoders:
+- id: 0
+  type: multi_error_lut
+  dispatch: device_graph
+  cuda_device_id: 0
+  block_size: 2
+  syndrome_size: 2
+  H_sparse:
+  - 0
+  - -1
+  - 1
+  - -1
+  O_sparse:
+  - 1
+  - -1
+  D_sparse:
+  - 0
+  - -1
+  - 3
+  - -1
+transport:
+  provider: gpu_roce
+  args:
+  - --device=mlx5_4
+  - --peer-ip=192.168.0.2
+)";
+
+  const auto config =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+
+  ASSERT_EQ(config.decoders.size(), 1u);
+  const auto &decoder = config.decoders.front();
+  EXPECT_EQ(decoder.H_sparse, (std::vector<std::int64_t>{0, -1, 1, -1}));
+  EXPECT_EQ(decoder.O_sparse, (std::vector<std::int64_t>{1, -1}));
+  EXPECT_EQ(decoder.D_sparse, (std::vector<std::int64_t>{0, -1, 3, -1}));
+  EXPECT_EQ(config.transport.provider, "gpu_roce");
+  EXPECT_EQ(
+      config.transport.args,
+      (std::vector<std::string>{"--device=mlx5_4", "--peer-ip=192.168.0.2"}));
+}
+
 /// Helper function to test that a decoder configuration can be serialized to
 /// and from YAML.
 void test_decoder_yaml_roundtrip(
@@ -327,6 +370,11 @@ decoders:
   EXPECT_EQ(parsed.transport.device_graph.provider, "gpu_roce");
   ASSERT_EQ(parsed.transport.device_graph.args.size(), 1u);
   EXPECT_EQ(parsed.transport.device_graph.args[0], "--pinned-rings");
+  const auto resolved = parsed.transport.resolve_device_graph();
+  EXPECT_EQ(resolved.provider, "gpu_roce");
+  ASSERT_EQ(resolved.args.size(), 2u);
+  EXPECT_EQ(resolved.args[0], "--num-slots=8");
+  EXPECT_EQ(resolved.args[1], "--pinned-rings");
   ASSERT_EQ(parsed.decoders.size(), 2u);
   EXPECT_EQ(parsed.decoders[0].dispatch,
             cudaq::qec::decoding::config::DecoderDispatch::host);

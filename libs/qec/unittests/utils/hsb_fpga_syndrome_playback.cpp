@@ -6,6 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.
  */
 
+#include "cudaq/qec/realtime/decoding_config.h"
+
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -142,69 +145,23 @@ std::uint64_t parse_scalar(const std::string &content,
   }
 }
 
-/// @brief Derive num_observables from O_sparse in the config.
-///
-/// O_sparse encodes each observable as a row of correction indices terminated
-/// by -1, so the number of row terminators is the number of observables.
-std::size_t derive_num_observables(const std::string &content) {
-  std::size_t pos = content.find("O_sparse:");
-  if (pos == std::string::npos)
-    return 0;
-  std::size_t bracket_start = content.find('[', pos);
-  if (bracket_start == std::string::npos)
-    return 0;
-  std::size_t bracket_end = content.find(']', bracket_start);
-  if (bracket_end == std::string::npos)
-    return 0;
-  std::string arr =
-      content.substr(bracket_start + 1, bracket_end - bracket_start - 1);
-
-  std::size_t rows = 0;
-  std::istringstream ss(arr);
-  std::string token;
-  while (std::getline(ss, token, ',')) {
-    token.erase(0, token.find_first_not_of(" \t\n\r"));
-    token.erase(token.find_last_not_of(" \t\n\r") + 1);
-    if (token == "-1")
-      ++rows;
-  }
-  return rows;
-}
-
 /// @brief Derive num_measurements from D_sparse in the config.
 ///
 /// D_sparse encodes the detector-measurement matrix in row-major order with
 /// -1 as the row delimiter.  The column indices are measurement indices, so
 /// max(column indices) + 1 = num_measurements.  Returns 0 if D_sparse is
 /// absent or empty.
-std::size_t derive_num_measurements(const std::string &content) {
-  std::size_t pos = content.find("D_sparse:");
-  if (pos == std::string::npos)
-    return 0;
-  std::size_t bracket_start = content.find('[', pos);
-  if (bracket_start == std::string::npos)
-    return 0;
-  std::size_t bracket_end = content.find(']', bracket_start);
-  if (bracket_end == std::string::npos)
-    return 0;
-  std::string arr =
-      content.substr(bracket_start + 1, bracket_end - bracket_start - 1);
-  int max_col = -1;
-  std::istringstream ss(arr);
-  std::string token;
-  while (std::getline(ss, token, ',')) {
-    token.erase(0, token.find_first_not_of(" \t\n\r"));
-    token.erase(token.find_last_not_of(" \t\n\r") + 1);
-    if (token.empty())
+std::size_t derive_num_measurements(const std::vector<std::int64_t> &d_sparse) {
+  std::size_t span = 0;
+  for (const auto value : d_sparse) {
+    if (value < 0)
       continue;
-    try {
-      int val = std::stoi(token);
-      if (val >= 0 && val > max_col)
-        max_col = val;
-    } catch (...) {
-    }
+    const auto index = static_cast<std::uint64_t>(value);
+    if (index >= std::numeric_limits<std::size_t>::max())
+      throw std::runtime_error("D_sparse measurement index is too large");
+    span = std::max(span, static_cast<std::size_t>(index + 1));
   }
-  return (max_col >= 0) ? static_cast<std::size_t>(max_col + 1) : 0;
+  return span;
 }
 
 // ============================================================================
@@ -1105,7 +1062,52 @@ int main(int argc, char **argv) {
   std::string config_content((std::istreambuf_iterator<char>(config_file)),
                              std::istreambuf_iterator<char>());
 
-  std::size_t syndrome_size = parse_scalar(config_content, "syndrome_size");
+  std::size_t syndrome_size = 0;
+  std::size_t num_measurements = 0;
+  std::size_t num_observables = 0;
+  if (options.per_round) {
+    cudaq::qec::decoding::config::multi_decoder_config config;
+    try {
+      config =
+          cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+              config_content);
+    } catch (const std::exception &error) {
+      std::cerr << "Invalid config file " << config_path << ": " << error.what()
+                << "\n";
+      return 1;
+    }
+    if (config.decoders.empty()) {
+      std::cerr << "Config file contains no decoders\n";
+      return 1;
+    }
+
+    const auto &decoder_config = config.decoders.front();
+    if (decoder_config.syndrome_size >
+        std::numeric_limits<std::size_t>::max()) {
+      std::cerr << "syndrome_size is too large\n";
+      return 1;
+    }
+    syndrome_size = static_cast<std::size_t>(decoder_config.syndrome_size);
+    try {
+      num_measurements = derive_num_measurements(decoder_config.D_sparse);
+    } catch (const std::exception &error) {
+      std::cerr << "Invalid config file " << config_path << ": " << error.what()
+                << "\n";
+      return 1;
+    }
+    num_observables = static_cast<std::size_t>(std::count(
+        decoder_config.O_sparse.begin(), decoder_config.O_sparse.end(), -1));
+  } else {
+    // The predecoder playback path intentionally accepts a minimal YAML file
+    // containing only syndrome_size; it is not a decoder configuration.
+    const auto parsed_size = parse_scalar(config_content, "syndrome_size");
+    if (parsed_size > std::numeric_limits<std::size_t>::max()) {
+      std::cerr << "syndrome_size is too large\n";
+      return 1;
+    }
+    syndrome_size = static_cast<std::size_t>(parsed_size);
+  }
+
   if (syndrome_size == 0) {
     std::cerr << "Invalid syndrome_size in config file\n";
     return 1;
@@ -1113,13 +1115,11 @@ int main(int argc, char **argv) {
 
   // num_measurements is the number of raw measurement bits per shot (used as
   // RPC payload size).  Derived from D_sparse (max column index + 1).
-  // Falls back to syndrome_size for backward compat with configs that have
-  // no D matrix (e.g. mock decoder where measurements == syndromes).
-  std::size_t num_measurements = derive_num_measurements(config_content);
+  // Non-per-round predecoder configs have no D matrix because their input
+  // bits are already syndromes, so syndrome_size is their payload size.
   if (num_measurements == 0)
     num_measurements = syndrome_size;
 
-  const std::size_t num_observables = derive_num_observables(config_content);
   if (options.per_round && num_observables == 0) {
     std::cerr << "Per-round mode requires O_sparse in config file\n";
     return 1;
