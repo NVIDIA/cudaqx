@@ -27,7 +27,7 @@
 #                         FPGA into the server's RDMA ring (needs a ConnectX NIC
 #                         cabled to the FPGA).  CPU decoders ride the cpu_roce
 #                         wire on host dispatch; nv-qldpc defaults to the
-#                         hololink wire on device_graph dispatch (the GPU
+#                         gpu_roce wire on device_graph dispatch (the GPU
 #                         device-call scheduler).  There is NO emulator here --
 #                         emulator testing lives in the unittests
 #                         hsb_fpga_decoding_server_test.sh.
@@ -117,7 +117,7 @@ SPACING="10"
 #   DISPATCH which engine consumes each decoder's ring: host (a CPU dispatcher
 #            thread) or device_graph (the GPU device-call scheduler)
 # The combination gate below rejects pairings this example has not wired up.
-WIRE=""                      # udp | cpu_roce | hololink
+WIRE=""                      # udp | cpu_roce | gpu_roce
 DISPATCH=""                  # host | device_graph
 GPU_ID=0
 
@@ -187,9 +187,9 @@ Common:
   --num-shots N           Shots (default: 85 fpga / 200 qpu-kernel)
   --gpu N                 GPU id for nv-qldpc (default 0)
   --wire W                Bridge provider carrying syndromes into the server:
-                          udp | cpu_roce | hololink (default: derived --
+                          udp | cpu_roce | gpu_roce (default: derived --
                           qpu-kernel -> udp; fpga -> cpu_roce for host
-                          dispatch, hololink for device_graph)
+                          dispatch, gpu_roce for device_graph)
   --dispatch D            Per-decoder ring consumer: host | device_graph
                           (default: derived -- fpga + nv-qldpc-decoder ->
                           device_graph, everything else -> host)
@@ -270,7 +270,7 @@ fi
 # The bridge NIC and the FPGA must share a /24: there is no gateway on the
 # FPGA link, and --setup-network flushes the NIC and assigns BRIDGE_IP/24, so
 # a mismatched pair leaves the FPGA unreachable -- the run then dies minutes
-# later as an opaque hololink read_timeout_error. Reject it up front.
+# later as an opaque HSB read timeout. Reject it up front.
 if [[ "$SOURCE" == "fpga" && "${BRIDGE_IP%.*}" != "${FPGA_IP%.*}" ]]; then
     echo "ERROR: --bridge-ip $BRIDGE_IP and --fpga-ip $FPGA_IP are on different" >&2
     echo "       /24 subnets; the FPGA data path is same-subnet routed." >&2
@@ -332,7 +332,7 @@ fi
 #   qpu-kernel : udp wire,      host dispatch  (any decoder incl. trt_decoder)
 #   qpu-kernel : cpu_roce wire, host dispatch  (any decoder incl. trt_decoder)
 #   fpga       : cpu_roce wire, host dispatch  (any decoder incl. trt_decoder)
-#   fpga       : hololink wire, device_graph dispatch  (nv-qldpc-decoder)
+#   fpga       : gpu_roce wire, device_graph dispatch  (nv-qldpc-decoder)
 # Everything else is a real configuration of the decoding server that this
 # example does not (yet) exercise, so it is rejected with the reason.
 # ---------------------------------------------------------------------------
@@ -359,18 +359,19 @@ if [[ "$SOURCE" == "fpga" && "$DECODER" == "nv-qldpc-decoder" ]] && \
 fi
 
 [[ "$WIRE" == "cpu-roce" ]] && WIRE="cpu_roce"   # accept both spellings
+[[ "$WIRE" == "gpu-roce" ]] && WIRE="gpu_roce"
 if [[ -z "$WIRE" ]]; then
     if [[ "$SOURCE" == "qpu-kernel" ]]; then WIRE="udp"
-    elif [[ "$DISPATCH" == "device_graph" ]]; then WIRE="hololink"
+    elif [[ "$DISPATCH" == "device_graph" ]]; then WIRE="gpu_roce"
     else WIRE="cpu_roce"; fi
 fi
-case "$WIRE" in udp|cpu_roce|hololink) ;;
-    *) echo "ERROR: --wire must be udp, cpu_roce, or hololink (got '$WIRE')" >&2; exit 1 ;;
+case "$WIRE" in udp|cpu_roce|gpu_roce) ;;
+    *) echo "ERROR: --wire must be udp, cpu_roce, or gpu_roce (got '$WIRE')" >&2; exit 1 ;;
 esac
 
 if [[ "$SOURCE" == "qpu-kernel" ]]; then
-    if [[ "$WIRE" == "hololink" ]]; then
-        echo "ERROR: the qpu-kernel source is not wired to the hololink wire in" >&2
+    if [[ "$WIRE" == "gpu_roce" ]]; then
+        echo "ERROR: the qpu-kernel source is not wired to the gpu_roce wire in" >&2
         echo "       this example (use --wire udp or --wire cpu_roce)." >&2; exit 1
     fi
     if [[ "$DISPATCH" != "host" ]]; then
@@ -383,8 +384,8 @@ else
             echo "ERROR: device_graph dispatch serves only nv-qldpc-decoder" >&2
             echo "       (got '$DECODER'); CPU decoders use --dispatch host." >&2; exit 1
         fi
-        if [[ "$WIRE" != "hololink" ]]; then
-            echo "ERROR: device_graph dispatch on the FPGA requires the hololink" >&2
+        if [[ "$WIRE" != "gpu_roce" ]]; then
+            echo "ERROR: device_graph dispatch on the FPGA requires the gpu_roce" >&2
             echo "       wire (got '$WIRE')." >&2; exit 1
         fi
     else
@@ -395,11 +396,9 @@ else
     fi
 fi
 
-# The provider library soname is hyphenated (libcudaq-realtime-bridge-cpu-roce.so)
-# while the conventional token is cpu_roce; the server's resolver composes the
-# soname literally from the token, so pass the hyphenated form on the wire.
+# Provider names use the YAML spelling; the server maps underscores to the
+# installed providers' hyphenated sonames.
 WIRE_TOKEN="$WIRE"
-[[ "$WIRE_TOKEN" == "cpu_roce" ]] && WIRE_TOKEN="cpu-roce"
 
 # ---------------------------------------------------------------------------
 # qpu-kernel over cpu_roce: RDMA topology.  Same four-env-var convention as
@@ -474,7 +473,7 @@ resolve_paths() {
         _err "lowered kernel not found: $KERNEL_BIN (build the example, or --kernel PATH)"; exit 1
     fi
     if [[ "$SOURCE" == "fpga" && ! -x "$PLAYBACK_BIN" ]]; then
-        _err "playback tool not found: $PLAYBACK_BIN (a hololink-enabled deliverable)"; exit 1
+        _err "playback tool not found: $PLAYBACK_BIN (an HSB-enabled deliverable)"; exit 1
     fi
 
     # Load path: deliverable libs + plugins, plus the CUDA-Q runtime/realtime.
@@ -939,20 +938,61 @@ setup_network_cpu_roce() {
     fi
 }
 
+prepare_gpu_roce_config() {
+    local peer_ip="$1" remote_qp="$2" num_pages="$3" page_size="$4"
+    local remote_qp_decimal=$((remote_qp))
+    local payload_size=$((PAGE_SIZE - 24))
+    if (( payload_size <= 0 )); then
+        _err "gpu_roce page size ($PAGE_SIZE) must exceed the 24-byte RPC header"
+        return 1
+    fi
+    if grep -Eq '^[[:space:]]*transport:' "$CONFIG_FILE"; then
+        _err "generated config already contains a transport section: $CONFIG_FILE"
+        return 1
+    fi
+
+    # CONFIG_FILE already lives in this run's temporary directory. Strip the
+    # generator's terminal YAML document marker, then serialize the dynamic
+    # endpoint once so the server sees one configuration source.
+    awk '
+        { lines[NR] = $0 }
+        END {
+            last = NR
+            while (last > 0 && lines[last] ~ /^[[:space:]]*$/)
+                --last
+            if (last > 0 && lines[last] ~ /^[[:space:]]*\.\.\.[[:space:]]*$/)
+                --last
+            for (line = 1; line <= last; ++line)
+                print lines[line]
+        }
+    ' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    cat >> "$CONFIG_FILE" <<EOF
+transport:
+  provider: gpu_roce
+  args:
+    - --device=$BRIDGE_DEVICE
+    - --peer-ip=$peer_ip
+    - --remote-qp=$remote_qp_decimal
+    - --page-size=$page_size
+    - --num-pages=$num_pages
+    - --payload-size=$payload_size
+...
+EOF
+    _info "GPU RoCE launch settings written to YAML: $CONFIG_FILE"
+}
+
 start_roce_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
+    local device_graph_num_pages="$4" device_graph_page_size="$5"
     _log "Starting decoding_server (wire=$WIRE, dispatch=$DISPATCH, remote-qp=$remote_qp)"
     local ready
     if [[ "$DISPATCH" == "device_graph" ]]; then
         # All-device_graph config: the standalone device-graph transceiver
-        # brings up the wire itself (defaulting to the hololink provider) from
-        # the QEC_DEVICE_GRAPH_* env; no --transport flag is passed.
+        # brings up the GPU RoCE wire from the generated YAML; no transport
+        # environment variables, CLI selector, or provider arguments are used.
+        prepare_gpu_roce_config "$peer_ip" "$remote_qp" \
+            "$device_graph_num_pages" "$device_graph_page_size" || return 1
         CUDA_MODULE_LOADING=EAGER \
-        QEC_DEVICE_GRAPH_DEVICE="$BRIDGE_DEVICE" \
-        QEC_DEVICE_GRAPH_PEER_IP="$peer_ip" \
-        QEC_DEVICE_GRAPH_REMOTE_QP="$((remote_qp))" \
-        QEC_DEVICE_GRAPH_FRAME_SIZE="$PAGE_SIZE" \
-        QEC_DEVICE_GRAPH_NUM_PAGES="$DEVICE_GRAPH_NUM_PAGES" \
         "$SERVER_BIN" --config="$CONFIG_FILE" --timeout="$TIMEOUT" \
             > >(tee "$server_log") 2>&1 &
         ready="QEC_DECODING_SERVER_READY device_graph"
@@ -991,6 +1031,9 @@ run_fpga() {
     # clamps), device_graph dispatch via DEVICE_GRAPH_NUM_PAGES here.
     local HSB_WQE_DEPTH=64
     local DEVICE_GRAPH_NUM_PAGES="$HSB_WQE_DEPTH"
+    # GPU RoCE ring slots are 128-byte granular. Keep PAGE_SIZE as the frame
+    # budget, but give the provider and playback the same aligned slot stride.
+    local DEVICE_GRAPH_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
     if (( NUM_SLOTS > HSB_WQE_DEPTH )); then
         _warn "NUM_SLOTS=$NUM_SLOTS exceeds the HSB WQE depth ($HSB_WQE_DEPTH); clamping"
         NUM_SLOTS="$HSB_WQE_DEPTH"
@@ -1002,8 +1045,8 @@ run_fpga() {
         # configs) the server would reject the ring at startup, so fail fast
         # with the constraint spelled out.
         local host_page; host_page=$(getconf PAGESIZE)
-        if (( (DEVICE_GRAPH_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
-            _err "device_graph ring ($DEVICE_GRAPH_NUM_PAGES slots x $PAGE_SIZE B) is not a multiple of this host's page size ($host_page B)."
+        if (( (DEVICE_GRAPH_NUM_PAGES * DEVICE_GRAPH_PAGE_SIZE) % host_page != 0 )); then
+            _err "device_graph ring ($DEVICE_GRAPH_NUM_PAGES slots x $DEVICE_GRAPH_PAGE_SIZE B) is not a multiple of this host's page size ($host_page B)."
             _err "The HSB frame stride must be a multiple of $(( host_page / HSB_WQE_DEPTH )) B on this host; see the unittests"
             _err "hsb_fpga_decoding_server_test.sh (--page-size) for a tunable-geometry run."
             exit 1
@@ -1012,7 +1055,8 @@ run_fpga() {
     : "${BRIDGE_DEVICE:=${IB_DEVICE:-rocep1s0f0}}"
 
     local server_log="$GEN_DIR/server.log"
-    start_roce_server "$FPGA_IP" "0x2" "$server_log" || return 1
+    start_roce_server "$FPGA_IP" "0x2" "$server_log" \
+        "$DEVICE_GRAPH_NUM_PAGES" "$DEVICE_GRAPH_PAGE_SIZE" || return 1
 
     _log "Streaming syndromes from the FPGA via playback (spacing=${SPACING}us)"
     # The FPGA writes syndrome frame rid to RDMA slot (rid % num-pages), so the
@@ -1022,10 +1066,14 @@ run_fpga() {
     # (num_slots). The cpu_roce wire's server ring is NUM_SLOTS; the
     # device_graph ring is DEVICE_GRAPH_NUM_PAGES.
     local pb_pages="$NUM_SLOTS"
-    if [[ "$DISPATCH" == "device_graph" ]]; then pb_pages="$DEVICE_GRAPH_NUM_PAGES"; fi
-    local args=( --hololink "$FPGA_IP" --per-round --config "$CONFIG_FILE"
+    local pb_page_size="$PAGE_SIZE"
+    if [[ "$DISPATCH" == "device_graph" ]]; then
+        pb_pages="$DEVICE_GRAPH_NUM_PAGES"
+        pb_page_size="$DEVICE_GRAPH_PAGE_SIZE"
+    fi
+    local args=( --hsb-ip "$FPGA_IP" --per-round --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE" --qp-number "$SERVER_QP" --rkey "$SERVER_RKEY"
-        --buffer-addr "$SERVER_ADDR" --page-size "$PAGE_SIZE" --num-pages "$pb_pages" )
+        --buffer-addr "$SERVER_ADDR" --page-size "$pb_page_size" --num-pages "$pb_pages" )
     $VERIFY && args+=(--verify)
     [[ -n "$NUM_SHOTS" ]] && args+=(--num-shots "$NUM_SHOTS")
     [[ -n "$SPACING"   ]] && args+=(--spacing "$SPACING")

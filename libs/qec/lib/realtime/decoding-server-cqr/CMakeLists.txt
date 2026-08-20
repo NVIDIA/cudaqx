@@ -96,10 +96,8 @@ if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
 endif()
 
 add_library(cudaq-qec-decoding-server STATIC
-  RoundAccumulator.cpp
   DecodingSession.cpp
   SessionRegistry.cpp
-  RpcDispatcher.cpp
   DecodingServer.cpp
 )
 
@@ -146,10 +144,9 @@ set_target_properties(cudaq-qec-decoding-server PROPERTIES
 # (DeviceGraphFactory.cpp) of the factory that DecodingServer.cpp references
 # weakly.  Kept out of the core library so core consumers stay loadable on
 # machines without the CUDA runtime.  The transport itself is a runtime-
-# loaded bridge provider (libcudaq-realtime-bridge-gpu-roce.so or a
-# CUDAQ_REALTIME_BRIDGE_LIB drop-in), so this component links only the
-# CUDA-Q realtime bridge C API and the CUDA runtime -- no GpuRoceTransceiver / DOCA /
-# HSB link-time dependencies.
+# loaded bridge provider selected by the YAML transport section, so this
+# component links only the CUDA-Q realtime bridge C API and the CUDA runtime --
+# no GpuRoceTransceiver / DOCA / HSB link-time dependencies.
 #
 # Consumers must link this WHOLE_ARCHIVE: the only reference to the factory
 # is weak, which does not pull archive members on its own.
@@ -162,7 +159,9 @@ if(CUDAQ_QEC_DEVICE_GRAPH_AVAILABLE)
   )
 
   target_compile_definitions(cudaq-qec-decoding-server-device-graph
-    PRIVATE CUDAQ_QEC_DEVICE_GRAPH_AVAILABLE)
+    PRIVATE
+      CUDAQ_QEC_DEVICE_GRAPH_AVAILABLE
+      QEC_BRIDGE_PROVIDER_DIR="${_cudaq_rt_lib_dir}")
 
   target_include_directories(cudaq-qec-decoding-server-device-graph PRIVATE
     "${CUDAQ_REALTIME_INCLUDE_DIR}"
@@ -204,8 +203,8 @@ endif()
 
 # ---------------------------------------------------------------------------
 # CQR host-dispatch plugin (only when CUDAQ device_call headers are available):
-# CqrTransceiver bridges DeviceCallService handler callbacks to ITransceiver,
-# then hands off to DecodingServer for session management and decoding.
+# registers the HOST_CALL handlers, which serve each request inline on the
+# CUDAQ dispatcher thread (DecodingSession::handle_*).
 # ---------------------------------------------------------------------------
 if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
   add_library(cudaq-qec-realtime-decoding-server-cqr SHARED

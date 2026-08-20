@@ -715,3 +715,10 @@ The bridge enforces this: if ``--num-pages`` is ever passed with a value above
 ``WQE_NUM``, it clamps to 64 and prints a warning.  Supporting a deeper ring
 would require changing ``WQE_NUM`` (and the per-thread WQE striding) in
 ``holoscan-sensor-bridge``, diverging from the ``2.6.0-EA2`` tag.
+
+See Also
+--------
+
+* :doc:`Realtime Decoding </components/qec/realtime_decoding>` -- concept and workflow
+* :doc:`Getting Started with Realtime Decoding </examples_rst/qec/getting_started_realtime_decoding>`
+* :ref:`C++ <cpp_realtime_decoding_api>` and :ref:`Python <python_realtime_decoding_api>` realtime decoding API
