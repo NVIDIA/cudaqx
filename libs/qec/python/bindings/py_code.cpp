@@ -151,9 +151,14 @@ public:
         if (!retTyObj.is_none()) {
           nb::object cc =
               nb::module_::import_("cudaq.mlir.dialects").attr("cc");
-          nb::object stdvecTy = cc.attr("StdvecType");
-          if (nb::cast<bool>(stdvecTy.attr("isinstance")(retTyObj))) {
-            nb::object eleTy = stdvecTy.attr("getElementType")(retTyObj);
+          // CUDA-Q renamed cc.StdvecType to cc.SequenceType (cuda-quantum
+          // #5089). Accept either name so this keeps working across both the
+          // pinned CUDA-Q version and main.
+          nb::object seqTy = nb::hasattr(cc, "SequenceType")
+                                 ? cc.attr("SequenceType")
+                                 : cc.attr("StdvecType");
+          if (nb::cast<bool>(seqTy.attr("isinstance")(retTyObj))) {
+            nb::object eleTy = seqTy.attr("getElementType")(retTyObj);
             returnsHandleVector = nb::cast<bool>(
                 cc.attr("MeasureHandleType").attr("isinstance")(eleTy));
           }

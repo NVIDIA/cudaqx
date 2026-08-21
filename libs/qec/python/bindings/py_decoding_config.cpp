@@ -187,12 +187,16 @@ void bindDecodingConfig(nb::module_ &mod) {
       .def_rw("type", &decoder_config::type)
       .def_rw("dispatch", &decoder_config::dispatch)
       .def_rw("cuda_device_id", &decoder_config::cuda_device_id)
-      .def_rw("stim_dem_path", &decoder_config::stim_dem_path)
       .def_rw("block_size", &decoder_config::block_size)
       .def_rw("syndrome_size", &decoder_config::syndrome_size)
       .def_rw("H_sparse", &decoder_config::H_sparse)
       .def_rw("O_sparse", &decoder_config::O_sparse)
       .def_rw("D_sparse", &decoder_config::D_sparse)
+      .def_rw("dem_chunks", &decoder_config::dem_chunks,
+              "Optional DemChunksSpec describing the DEM as named phases.\n"
+              "num_rounds lives inside DemChunksSpec. Leave block_size,\n"
+              "syndrome_size, H_sparse, O_sparse and D_sparse unset;\n"
+              "expand_dem_chunks() derives those.")
       .def_prop_rw(
           "decoder_custom_args",
           [](const decoder_config &self) -> nb::object {
@@ -247,6 +251,22 @@ void bindDecodingConfig(nb::module_ &mod) {
                         const multi_decoder_config &b) { return a == b; });
 
   // Library helpers
+  mod_cfg.def(
+      "expand_dem_chunks", &config::expand_dem_chunks, nb::arg("config"),
+      "Rewrite a chunk-form configuration into the equivalent flat form.\n\n"
+      "Fills block_size, syndrome_size, H_sparse, O_sparse and D_sparse on\n"
+      "`config` in place from dem_chunks (which carries num_rounds inside\n"
+      "DemChunksSpec), so a chunk-form configuration can be handed to\n"
+      "anything that understands only the flat form.\n\n"
+      "Does nothing to a configuration that is already flat, so it is safe to\n"
+      "call unconditionally.\n\n"
+      "Args:\n"
+      "    config: decoder_config to rewrite in place.\n"
+      "Returns:\n"
+      "    The closed detector_error_model the flat fields came from, or None\n"
+      "    if the configuration was already flat. Its error_rates are the\n"
+      "    per-fault priors the phases declared.");
+
   mod_cfg.def(
       "configure_decoders", &configure_decoders, nb::arg("config"),
       "Configure decoders in a multi_decoder_config list; returns int status.");

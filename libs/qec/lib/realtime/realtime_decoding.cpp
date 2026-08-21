@@ -18,8 +18,6 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <fmt/core.h>
-#include <fstream>
-#include <iterator>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -158,17 +156,6 @@ static std::vector<uint8_t> pack_syndrome_bits(const uint8_t *syndromes,
 
 namespace cudaq::qec::decoding::host {
 
-/// Read the DEM a decoder entry names.
-std::string read_stim_dem(
-    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
-  std::ifstream file(decoder_config.stim_dem_path);
-  if (!file)
-    throw std::runtime_error(fmt::format(
-        "stim_dem_path could not be opened: {}", decoder_config.stim_dem_path));
-  return std::string((std::istreambuf_iterator<char>(file)),
-                     std::istreambuf_iterator<char>());
-}
-
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
@@ -205,16 +192,6 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   if (has_global_decoder && !params.contains("global_decoder_params"))
     params.insert("global_decoder_params", cudaqx::heterogeneous_map());
 
-  // A DEM-native global decoder (chromobius) cannot be built from the parent's
-  // H, so pass the model text down beside it. Decoders that do not ask for it
-  // ignore the key.
-  if (has_global_decoder && !decoder_config.stim_dem_path.empty()) {
-    auto global_decoder_params =
-        params.get<cudaqx::heterogeneous_map>("global_decoder_params");
-    global_decoder_params.insert("stim_dem", read_stim_dem(decoder_config));
-    params.insert("global_decoder_params", global_decoder_params);
-  }
-
   if (decoder_config.O_sparse.empty())
     return params;
 
@@ -241,57 +218,61 @@ cudaqx::heterogeneous_map prepare_decoder_params(
 }
 
 std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
-    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
-  if (decoder_config.id < 0 || static_cast<std::uint64_t>(decoder_config.id) >
-                                   std::numeric_limits<std::uint32_t>::max())
+    const cudaq::qec::decoding::config::decoder_config &config_in) {
+  if (config_in.id < 0 || static_cast<std::uint64_t>(config_in.id) >
+                              std::numeric_limits<std::uint32_t>::max())
     throw std::invalid_argument("Decoder ID is outside the uint32_t range: " +
-                                std::to_string(decoder_config.id));
+                                std::to_string(config_in.id));
+
+  // A chunk-form configuration names its DEM one round at a time. Expand it
+  // here so everything below is written against the flat form only.
+  auto expanded_config = config_in;
+  const auto closed_dem =
+      cudaq::qec::decoding::config::expand_dem_chunks(expanded_config);
+  const auto &decoder_config = expanded_config;
+
   if (decoder_config.D_sparse.empty())
     throw std::runtime_error(
         "D_sparse must be provided in decoder configuration");
+  // pcm_from_sparse_vec() turns an empty H_sparse into an all-zero matrix
+  // rather than failing, so without this check a config that described no DEM
+  // at all would build a decoder whose parity-check matrix decodes nothing.
+  if (decoder_config.H_sparse.empty())
+    throw std::runtime_error(
+        "H_sparse must be provided to build decoder " +
+        std::to_string(decoder_config.id) +
+        ", either directly or by way of dem_chunks and num_rounds.");
 
   auto t0 = std::chrono::high_resolution_clock::now();
   CUDA_QEC_INFO("Creating decoder {} of type {}", decoder_config.id,
                 decoder_config.type);
 
   auto params = prepare_decoder_params(decoder_config);
-  std::unique_ptr<cudaq::qec::decoder> decoder;
-  if (!decoder_config.stim_dem_path.empty()) {
-    // A DEM-native decoder is constructed from the model text itself. It
-    // derives its own dimensions and, like chromobius, installs the observable
-    // mapping its results are expressed in, so neither is supplied here.
-    decoder = cudaq::qec::get_decoder(decoder_config.type,
-                                      read_stim_dem(decoder_config), params);
-    const auto num_D_rows = std::count(decoder_config.D_sparse.begin(),
-                                       decoder_config.D_sparse.end(), -1);
-    if (num_D_rows != static_cast<std::int64_t>(decoder->get_syndrome_size()))
-      throw std::runtime_error(fmt::format(
-          "Number of rows in D_sparse vector is not equal to the number of "
-          "detectors in {}: {} != {}",
-          decoder_config.stim_dem_path, num_D_rows,
-          decoder->get_syndrome_size()));
-  } else {
-    auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
-                                               decoder_config.syndrome_size,
-                                               decoder_config.block_size);
-    const auto num_observables = std::count(decoder_config.O_sparse.begin(),
-                                            decoder_config.O_sparse.end(), -1);
-    // Materialize O before decoder construction to validate its sparse shape
-    // and column indices for every decoder type. TRT also receives this matrix
-    // in its constructor parameters through prepare_decoder_params() above.
-    (void)cudaq::qec::pcm_from_sparse_vec(
-        decoder_config.O_sparse, num_observables, decoder_config.block_size);
-    decoder = cudaq::qec::get_decoder(decoder_config.type, pcm, params);
-  }
+  // The phases carry a prior per fault, which the derived matrices do not. A
+  // hand-written flat configuration would have had to pass these through
+  // decoder_custom_args, so supply them here for the ones that did not.
+  if (closed_dem && !params.contains("error_rate_vec"))
+    params.insert("error_rate_vec", closed_dem->error_rates);
+
+  auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
+                                             decoder_config.syndrome_size,
+                                             decoder_config.block_size);
+  const auto num_observables = std::count(decoder_config.O_sparse.begin(),
+                                          decoder_config.O_sparse.end(), -1);
+  // Materialize O before decoder construction to validate its sparse shape and
+  // column indices for every decoder type. TRT also receives this matrix in its
+  // constructor parameters through prepare_decoder_params() above.
+  (void)cudaq::qec::pcm_from_sparse_vec(
+      decoder_config.O_sparse, num_observables, decoder_config.block_size);
+  auto decoder = cudaq::qec::get_decoder(decoder_config.type, pcm, params);
   decoder->set_decoder_id(decoder_config.id);
-  if (!decoder_config.O_sparse.empty())
-    decoder->set_O_sparse(decoder_config.O_sparse);
+  decoder->set_O_sparse(decoder_config.O_sparse);
   decoder->set_D_sparse(decoder_config.D_sparse);
 
   // Force plugin initialization before the caller publishes the decoder for
   // realtime work. This preserves configure_decoders()'s existing behavior.
   auto t1 = std::chrono::high_resolution_clock::now();
-  std::vector<cudaq::qec::float_t> syndrome(decoder->get_syndrome_size(), 0.0);
+  std::vector<cudaq::qec::float_t> syndrome(decoder_config.syndrome_size, 0.0);
   decoder->decode(syndrome);
   auto t2 = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> creation_duration = t1 - t0;

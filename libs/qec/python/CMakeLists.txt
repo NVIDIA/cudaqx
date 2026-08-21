@@ -27,39 +27,18 @@ endif()
 
 set(MODULE_NAME _pycudaqx_qec_the_suffix_matters_cudaq_qec)
 
-set(_qec_pymodule_sources
+cudaqx_add_pymodule(${MODULE_NAME}
   bindings/cudaqx_qec.cpp
   bindings/py_code.cpp
   bindings/py_decoder.cpp
   bindings/py_decoding_config.cpp
   bindings/py_decoding.cpp
+  bindings/py_dem_construction.cpp
   bindings/py_dem_sampling.cpp
+  bindings/py_extended_dem.cpp
   bindings/py_surface_code.cpp
   bindings/py_patch.cpp
 )
-
-# The playback emulator's Python binding source lives with the rest of the
-# tool under tools/playback-emulator/python/ (self-contained per that tool's
-# own layout), not under python/bindings/ with the other QEC bindings -- it
-# only builds where the emulator itself does (a realtime-enabled CUDA-Q
-# install; see tools/playback-emulator/lib/CMakeLists.txt). cudaqx_qec.cpp's
-# call into bindPlaybackEmulator() is itself guarded by the same
-# CUDAQX_QEC_HAS_PLAYBACK_EMULATOR define, set below.
-set(_playback_emulator_python_dir
-  ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python)
-if(TARGET cudaq-qec-playback-emulator)
-  list(APPEND _qec_pymodule_sources
-    ${_playback_emulator_python_dir}/py_playback_emulator.cpp)
-endif()
-
-cudaqx_add_pymodule(${MODULE_NAME} ${_qec_pymodule_sources})
-
-if(TARGET cudaq-qec-playback-emulator)
-  target_compile_definitions(${MODULE_NAME} PRIVATE CUDAQX_QEC_HAS_PLAYBACK_EMULATOR)
-  target_include_directories(${MODULE_NAME} PRIVATE ${_playback_emulator_python_dir})
-  target_link_libraries(${MODULE_NAME} PRIVATE
-    cudaq-qec-playback-emulator)
-endif()
 
 target_link_libraries(${MODULE_NAME}
   PRIVATE

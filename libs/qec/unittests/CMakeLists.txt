@@ -87,6 +87,25 @@ target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main
 add_dependencies(CUDAQXQECUnitTests test_sparse_binary_matrix)
 gtest_discover_tests(test_sparse_binary_matrix)
 
+add_executable(test_extended_dem test_extended_dem.cpp)
+target_link_libraries(test_extended_dem PRIVATE GTest::gtest_main
+                                        cudaq-qec-decoders)
+add_dependencies(CUDAQXQECUnitTests test_extended_dem)
+gtest_discover_tests(test_extended_dem)
+
+add_executable(test_dem_construction test_dem_construction.cpp)
+target_link_libraries(test_dem_construction PRIVATE GTest::gtest_main
+                                            cudaq-qec-decoders)
+add_dependencies(CUDAQXQECUnitTests test_dem_construction)
+gtest_discover_tests(test_dem_construction)
+
+add_executable(test_dem_construction_code test_dem_construction_code.cpp)
+target_link_libraries(test_dem_construction_code PRIVATE GTest::gtest_main
+                                                  cudaq-qec
+                                                  cudaq::cudaq-stim-target)
+add_dependencies(CUDAQXQECUnitTests test_dem_construction_code)
+gtest_discover_tests(test_dem_construction_code)
+
 add_executable(test_logger test_logger.cpp)
 target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec-decoders)
 add_dependencies(CUDAQXQECUnitTests test_logger)
