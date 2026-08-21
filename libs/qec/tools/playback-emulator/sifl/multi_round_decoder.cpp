@@ -22,7 +22,7 @@
 /// depend on them, same as any real memory-experiment detector).
 ///
 /// Decode runs synchronously, inline, on the readout call -- required for
-/// stream_until's poll-before-send design (see emulator.cpp) to observe
+/// a polling stream's poll-before-send design (see emulator.cpp) to observe
 /// completion; a background-thread decode finishing on a later call would be
 /// invisible to a client that stops polling once it gives up.
 
@@ -44,7 +44,7 @@ namespace {
 /// readout; kept in step with dem_templates.py's MIN_ROUNDS. Each round
 /// count gets an independently built full DEM, so 1 is a valid shot -- and
 /// a shot that keeps up with its cadence can genuinely close out after just
-/// 1 round (see sifl_demo_pymatching.py's schedule comment).
+/// 1 round (see sifl_demo.py's schedule comment).
 constexpr std::uint64_t kMinRounds = 1;
 
 std::ifstream open_or_throw(const std::string &path) {

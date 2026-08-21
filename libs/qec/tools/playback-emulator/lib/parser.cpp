@@ -7,8 +7,12 @@
  ******************************************************************************/
 
 /// @file parser.cpp
-/// @brief parse(): Line-oriented. Unknown operation, malformed bit string,
-/// or decoder_id absent from the config is a parse error 
+/// @brief parse(): line-oriented, `<trigger> <op> [key=value...]`. Unknown
+/// operation, malformed bit string, or a `session=` absent from the config is
+/// a parse error. The trigger is the only operand written without a keyword,
+/// and is either a tick or a `+N` delta (`-` for `+0`). Signal names are
+/// interned here into `schedule::signal_names`; every event downstream
+/// carries indices, never strings.
 
 #include "emulator.h"
 
@@ -79,14 +83,268 @@ void append_bits(std::vector<std::uint8_t> &arena, const std::string &s,
   }
 }
 
-/// True if `s` is a "key=value" token with the given key.
-bool key_is(const std::string &s, std::string_view key, std::string &value) {
-  auto eq = s.find('=');
-  if (eq == std::string::npos || s.compare(0, eq, key) != 0)
-    return false;
-  value = s.substr(eq + 1);
-  return true;
+/// One line's operands, split once into `key=value` pairs and the at most one
+/// token written without a keyword. Every accessor marks what it read, so
+/// whatever is left at the end is an operand the op does not take, and is rejected.
+class operands {
+public:
+  operands(std::vector<std::string>::const_iterator first,
+           std::vector<std::string>::const_iterator last) {
+    for (auto it = first; it != last; ++it) {
+      const auto eq = it->find('=');
+      if (eq == std::string::npos) {
+        if (!bare_.empty())
+          throw std::invalid_argument("takes at most one operand written "
+                                      "without a 'key=', got '" + bare_ +
+                                      "' and '" + *it + "'");
+        bare_ = *it;
+        continue;
+      }
+      const std::string key = it->substr(0, eq);
+      if (std::any_of(kv_.begin(), kv_.end(),
+                      [&](const entry &kv) { return kv.key == key; }))
+        throw std::invalid_argument("'" + key + "=' given more than once");
+      kv_.push_back({key, it->substr(eq + 1), false});
+    }
+  }
+
+  /// `key`'s value, or nullptr if the line did not carry it.
+  const std::string *value(std::string_view key) {
+    for (auto &kv : kv_)
+      if (kv.key == key) {
+        kv.read = true;
+        return &kv.value;
+      }
+    return nullptr;
+  }
+
+  bool has(std::string_view key) { return value(key) != nullptr; }
+
+  std::uint64_t u64(std::string_view key, std::uint64_t fallback) {
+    const auto *v = value(key);
+    return v ? parse_u64(*v, std::string(key).c_str()) : fallback;
+  }
+
+  std::uint32_t u32(std::string_view key, std::uint32_t fallback) {
+    const auto *v = value(key);
+    return v ? parse_u32(*v, std::string(key).c_str()) : fallback;
+  }
+
+  /// `key`'s value as a name, or an empty string when the line omits it. A
+  /// name with nothing in it is rejected here rather than by each caller,
+  /// since it never means anything anywhere.
+  std::string name(std::string_view key) {
+    const auto *v = value(key);
+    if (!v)
+      return {};
+    if (v->empty())
+      throw std::invalid_argument("'" + std::string(key) + "=' needs a name");
+    return *v;
+  }
+
+  /// The one operand written without a keyword, empty if there was none.
+  const std::string &bare() {
+    bare_read_ = true;
+    return bare_;
+  }
+
+  /// Whatever nobody asked for. Reported together so a line with two stray
+  /// operands takes one run to fix rather than two.
+  void reject_unread(const std::string &op_name) const {
+    std::string stray;
+    for (const auto &kv : kv_)
+      if (!kv.read)
+        stray += (stray.empty() ? "" : ", ") + kv.key + "=";
+    if (!bare_.empty() && !bare_read_)
+      stray += (stray.empty() ? "" : ", ") + bare_;
+    if (!stray.empty())
+      throw std::invalid_argument("'" + op_name + "' does not take " + stray);
+  }
+
+private:
+  struct entry {
+    std::string key, value;
+    bool read;
+  };
+  std::vector<entry> kv_;
+  std::string bare_;
+  bool bare_read_ = false;
+};
+
+/// Index of `name` in `names`, appending it if this is its first mention.
+/// Names are interned once here so nothing downstream of parse() ever
+/// compares or hashes a string.
+std::uint32_t intern(std::vector<std::string> &names, const std::string &name) {
+  for (std::size_t i = 0; i < names.size(); ++i)
+    if (names[i] == name)
+      return static_cast<std::uint32_t>(i);
+  names.push_back(name);
+  return static_cast<std::uint32_t>(names.size() - 1);
 }
+
+/// The default round cap for a stream that waits on a signal. A stream is
+/// bounded no matter what, so a schedule whose signal never arrives fails
+/// loudly with EXHAUSTED_ROUNDS instead of hanging.
+constexpr std::uint32_t kDefaultUntilMaxRounds = 1000;
+
+/// The trigger: the one operand every line must carry, and the only one that
+/// is neither a keyword nor an operand of the op. `-` is `+0`, "go as soon as
+/// the timeline gets here", which is what a line says when it simply follows
+/// the one above.
+void read_trigger(const std::string &tok, std::uint64_t tick_ns, event &e,
+                  std::uint64_t &last_tick, bool &have_last_tick,
+                  bool &saw_delta) {
+  const bool relative = !tok.empty() && (tok[0] == '+' || tok == "-");
+  const std::string number = tok == "-" ? "0" : relative ? tok.substr(1) : tok;
+  if (!is_digits(number))
+    throw std::invalid_argument(
+        "trigger '" + tok +
+        "' is neither a tick nor a '+N'/'-' offset from the previous line");
+
+  e.trig = relative ? trigger::delta : trigger::tick;
+  const std::uint64_t tick = parse_u64(number, "trigger tick");
+  if (relative) {
+    saw_delta = true;
+  } else {
+    // A delta's duration is only known at run time, so nothing here can
+    // place a later absolute tick relative to it. Left alone, such a tick
+    // silently resolves into the past and dispatches immediately.
+    if (saw_delta)
+      throw std::invalid_argument(
+          "tick " + std::to_string(tick) +
+          " follows a '+N'/'-' offset, whose duration is only known at run "
+          "time; once a schedule goes relative it must stay relative");
+    if (have_last_tick && tick < last_tick)
+      throw std::invalid_argument(
+          "a schedule must be written in dispatch order, but tick " +
+          std::to_string(tick) + " follows tick " + std::to_string(last_tick) +
+          "; ticks must be non-decreasing");
+    last_tick = tick;
+    have_last_tick = true;
+  }
+  if (tick != 0 && __builtin_mul_overflow(tick, tick_ns, &e.deadline_ns))
+    throw std::invalid_argument("tick " + tok +
+                                " * tick_ns overflows a 64-bit nanosecond "
+                                "offset");
+}
+
+/// `session=N`, defaulting to decoder 0 -- which is every schedule that has
+/// only one decoder to talk to.
+std::uint64_t read_session(operands &ops,
+                           const std::unordered_set<std::uint64_t> &known) {
+  const std::uint64_t decoder_id = ops.u64("session", 0);
+  if (!known.contains(decoder_id))
+    throw std::invalid_argument("session=" + std::to_string(decoder_id) +
+                                " is not present in the decoder config");
+  return decoder_id;
+}
+
+/// The signal named by `key`, interned, or kNoSignal when the line omits it.
+/// `signal=` and `until=` are the same lookup at the two ends of one signal:
+/// `signal=` raises it when the RPC answers, `until=` is a stream waiting for it.
+std::uint32_t read_signal(operands &ops, const char *key,
+                         std::vector<std::string> &names) {
+  const std::string name = ops.name(key);
+  return name.empty() ? kNoSignal : intern(names, name);
+}
+
+/// `source=N`, which a stream or a shot boundary cannot do without.
+/// Marks a `source=` value as literal syndrome bits rather than a source id.
+constexpr std::string_view kLiteralPrefix = "0b";
+
+/// `source=` says where an op's syndrome bits come from, and reads two ways:
+/// a plain integer names a registered syndrome_source, and `0b<bits>` carries
+/// one round of them inline. Literal bits land in the schedule's syndrome
+/// arena and leave `source_id` at kNoSource, which is what every later stage
+/// reads to tell the two apart.
+void read_source(operands &ops, const std::string &op_name, schedule &sched,
+                 event &e) {
+  const std::string value = ops.name("source");
+  if (value.empty())
+    throw std::invalid_argument("'" + op_name +
+                                "' requires 'source=N' or 'source=0b<bits>'");
+
+  if (value.compare(0, kLiteralPrefix.size(), kLiteralPrefix) != 0) {
+    e.source_id = parse_u32(value, "source");
+    // kNoSource is the "no source at all" sentinel, so it cannot also name
+    // one; without this the id silently reads back as a literal.
+    if (e.source_id == kNoSource)
+      throw std::invalid_argument("source=" + value +
+                                  " is reserved and cannot name a source");
+    return;
+  }
+
+  const std::string bits = value.substr(kLiteralPrefix.size());
+  if (bits.empty())
+    throw std::invalid_argument("'" + op_name +
+                                "' source=0b needs at least one bit");
+  e.source_id = kNoSource;
+  e.syndrome_offset = static_cast<std::uint32_t>(sched.syndrome_arena.size());
+  append_bits(sched.syndrome_arena, bits, "source");
+  e.syndrome_count = static_cast<std::uint32_t>(bits.size());
+}
+
+/// The bare 0/1 token, appended to `arena`. Which arena it lands in is the
+/// caller's business: under `enqueue` it is the syndrome to send, everywhere
+/// else the correction expected back.
+void read_bits(operands &ops, std::vector<std::uint8_t> &arena,
+               std::uint32_t &offset, std::uint32_t &count, const char *what) {
+  const std::string &bits = ops.bare();
+  if (bits.empty())
+    return;
+  offset = static_cast<std::uint32_t>(arena.size());
+  append_bits(arena, bits, what);
+  count = static_cast<std::uint32_t>(bits.size());
+}
+
+/// Two ways of saying how wide a correction is, so they had better agree.
+void check_return_width(const event &e, const std::string &op_name) {
+  if (e.return_size != 0 && e.expected_count != 0 &&
+      e.return_size != e.expected_count)
+    throw std::invalid_argument(
+        "'" + op_name + "' return_size=" + std::to_string(e.return_size) +
+        " does not match the width of the expected bits (" +
+        std::to_string(e.expected_count) + ")");
+}
+
+/// `rounds=` / `min_rounds=` / `max_rounds=`, and the three ways they can
+/// contradict each other or the stream's stop condition.
+void read_round_bounds(operands &ops, event &e) {
+  bool have_min = false, have_max = false;
+  if (const auto *rounds = ops.value("rounds")) {
+    e.stream_min_rounds = e.stream_max_rounds = parse_u32(*rounds, "rounds");
+    have_min = have_max = true;
+  }
+  if (const auto *min = ops.value("min_rounds")) {
+    e.stream_min_rounds = parse_u32(*min, "min_rounds");
+    have_min = true;
+  }
+  if (const auto *max = ops.value("max_rounds")) {
+    e.stream_max_rounds = parse_u32(*max, "max_rounds");
+    have_max = true;
+  }
+
+  // A stream with nothing to wait for has no arrival to stop it early, so a
+  // ceiling above its floor would be a round count nothing can ever reach.
+  if (e.until_signal_id == kNoSignal) {
+    if (have_max && !have_min)
+      throw std::invalid_argument(
+          "'stream' with 'max_rounds=' but no 'until=' has nothing to stop it "
+          "early -- use 'rounds=' for a fixed count");
+    if (!have_max)
+      e.stream_max_rounds = e.stream_min_rounds;
+  } else if (!have_max) {
+    e.stream_max_rounds = kDefaultUntilMaxRounds;
+  }
+
+  if (e.stream_min_rounds > e.stream_max_rounds)
+    throw std::invalid_argument(
+        "'stream' min_rounds=" + std::to_string(e.stream_min_rounds) +
+        " exceeds max_rounds=" + std::to_string(e.stream_max_rounds));
+  if (e.stream_max_rounds == 0)
+    throw std::invalid_argument("'stream' must send at least one round");
+}
+
 
 } // namespace
 
@@ -103,6 +361,7 @@ schedule parse(std::string_view text,
 
   std::uint64_t last_tick = 0;
   bool have_last_tick = false;
+  bool saw_delta = false;
 
   std::istringstream stream{std::string(text)};
   std::string raw_line;
@@ -114,158 +373,84 @@ schedule parse(std::string_view text,
       continue; // blank or comment-only line
 
     try {
-      if (tokens.size() < 3)
+      if (tokens.size() < 2)
         throw std::invalid_argument(
-            "expected '<tick> <decoder_id> <operation> [operands...]', got '" +
-            raw_line + "'");
-
-      const bool relative = !tokens[0].empty() && tokens[0][0] == '+';
-      const std::uint64_t tick =
-          parse_u64(relative ? tokens[0].substr(1) : tokens[0], "tick");
-      if (!relative) {
-        if (have_last_tick && tick < last_tick)
-          throw std::invalid_argument(
-              "ticks must be non-decreasing (saw " + std::to_string(tick) +
-              " after " + std::to_string(last_tick) + ")");
-        last_tick = tick;
-        have_last_tick = true;
-      }
-
-      std::uint64_t deadline_ns = 0;
-      if (tick != 0 && __builtin_mul_overflow(tick, tick_ns, &deadline_ns))
-        throw std::invalid_argument(
-            "tick " + tokens[0] +
-            " * tick_ns overflows a 64-bit nanosecond offset");
-
-      const std::uint64_t decoder_id = parse_u64(tokens[1], "decoder_id");
-      if (!known.contains(decoder_id))
-        throw std::invalid_argument("decoder_id " + tokens[1] +
-                                    " is not present in the decoder config");
+            "expected '<trigger> <op> [key=value...]', got '" + raw_line + "'");
 
       event e;
-      e.deadline_ns = deadline_ns;
-      e.relative_deadline = relative;
-      e.decoder_id = decoder_id;
+      const std::string &op_name = tokens[1];
+      operands ops(tokens.begin() + 2, tokens.end());
 
-      const std::string &op_name = tokens[2];
-      std::vector<std::string> operands(tokens.begin() + 3, tokens.end());
+      read_trigger(tokens[0], tick_ns, e, last_tick, have_last_tick, saw_delta);
+      e.decoder_id = read_session(ops, known);
 
       if (op_name == "reset") {
         e.op = operation::reset;
-        if (!operands.empty())
-          throw std::invalid_argument("'reset' takes no operands");
+        e.signal_id = read_signal(ops, "signal", sched.signal_names);
       } else if (op_name == "enqueue") {
-        e.op = operation::enqueue;
-        if (operands.size() != 1)
-          throw std::invalid_argument(
-              "'enqueue' takes exactly one operand (bits or source=N)");
-        std::string value;
-        if (key_is(operands[0], "source", value)) {
-          e.source_id = parse_u32(value, "source");
-        } else {
-          e.syndrome_offset = static_cast<std::uint32_t>(sched.syndrome_arena.size());
-          append_bits(sched.syndrome_arena, operands[0], "enqueue");
-          e.syndrome_count = static_cast<std::uint32_t>(operands[0].size());
-        }
+        // The one-round spelling of `stream`, and it reads `source=` exactly
+        // the same way.
+        e.op = operation::stream;
+        e.stream_min_rounds = e.stream_max_rounds = 1;
+        read_source(ops, op_name, sched, e);
       } else if (op_name == "enqueue_data") {
+        // Wire-identical to a one-round `enqueue`, and reads `source=` the
+        // same way; all that differs is which end of the source it pulls.
         e.op = operation::enqueue_data;
-        std::string value;
-        if (operands.size() != 1 || !key_is(operands[0], "source", value))
-          throw std::invalid_argument(
-              "'enqueue_data' takes exactly one operand, source=N -- a shot "
-              "boundary has nothing to read out without a source");
-        e.source_id = parse_u32(value, "source");
+        read_source(ops, op_name, sched, e);
       } else if (op_name == "get_corrections") {
         e.op = operation::get_corrections;
-        if (operands.size() > 2)
+        e.signal_id = read_signal(ops, "signal", sched.signal_names);
+        e.return_size = ops.u32("return_size", 0);
+        read_bits(ops, sched.expected_arena, e.expected_offset,
+                  e.expected_count, "get_corrections expected");
+        check_return_width(e, op_name);
+      } else if (op_name == "stream") {
+        e.op = operation::stream;
+        read_source(ops, op_name, sched, e);
+        e.stream_every_ticks = ops.u64("every", 1);
+        std::uint64_t every_ns = 0;
+        if (e.stream_every_ticks != 0 &&
+            __builtin_mul_overflow(e.stream_every_ticks, tick_ns, &every_ns))
           throw std::invalid_argument(
-              "'get_corrections' takes at most two operands "
-              "(return_size=N and/or expected bits)");
-        bool have_return_size = false, have_expected = false;
-        for (const auto &tok : operands) {
-          std::string value;
-          if (key_is(tok, "return_size", value)) {
-            if (have_return_size)
-              throw std::invalid_argument(
-                  "'get_corrections' takes at most one 'return_size=' operand");
-            e.return_size = parse_u32(value, "return_size");
-            have_return_size = true;
-          } else {
-            if (have_expected)
-              throw std::invalid_argument(
-                  "'get_corrections' takes at most one expected-bits operand");
-            e.expected_offset = static_cast<std::uint32_t>(sched.expected_arena.size());
-            append_bits(sched.expected_arena, tok, "get_corrections expected");
-            e.expected_count = static_cast<std::uint32_t>(tok.size());
-            have_expected = true;
-          }
+              "'every=' * tick_ns overflows a 64-bit nanosecond offset");
+        e.until_signal_id = read_signal(ops, "until", sched.signal_names);
+        read_round_bounds(ops, e);
+        if (e.source_id == kNoSource) {
+          // Literal bits are one round, repeated. How many times has to be
+          // known here, so anything that decides the count at run time is a
+          // contradiction rather than something to resolve later.
+          if (e.until_signal_id != kNoSignal)
+            throw std::invalid_argument(
+                "'stream' with literal syndromes cannot wait on 'until=': "
+                "its round count is fixed when the schedule is written");
+          if (e.stream_min_rounds != e.stream_max_rounds)
+            throw std::invalid_argument(
+                "'stream' with literal syndromes needs a fixed 'rounds=N', "
+                "not a min/max range");
         }
-        if (have_return_size && e.expected_count != 0 &&
-            e.return_size != e.expected_count)
+        // A stream takes no bit string at all. Its syndromes come from
+        // `source=N`, so literal bits here would be a second, contradictory
+        // source; and it reads no corrections, so an expected one has
+        // nothing to be compared against. Both belong elsewhere, and saying
+        // so is better than accepting the operand and ignoring it.
+        if (!ops.bare().empty())
           throw std::invalid_argument(
-              "'get_corrections' return_size=" + std::to_string(e.return_size) +
-              " does not match the width of the expected bits (" +
-              std::to_string(e.expected_count) + ")");
-      } else if (op_name == "stream_until") {
-        e.op = operation::stream_until;
-        bool have_source = false;
-        // Paced at the schedule's tick unless an explicit every= says
-        // otherwise 
-        e.stream_every_ticks = 1;
-        for (const auto &tok : operands) {
-          std::string value;
-          if (key_is(tok, "source", value)) {
-            e.source_id = parse_u32(value, "source");
-            have_source = true;
-          } else if (key_is(tok, "every", value)) {
-            e.stream_every_ticks = parse_u64(value, "every");
-          } else if (key_is(tok, "max_rounds", value)) {
-            e.stream_max_rounds = parse_u32(value, "max_rounds");
-          } else if (key_is(tok, "return_size", value)) {
-            e.return_size = parse_u32(value, "return_size");
-          } else if (std::all_of(tok.begin(), tok.end(), [](unsigned char c) {
-                       return c == '0' || c == '1';
-                     })) {
-            e.expected_offset = static_cast<std::uint32_t>(sched.expected_arena.size());
-            append_bits(sched.expected_arena, tok, "stream_until expected");
-            e.expected_count = static_cast<std::uint32_t>(tok.size());
-          } else {
-            throw std::invalid_argument("unrecognized 'stream_until' operand '" +
-                                        tok + "'");
-          }
-        }
-        if (!have_source)
-          throw std::invalid_argument("'stream_until' requires 'source=N'");
-        if (e.return_size != 0 && e.expected_count != 0 &&
-            e.return_size != e.expected_count)
-          throw std::invalid_argument(
-              "'stream_until' return_size=" + std::to_string(e.return_size) +
-              " does not match the width of the expected bits (" +
-              std::to_string(e.expected_count) + ")");
+              "'stream' does not take a bit string: its syndromes come from "
+              "'source=N' (use 'enqueue <bits>' to send literal ones), and an "
+              "expected correction belongs on the 'get_corrections' that "
+              "reads it");
       } else {
         throw std::invalid_argument("unknown operation '" + op_name + "'");
       }
 
+      ops.reject_unread(op_name);
       sched.events.push_back(e);
     } catch (const std::invalid_argument &ex) {
       throw std::invalid_argument("playback schedule, line " +
                                   std::to_string(line_number) + ": " + ex.what());
     }
   }
-
-  // A relative event's deadline_ns is a delta, not an absolute offset, and
-  // is only meaningful relative to whatever precedes it in file order --
-  // sorting by deadline_ns would scatter it away from that predecessor. A
-  // schedule containing any relative tick must already be written in
-  // intended dispatch order.
-  const bool has_relative =
-      std::any_of(sched.events.begin(), sched.events.end(),
-                 [](const event &e) { return e.relative_deadline; });
-  if (!has_relative)
-    std::stable_sort(sched.events.begin(), sched.events.end(),
-                     [](const event &a, const event &b) {
-                       return a.deadline_ns < b.deadline_ns;
-                     });
 
   return sched;
 }

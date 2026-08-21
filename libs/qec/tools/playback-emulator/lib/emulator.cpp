@@ -7,10 +7,9 @@
  ******************************************************************************/
 
 /// @file emulator.cpp
-/// @brief plan() and run(): pre-serialize every
-/// static frame before t0, validate capabilities before t0, then run one
-/// timing thread per decoder_id, each doing nothing between its own
-/// deadlines but wait and dispatch -- decoders never block on each other.
+/// @brief plan() and run(): pre-serialize every static frame before t0,
+/// validate frame sizes before t0, then run ONE timing thread that does
+/// nothing between its deadlines but wait and dispatch. 
 
 #include "emulator.h"
 
@@ -18,9 +17,9 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <ctime>
 #include <functional>
-#include <future>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -36,7 +35,7 @@ namespace wire = cudaq::qec::decoding::rpc;
 namespace {
 
 // -- Timing core: sleep off the bulk of a wait, then spin
-// the last `slack_ns` to the clock-read floor.
+// the last `kSpinSlackNs` to the clock-read floor.
 
 std::uint64_t now_ns() {
   struct timespec ts;
@@ -54,36 +53,27 @@ void sleep_until(std::uint64_t target_ns) {
   clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, nullptr);
 }
 
-/// Sample clock_nanosleep overshoot a handful of times and return a
-/// comfortable multiple of the worst observed value, clamped to a sane
-/// range, for use as `wait_until`'s slack. Run once at startup, before t0.
-std::uint64_t calibrate_spin_slack_ns() {
-  constexpr int kSamples = 8;
-  constexpr std::uint64_t kSampleGapNs = 200'000; // 200 us
-  std::uint64_t worst = 0;
-  for (int i = 0; i < kSamples; ++i) {
-    const std::uint64_t target = now_ns() + kSampleGapNs;
-    sleep_until(target);
-    const std::uint64_t actual = now_ns();
-    worst = std::max(worst, actual > target ? actual - target : 0);
-  }
-  // A comfortable multiple of the worst observed overshoot (below
-  // worst-case, the sleep lands past the deadline and the spin has nothing
-  // left to correct), clamped: a floor because a near-zero sample can't be
-  // trusted, a ceiling because one bad preemption during calibration
-  // shouldn't blow up the spin budget for the whole run (spinning past a
-  // point wastes a core with no accuracy benefit).
-  constexpr std::uint64_t kFloorNs = 5'000;
-  constexpr std::uint64_t kMaxSlackNs = 2'000'000;
-  return std::clamp(worst * 4, kFloorNs, kMaxSlackNs);
+/// How much of a wait `wait_until` spins rather than sleeps: a little above
+/// typical clock_nanosleep overshoot. Fixed rather than measured or
+/// configurable -- a calibration samples whatever the host happens to be
+/// doing at startup, and on a loaded or virtualized box one bad preemption
+/// pushes it into the milliseconds, which then gets spent spinning at every
+/// deadline for the rest of the run.
+constexpr std::uint64_t kSpinSlackNs = 50'000;
+
+/// Saturating add. A deadline far enough out to overflow the clock is
+/// clamped to "never" 
+inline std::uint64_t add_sat(std::uint64_t a, std::uint64_t b) {
+  std::uint64_t sum = 0;
+  return __builtin_add_overflow(a, b, &sum) ? ~std::uint64_t(0) : sum;
 }
 
 /// Block until CLOCK_MONOTONIC reaches `deadline_ns` (an absolute
 /// CLOCK_MONOTONIC timestamp). Sleeps in bounded naps down to
-/// `deadline_ns - slack_ns`, then spins a plain clock read to the deadline
-void wait_until(std::uint64_t deadline_ns, std::uint64_t slack_ns) {
+/// `deadline_ns - kSpinSlackNs`, then spins a plain clock read to the deadline
+void wait_until(std::uint64_t deadline_ns) {
   const std::uint64_t spin_from =
-      deadline_ns > slack_ns ? deadline_ns - slack_ns : 0;
+      deadline_ns > kSpinSlackNs ? deadline_ns - kSpinSlackNs : 0;
   for (std::uint64_t t = now_ns(); t < spin_from; t = now_ns())
     sleep_until(t + std::min(spin_from - t, kMaxNapNs));
   while (now_ns() < deadline_ns) {
@@ -118,7 +108,7 @@ void append_unpacked_bits(std::vector<std::uint8_t> &out, const std::uint8_t *pa
 }
 
 /// Build one wire frame: RPCHeader + a fixed payload struct, plus optional
-/// trailing bit-packed syndrome bytes (enqueue only). The single point
+/// trailing bit-packed syndrome bytes. The single point
 /// where every operation's frame shape is assembled.
 std::vector<std::uint8_t> build_frame(std::uint32_t function_id, std::uint32_t request_id,
                                       const void *payload, std::size_t payload_len,
@@ -141,11 +131,7 @@ std::vector<std::uint8_t> build_frame(std::uint32_t function_id, std::uint32_t r
 }
 
 /// Overwrites a frame's request_id in place, after it was built with a
-/// placeholder -- RPCHeader is always a frame's leading bytes, at whatever
-/// offset it lives at (the frame arena for a pre-built frame, or a
-/// freshly-built buffer). Used so request_id can be assigned fresh right
-/// before a frame is actually sent (run()'s single global counter) without
-/// re-serializing the whole frame on the hot path.
+/// placeholder.
 void set_request_id(std::uint8_t *frame_bytes, std::uint32_t rid) {
   reinterpret_cast<RPCHeader *>(frame_bytes)->request_id = rid;
 }
@@ -172,7 +158,7 @@ std::vector<std::uint8_t> build_get_corrections_frame(std::uint64_t decoder_id,
   return build_frame(wire::kGetCorrectionsFunctionId, rid, &p, sizeof(p));
 }
 
-/// The return_size a get_corrections/stream_until call requests.
+/// The correction width a get_corrections requests.
 /// Explicit return_size=N takes precedence; falls back to the expected-bits
 /// width; 0 (request nothing) when neither is given.
 std::uint32_t return_size_for(const event &e) {
@@ -198,7 +184,20 @@ bool mismatches_expected(const schedule &sched, const event &e, const std::uint8
         !std::equal(bits, bits + n, sched.expected_arena.begin() + e.expected_offset);
 }
 
-/// Records the warning and flips `aborted` for every decoder thread to stop
+/// Appends one line to `result.warnings`. 
+void warn(run_result &result, std::mutex &logs_mu, const std::string &message) {
+  std::lock_guard<std::mutex> lock(logs_mu);
+  result.warnings.push_back(message);
+}
+
+/// Describes an event the way a warning should name it.
+std::string event_label(std::size_t event_index, const char *op_name,
+                        std::uint64_t decoder_id) {
+  return "event " + std::to_string(event_index) + " (" + op_name +
+         ", decoder_id=" + std::to_string(decoder_id) + ")";
+}
+
+/// Records the warning and flips `aborted` so the timing thread stops
 /// dispatching further events.
 void abort_on_hard_error(RpcStatus status, std::size_t event_index, const char *op_name,
                          std::uint64_t decoder_id, run_result &result,
@@ -206,11 +205,25 @@ void abort_on_hard_error(RpcStatus status, std::size_t event_index, const char *
   if (status == RpcStatus::OK || status == RpcStatus::NOT_READY)
     return;
   aborted.store(true, std::memory_order_relaxed);
-  std::lock_guard<std::mutex> lock(logs_mu);
-  result.warnings.push_back("event " + std::to_string(event_index) + " (" + op_name +
-                            ", decoder_id=" + std::to_string(decoder_id) +
-                            ") returned status " + std::to_string(static_cast<int>(status)) +
-                            "; aborting the run");
+  warn(result, logs_mu,
+       event_label(event_index, op_name, decoder_id) + " returned status " +
+           std::to_string(static_cast<int>(status)) + "; aborting the run");
+}
+
+/// Reject a schedule whose `until=` can never come up before it is asked for
+void check_signal_order(const schedule &sched) {
+  std::vector<bool> raised(sched.signal_names.size(), false);
+  for (std::size_t i = 0; i < sched.events.size(); ++i) {
+    const auto &e = sched.events[i];
+    if (e.op == operation::stream && e.until_signal_id != kNoSignal &&
+        !raised[e.until_signal_id])
+      throw std::invalid_argument(
+          "event " + std::to_string(i) + " streams until signal '" +
+          sched.signal_names[e.until_signal_id] +
+          "', which no earlier 'signal=' event raises");
+    if (e.signal_id != kNoSignal)
+      raised[e.signal_id] = true;
+  }
 }
 
 } // namespace
@@ -227,510 +240,511 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
 
   // -- Capability validation
   for (auto &e : sched.events) {
-    session *s = nullptr;
-    try {
-      s = router.at(e.decoder_id);
-    } catch (const std::out_of_range &) {
+    if (!router.contains(e.decoder_id))
       throw std::invalid_argument("no session routes decoder_id=" +
-                             std::to_string(e.decoder_id));
-    }
-    const auto caps = s->caps();
+                                  std::to_string(e.decoder_id));
 
-    if (e.op == operation::stream_until && !caps.reports_not_ready)
-      throw std::invalid_argument(
-          "stream_until on decoder_id=" + std::to_string(e.decoder_id) +
-          " requires a session with reports_not_ready capability, but the "
-          "routed session does not have it");
-
-    if ((e.op == operation::enqueue && e.source_id != kNoSource) ||
-        e.op == operation::enqueue_data || e.op == operation::stream_until) {
-      if (!sources.contains(e.source_id))
-        throw std::invalid_argument("no syndrome_source registered for source_id=" +
-                               std::to_string(e.source_id));
-    }
+    // Literal `source=0b<bits>` events carry their own round and name no
+    // source, so only the ones that do have anything to look up.
+    if (e.source_id != kNoSource &&
+        (e.op == operation::stream || e.op == operation::enqueue_data) &&
+        !sources.contains(e.source_id))
+      throw std::invalid_argument("no syndrome_source registered for source_id=" +
+                                  std::to_string(e.source_id));
   }
 
-  // -- Pre-draw source-backed rounds where the count AND the content are
-  // known ahead of t0.
-  for (auto &e : sched.events) {
-    if ((e.op != operation::enqueue && e.op != operation::enqueue_data) ||
-        e.source_id == kNoSource)
-      continue;
-    auto &src = *sources.at(e.source_id);
-    if (src.is_streamed())
-      continue;
-    auto round = e.op == operation::enqueue_data ? src.read_data() : src.next_round();
-    e.syndrome_offset = static_cast<std::uint32_t>(sched.syndrome_arena.size());
-    e.syndrome_count = static_cast<std::uint32_t>(round.size());
-    sched.syndrome_arena.insert(sched.syndrome_arena.end(), round.begin(), round.end());
-  }
-
-  // -- Build every frame whose bytes are known now.
+  // -- Draw and serialize everything whose bytes are known before t0, in
+  // file order, so a source is consumed in exactly the order the schedule
+  // sends it. A source stops being pre-drawable the moment an event on it
+  // decides its own round count at run time (a `stream ... until=`): every
+  // later event on that source has to draw at dispatch time too, or it would
+  // take rounds belonging to the stream in front of it.
   impl->event_plans.resize(sched.events.size());
+  std::unordered_map<std::uint32_t, bool> predrawable;
 
   for (std::size_t i = 0; i < sched.events.size(); ++i) {
-    const auto &e = sched.events[i];
+    auto &e = sched.events[i];
     auto &ep = impl->event_plans[i];
-    const auto max_frame_bytes = router.at(e.decoder_id)->caps().max_frame_bytes;
+    const auto max_frame_bytes = router.at(e.decoder_id)->max_frame_bytes;
 
-    auto place_frame = [&](std::vector<std::uint8_t> bytes) {
+    auto place = [&](std::vector<std::uint8_t> bytes, std::uint32_t bits_offset,
+                     std::uint32_t bits_count) {
       if (max_frame_bytes != 0 && bytes.size() > max_frame_bytes)
         throw std::invalid_argument(
-            "event " + std::to_string(i) + " (decoder_id=" + std::to_string(e.decoder_id) +
-            ") builds a " + std::to_string(bytes.size()) +
+            "event " + std::to_string(i) + " (decoder_id=" +
+            std::to_string(e.decoder_id) + ") builds a " +
+            std::to_string(bytes.size()) +
             "-byte frame, exceeding the session's max_frame_bytes=" +
             std::to_string(max_frame_bytes));
-      ep.frame_offset = static_cast<std::uint32_t>(impl->frame_arena.size());
-      ep.frame_len = static_cast<std::uint32_t>(bytes.size());
+      round_plan rp;
+      rp.frame_offset = static_cast<std::uint32_t>(impl->frame_arena.size());
+      rp.frame_len = static_cast<std::uint32_t>(bytes.size());
+      rp.bits_offset = bits_offset;
+      rp.bits_count = bits_count;
       impl->frame_arena.insert(impl->frame_arena.end(), bytes.begin(), bytes.end());
-      ep.has_frame = true;
+      ep.rounds.push_back(rp);
     };
 
     switch (e.op) {
     case operation::reset:
-      place_frame(build_reset_frame(e.decoder_id, /*rid=*/0));
+      place(build_reset_frame(e.decoder_id, /*rid=*/0), 0, 0);
       break;
-    case operation::enqueue:
-    case operation::enqueue_data: {
-      const bool preloaded =
-          e.source_id == kNoSource || !sources.at(e.source_id)->is_streamed();
-      if (preloaded)
-        place_frame(build_enqueue_frame(e.decoder_id, /*rid=*/0,
-                                        sched.syndrome_arena.data() + e.syndrome_offset,
-                                        e.syndrome_count));
-      // else: JIT source -- bits aren't known until this event's actual
-      // turn in run()'s dispatch loop; leave the frame unbuilt
-      // (ep.has_frame stays false) and resolve it there.
-      break;
-    }
     case operation::get_corrections:
-      place_frame(build_get_corrections_frame(e.decoder_id, return_size_for(e),
-                                              /*reset=*/true, /*rid=*/0));
+      place(build_get_corrections_frame(e.decoder_id, return_size_for(e),
+                                        /*reset=*/true, /*rid=*/0),
+            0, 0);
       break;
-    case operation::stream_until:
-      break; // frames built round-by-round at run time; nothing to do here.
-    }
-  }
-
-  // -- Group event indices by decoder_id, first-seen order, preserving each
-  // group's existing relative order -- run() gives each decoder_id its own
-  // dispatch thread over exactly its bucket here.
-  {
-    std::unordered_map<std::uint64_t, std::size_t> bucket_of;
-    for (std::size_t i = 0; i < sched.events.size(); ++i) {
-      const auto id = sched.events[i].decoder_id;
-      auto it = bucket_of.find(id);
-      std::size_t bucket;
-      if (it == bucket_of.end()) {
-        bucket = impl->events_by_decoder.size();
-        impl->events_by_decoder.push_back({id, {}});
-        bucket_of.emplace(id, bucket);
-      } else {
-        bucket = it->second;
+    case operation::stream:
+    case operation::enqueue_data: {
+      if (e.source_id == kNoSource) {
+        // Literal `source=0b...`: the same round, repeated. The parser has
+        // already pinned the count, so every frame is known now.
+        for (std::uint32_t r = 0; r < e.stream_min_rounds; ++r)
+          place(build_enqueue_frame(e.decoder_id, /*rid=*/0,
+                                    sched.syndrome_arena.data() + e.syndrome_offset,
+                                    e.syndrome_count),
+                e.syndrome_offset, e.syndrome_count);
+        break;
       }
-      impl->events_by_decoder[bucket].second.push_back(static_cast<std::uint32_t>(i));
+
+      auto &src = *sources.at(e.source_id);
+      auto &ok = predrawable.try_emplace(e.source_id, true).first->second;
+      // `enqueue_data` is always exactly one readout; a stream's count is
+      // known only when nothing at run time can shorten it.
+      const bool fixed =
+          e.op == operation::enqueue_data || e.until_signal_id == kNoSignal;
+      if (!fixed || src.is_streamed() || !ok) {
+        ok = false; // and so is everything after it on this source
+        break;
+      }
+
+      const std::uint32_t want =
+          e.op == operation::enqueue_data ? 1u : e.stream_min_rounds;
+      for (std::uint32_t r = 0; r < want; ++r) {
+        auto round = e.op == operation::enqueue_data ? src.read_data()
+                                                     : src.next_round();
+        if (round.empty())
+          break; // dry: dispatch reports SOURCE_EXHAUSTED for what is missing
+        const auto off = static_cast<std::uint32_t>(sched.syndrome_arena.size());
+        const auto len = static_cast<std::uint32_t>(round.size());
+        sched.syndrome_arena.insert(sched.syndrome_arena.end(), round.begin(),
+                                    round.end());
+        if (r == 0) {
+          e.syndrome_offset = off;
+          e.syndrome_count = len;
+        }
+        place(build_enqueue_frame(e.decoder_id, /*rid=*/0,
+                                  sched.syndrome_arena.data() + off, len),
+              off, len);
+      }
+      break;
+    }
     }
   }
 
-  // -- One session per decoder_id, unconditionally: with each decoder_id
-  // now dispatching on its own thread, two decoder_ids sharing a session
-  // would call into it concurrently, which no backend is safe against (see
-  // backends.h's "one session per decoder" topology).
+  // -- One session per decoder_id, unconditionally. 
   {
     std::unordered_map<session *, std::uint64_t> owner;
-    for (auto &[decoder_id, indices] : impl->events_by_decoder) {
-      session *s = router.at(decoder_id);
-      auto [it, inserted] = owner.emplace(s, decoder_id);
-      if (!inserted)
+    for (const auto &e : sched.events) {
+      auto [it, inserted] = owner.emplace(router.at(e.decoder_id), e.decoder_id);
+      if (!inserted && it->second != e.decoder_id)
         throw std::invalid_argument(
-            "decoder_id=" + std::to_string(decoder_id) + " and decoder_id=" +
+            "decoder_id=" + std::to_string(e.decoder_id) + " and decoder_id=" +
             std::to_string(it->second) +
             " share one session instance -- each decoder_id must have its "
-            "own, since decoders now dispatch on independent threads");
+            "own");
     }
   }
+
+  check_signal_order(sched);
 
   return impl;
 }
 
 namespace {
 
-/// Outcome of one get_corrections issued by stream_until's listener.
-struct listener_reply {
-  RpcStatus status = RpcStatus::INTERNAL_ERROR;
-  std::vector<std::uint8_t> bits; // valid only when status == OK
-};
-
-/// Runs stream_until's blocking get_corrections calls off its decoder's
-/// dispatch thread. Created lazily, once per decoder thread that actually
-/// has a stream_until event, and reused by every stream_until event on
-/// that same decoder -- never shared across decoders.
-class listener_worker {
+/// Collects the answers to one decoder's `get_corrections ... signal=`
+/// reads, off the timing thread that issued them. One thread per session,
+/// because a decoder answers its own requests in the order they arrived, so
+/// awaiting them in submission order never waits on the wrong one.
+class reader_thread {
 public:
-  listener_worker() : thread_([this] { loop(); }) {}
-  ~listener_worker() {
+  struct pending {
+    std::uint32_t request_id = 0;
+    std::uint32_t event_index = 0;
+    std::uint32_t return_size = 0;
+  };
+
+  /// `collect` fills in the record and raises the signal; it runs on this
+  /// thread, one reply at a time. It may only ever `await` on the session it
+  /// is handed 
+  reader_thread(session &s, std::function<void(session &, const pending &)> collect)
+      : session_(s), collect_(std::move(collect)), thread_([this] { loop(); }) {}
+
+  ~reader_thread() { close(); }
+
+  void submit(pending p) {
     {
       std::lock_guard<std::mutex> lock(mu_);
-      stop_ = true;
+      queue_.push_back(p);
     }
     cv_.notify_one();
-    thread_.join();
   }
-  listener_worker(const listener_worker &) = delete;
-  listener_worker &operator=(const listener_worker &) = delete;
 
-  /// Hands `job` to the background thread and returns a future for its
-  /// result. Returns once that thread has picked the job up, so the caller
-  /// can count on the request being in flight rather than still waiting to
-  /// be scheduled.
-  std::future<listener_reply> submit(std::function<listener_reply()> job) {
-    std::promise<listener_reply> promise;
-    auto future = promise.get_future();
-    std::unique_lock<std::mutex> lock(mu_);
-    job_ = std::move(job);
-    promise_ = std::move(promise);
-    cv_.notify_one();
-    taken_.wait(lock, [this] { return !job_; });
-    return future;
+  /// Drain what is outstanding and stop. Called before run() returns, so
+  /// every record a reader owns is complete by the time anyone reads it.
+  void close() {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      if (closed_)
+        return;
+      closed_ = true;
+    }
+    cv_.notify_all();
+    if (thread_.joinable())
+      thread_.join();
   }
 
 private:
   void loop() {
-    std::unique_lock<std::mutex> lock(mu_);
     for (;;) {
-      cv_.wait(lock, [this] { return job_ || stop_; });
-      if (!job_)
-        return;
-      auto job = std::move(job_);
-      auto promise = std::move(promise_);
-      job_ = nullptr;
-      taken_.notify_one();
-      lock.unlock();
-      promise.set_value(job());
-      lock.lock();
+      pending p;
+      {
+        std::unique_lock<std::mutex> lock(mu_);
+        cv_.wait(lock, [&] { return closed_ || !queue_.empty(); });
+        if (queue_.empty())
+          return;
+        p = queue_.front();
+        queue_.pop_front();
+      }
+      collect_(session_, p);
     }
   }
 
+  session &session_;
+  std::function<void(session &, const pending &)> collect_;
   std::mutex mu_;
-  std::condition_variable cv_;    // a job was submitted, or stop_ was set
-  std::condition_variable taken_; // the submitted job was picked up
-  std::function<listener_reply()> job_;
-  std::promise<listener_reply> promise_;
-  bool stop_ = false;
+  std::condition_variable cv_;
+  std::deque<pending> queue_;
+  bool closed_ = false;
   std::thread thread_; // last, so loop() only ever sees initialized members
 };
 
-/// Forces a real yield wherever a thread would otherwise check "is the other
-/// side done yet?" in a tight loop: (1) the shortest gap between two of the
-/// listener's own get_corrections calls, and (2) how long the main thread's
-/// round-generation loop blocks on the listener's future before checking
-/// again. Neither use changes correctness -- a ready result or an actual
-/// reply is noticed the instant it happens, not delayed until the next tick
-/// of this gap -- it only bounds how long a thread can go without giving up
-/// its timeslice. Without it, a session with no real wait to speak of
-/// (in-process, null) can spin one thread flat out and starve the other of
-/// a core entirely on a busy host: a correctness problem (the rounds/polls
-/// it should be making never happen), not just wasted CPU.
+/// Everything the timing thread and the reader threads share, in one place
+/// Built on run()'s stack and fully populated before any reader starts, so `readers`
+/// is never inserted into again and concurrent lookups are safe.
+struct run_state {
+  // One global request_id space
+  std::atomic<std::uint32_t> next_request_id{1};
+  std::atomic<bool> aborted{false};
+  /// Guards the shared syndrome/correction logs, which the timing thread and
+  /// any reader thread both append to. 
+  std::mutex logs_mu;
+
+  /// One flag per signal name in the schedule, raised by a reader thread
+  /// when a `signal=` read's answer lands and read at a stream's round
+  /// boundaries. Plain atomics suffice -- nothing ever needs to sleep until
+  /// a raise, because a waiting stream always has rounds to send meanwhile.
+  std::vector<std::unique_ptr<std::atomic<bool>>> signals;
+
+  /// One reader per decoder that has at least one `signal=` read.
+  std::unordered_map<std::uint64_t, std::unique_ptr<reader_thread>> readers;
+
+  reader_thread &reader(std::uint64_t decoder_id) {
+    return *readers.at(decoder_id);
+  }
+
+  bool signal_raised(std::uint32_t id) const {
+    return signals[id]->load(std::memory_order_acquire);
+  }
+  void raise_signal(std::uint32_t id) {
+    signals[id]->store(true, std::memory_order_release);
+  }
+};
+
+/// Take the next request_id and note it against `rec`. Every RPC the run puts
+/// on the wire goes through here, so `request_id_log` ends up holding all of
+/// them in issue order and each record's slice of it is what that event sent.
+std::uint32_t issue_request_id(run_state &st, run_result &result, record &rec) {
+  const std::uint32_t rid =
+      st.next_request_id.fetch_add(1, std::memory_order_relaxed);
+  if (rec.request_id_count == 0)
+    rec.request_id_offset =
+        static_cast<std::uint32_t>(result.request_id_log.size());
+  result.request_id_log.push_back(rid);
+  ++rec.request_id_count;
+  return rid;
+}
+
+/// Forces a real yield where the timing thread would otherwise check "has
+/// that signal come up yet?" in a tight loop
 constexpr std::uint64_t kMinYieldGapNs = 50'000;
 
-/// One stream_until event. Returns once a terminal status is reached; `rec`
-/// and `result` are updated in place.
-///
-/// `next_request_id` is run()'s single atomic counter, shared across every
-/// decoder's thread and every event -- each RPC sent here claims the next
-/// id from it. `logs_mu` guards `result`'s shared syndrome/correction logs,
-/// which every decoder thread appends to.
-///
-/// The server dispatches every request for a decoder -- enqueue and
-/// get_corrections alike -- inline on one thread, strictly in arrival order
-/// (see DecodingSession's "Inline HOST_CALL path"), so a get_corrections
-/// queued behind a slow synchronous decode cannot be answered until that
-/// decode finishes. `worker` therefore issues blocking get_corrections
-/// calls whose reply lands when the server becomes free to answer, while this
-/// thread independently keeps generating rounds at the schedule's cadence until
-/// that reply arrives or a local bound (max_rounds, source exhaustion, an
-/// oversized frame) is hit.
-///
-/// A local bound sets `abort_listener`, which the listener checks between
-/// polls, so it can be safely joined
-///
-/// Rounds are cached and flushed in one go only once that reply is in
-/// hand: DecodingSession::enqueue_core resets shot_state unconditionally,
-/// so sending a round before the outcome is known could clobber a
-/// correction that became ready in the meantime.
-void run_stream_until(run_plan &plan, const event &e, std::uint64_t deadline_abs_ns, session &s,
-                      record &rec, run_result &result, std::uint64_t slack,
-                      std::atomic<std::uint32_t> &next_request_id, listener_worker &worker,
-                      std::mutex &logs_mu) {
-  auto &source = *plan.sources.at(e.source_id);
-  const std::uint32_t return_size = return_size_for(e);
-  const auto caps = s.caps();
+/// One multi-round or just-in-time `stream` event: draw a round from the
+/// source, send it, decide whether to send another. Returns once a terminal
+/// status is reached; `rec` and `result` are updated in place.
+void run_stream(run_plan &plan, run_state &st, const event &e,
+                const event_plan &ep, std::uint64_t deadline_abs_ns, session &s,
+                record &rec, run_result &result) {
+  // Either every round was drawn and serialized by plan(), or none was and
+  // this loop draws them as it goes -- plan() never leaves half a stream
+  // pre-built, so there is no third case to reconcile here.
+  const bool prebuilt = !ep.rounds.empty();
+  syndrome_source *source = prebuilt ? nullptr : plan.sources.at(e.source_id);
 
-  std::atomic<bool> abort_listener{false};
-  const std::uint32_t rid_gc = next_request_id.fetch_add(1, std::memory_order_relaxed);
-
-  // Submit the listener job to the background thread and await response
-  auto future = worker.submit([&s, &e, &abort_listener, &next_request_id, return_size,
-                               rid_gc] {
-    std::vector<std::uint8_t> bits(wire::bit_packed_bytes(return_size));
-    for (std::uint32_t rid = rid_gc;;
-        rid = next_request_id.fetch_add(1, std::memory_order_relaxed)) {
-      auto gc_frame =
-          build_get_corrections_frame(e.decoder_id, return_size, /*reset=*/true, rid);
-      std::size_t reply_len = 0;
-      const std::uint64_t sent_ns = now_ns();
-      const auto raw_status =
-          s.send_sync({gc_frame.data(), gc_frame.size()}, bits, reply_len);
-      const auto status = reject_truncated_reply(raw_status, reply_len, return_size);
-      if (status == RpcStatus::OK) {
-        bits.resize(reply_len);
-        return listener_reply{status, std::move(bits)};
-      }
-      if (status != RpcStatus::NOT_READY)
-        return listener_reply{status, {}}; // a genuine wire error ends the stream
-      if (abort_listener.load(std::memory_order_acquire))
-        return listener_reply{status, {}}; // the main thread is done; let its reason win
-      if (now_ns() - sent_ns < kMinYieldGapNs)
-        std::this_thread::sleep_for(std::chrono::nanoseconds(kMinYieldGapNs));
-    }
-  });
-
-  // Always generate one round before first checking the listener
   std::uint64_t next = deadline_abs_ns;
   std::uint32_t rounds = 0;
-  std::vector<std::vector<std::uint8_t>> cached;
   std::optional<stream_terminate> local_give_up;
-  do {
-    if (cached.size() >= e.stream_max_rounds) {
+  for (;;) {
+    if (st.aborted.load(std::memory_order_relaxed)) {
+      local_give_up = stream_terminate::ERROR;
+      break;
+    }
+    if (rounds >= e.stream_max_rounds) {
       local_give_up = stream_terminate::EXHAUSTED_ROUNDS;
       break;
     }
 
-    auto bits = source.next_round();
-    if (bits.empty()) {
+    // Pre-built rounds run out only when the source went dry while plan()
+    // was drawing them, which is the same exhaustion a run-time draw sees.
+    if (prebuilt && rounds >= ep.rounds.size()) {
       local_give_up = stream_terminate::SOURCE_EXHAUSTED;
       break;
     }
-
-    // Ensure that the frame size is within the session's limits
-    if (caps.max_frame_bytes != 0 &&
-        build_enqueue_frame(e.decoder_id, 0, bits.data(), bits.size()).size() >
-            caps.max_frame_bytes) {
-      local_give_up = stream_terminate::ERROR;
-      break;
+    std::vector<std::uint8_t> drawn;
+    if (!prebuilt) {
+      drawn = source->next_round();
+      if (drawn.empty()) {
+        local_give_up = stream_terminate::SOURCE_EXHAUSTED;
+        break;
+      }
+      if (s.max_frame_bytes != 0 &&
+          build_enqueue_frame(e.decoder_id, 0, drawn.data(), drawn.size()).size() >
+              s.max_frame_bytes) {
+        local_give_up = stream_terminate::ERROR;
+        break;
+      }
     }
+    const round_plan *rp = prebuilt ? &ep.rounds[rounds] : nullptr;
+    const std::uint8_t *bits =
+        prebuilt ? plan.sched.syndrome_arena.data() + rp->bits_offset : drawn.data();
+    const std::size_t n_bits = prebuilt ? rp->bits_count : drawn.size();
 
     if (e.stream_every_ticks > 0) {
-      wait_until(next, slack);
+      wait_until(next);
       next += e.stream_every_ticks * plan.sched.tick_ns;
     }
 
-    cached.push_back(std::move(bits));
-    // Unpaced (every==0): this is the loop's only yield point, so sleep 
-    // allow wait_for to yield the thread, otherwise listener thread may starve.
-    // Paced (every>0): wait_until() above slept, which yields the
-    // thread -- no need to block here too.
-  } while (future.wait_for(std::chrono::nanoseconds(
-               e.stream_every_ticks > 0 ? 0 : kMinYieldGapNs)) !=
-          std::future_status::ready);
-
-  abort_listener.store(true, std::memory_order_release);
-  const listener_reply reply = future.get();
-
-  // Submit all cached syndromes. send_async itself is unlocked (each
-  // decoder thread's session calls never overlap with another decoder's) --
-  // only the shared syndrome_log append needs logs_mu.
-  for (auto &bits : cached) {
-    const std::uint32_t rid_enqueue =
-        next_request_id.fetch_add(1, std::memory_order_relaxed);
-    auto enqueue_frame = build_enqueue_frame(e.decoder_id, rid_enqueue, bits.data(), bits.size());
-    s.send_async({enqueue_frame.data(), enqueue_frame.size()});
-    {
-      std::lock_guard<std::mutex> lock(logs_mu);
-      if (rounds == 0) {
-        rec.first_request_id = rid_enqueue;
-        rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
-      }
-      result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
+    const std::uint32_t rid_enqueue = issue_request_id(st, result, rec);
+    std::vector<std::uint8_t> built;
+    if (prebuilt) {
+      set_request_id(plan.frame_arena.data() + rp->frame_offset, rid_enqueue);
+      s.send_async({plan.frame_arena.data() + rp->frame_offset, rp->frame_len});
+    } else {
+      built = build_enqueue_frame(e.decoder_id, rid_enqueue, bits, n_bits);
+      s.send_async({built.data(), built.size()});
     }
-    rec.syndrome_count += static_cast<std::uint32_t>(bits.size());
+    {
+      std::lock_guard<std::mutex> lock(st.logs_mu);
+      if (rounds == 0)
+        rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
+      result.syndrome_log.insert(result.syndrome_log.end(), bits, bits + n_bits);
+    }
+    rec.syndrome_count += static_cast<std::uint32_t>(n_bits);
     ++rounds;
-  }
-  if (rounds == 0)
-    rec.first_request_id = rid_gc; // nothing was ever cached; the poll was this event's only RPC
 
-  stream_terminate term;
-  if (reply.status == RpcStatus::OK) { // everything went well
-    term = stream_terminate::OK;
-    // Load corrections into the correction log
-    rec.read_completed = true;
-    std::lock_guard<std::mutex> lock(logs_mu);
-    rec.correction_offset = static_cast<std::uint32_t>(result.correction_log.size());
-    rec.correction_count = return_size;
-    append_unpacked_bits(result.correction_log, reply.bits.data(), return_size);
-    rec.correction_mismatch = mismatches_expected(
-        plan.sched, e, result.correction_log.data() + rec.correction_offset, return_size);
-  } else if (reply.status == RpcStatus::NOT_READY) { // the listener had an error
-    term = *local_give_up;
-  } else { // the main thread had an error
-    term = stream_terminate::ERROR;
+    if (rounds < e.stream_min_rounds)
+      continue; // below the floor: nothing can stop this stream yet
+
+    if (e.until_signal_id == kNoSignal || st.signal_raised(e.until_signal_id))
+      break;
+
+    // Unpaced (every==0): this is the loop's only yield point, so block
+    // briefly rather than spinning -- otherwise this thread can starve the
+    // reader that owes us the raise of a core outright. Paced (every>0):
+    // wait_until() above already slept.
+    if (e.stream_every_ticks == 0)
+      wait_until(now_ns() + kMinYieldGapNs);
   }
 
+  const stream_terminate term = local_give_up.value_or(stream_terminate::OK);
   rec.status = static_cast<std::int32_t>(term);
   rec.rounds_streamed = rounds;
 }
 
+/// Collect one submitted blocking request's bare acknowledgement
+void collect_ack(run_result &result, run_state &st, const event &e,
+                 std::uint32_t i, session &s, record &rec,
+                 std::uint32_t request_id) {
+  std::size_t reply_len = 0;
+  const auto status = s.await(request_id, {}, reply_len);
+  rec.status = static_cast<std::int32_t>(status);
+  abort_on_hard_error(status, i, to_string(e.op), e.decoder_id, result,
+                      st.aborted, st.logs_mu);
+}
+
+/// Collect one submitted read's answer into `rec` and the run's correction
+/// log. 
+void collect_corrections(run_plan &plan, run_result &result, run_state &st,
+                         const event &e, std::uint32_t i, session &s,
+                         record &rec, std::uint32_t request_id,
+                         std::uint32_t return_size) {
+  std::vector<std::uint8_t> reply(wire::bit_packed_bytes(return_size));
+  std::size_t reply_len = 0;
+  const auto raw_status = s.await(request_id, reply, reply_len);
+  const RpcStatus status =
+      reject_truncated_reply(raw_status, reply_len, return_size);
+  rec.status = static_cast<std::int32_t>(status);
+  if (status != RpcStatus::OK) {
+    abort_on_hard_error(status, i, to_string(e.op), e.decoder_id, result,
+                        st.aborted, st.logs_mu);
+    return;
+  }
+  rec.read_completed = true;
+  rec.correction_count = return_size;
+  std::lock_guard<std::mutex> lock(st.logs_mu);
+  rec.correction_offset =
+      static_cast<std::uint32_t>(result.correction_log.size());
+  append_unpacked_bits(result.correction_log, reply.data(), return_size);
+  rec.correction_mismatch =
+      mismatches_expected(plan.sched, e,
+                          result.correction_log.data() + rec.correction_offset,
+                          return_size);
+}
+
 } // namespace
 
-/// One decoder_id's whole timeline: waits on its own deadlines, dispatches
-/// its own events, in schedule order, on its own thread -- entirely
-/// independent of every other decoder's thread except for the handful of
-/// explicitly shared, synchronized bits threaded in (`next_request_id`,
-/// `aborted`, `logs_mu`, `result.records` -- each index of which belongs to
-/// exactly one decoder, so needs no lock).
-void run_decoder(run_plan &plan, run_result &result, std::uint64_t t0, std::uint64_t slack,
-                 std::atomic<std::uint32_t> &next_request_id, std::atomic<bool> &aborted,
-                 std::mutex &logs_mu, std::uint64_t decoder_id,
-                 const std::vector<std::uint32_t> &indices) {
+/// One event, dispatched on run()'s single timing thread. `prev_return_ns`
+/// is the previous event's actual completion, for resolving a relative-tick
+/// deadline (0 until anything has dispatched).
+void dispatch_event(run_plan &plan, run_result &result, run_state &st, std::uint64_t t0,
+                    std::uint32_t i, session &s,
+                    std::uint64_t &prev_return_ns) {
   auto &sched = plan.sched;
-  session &s = *plan.router.at(decoder_id);
+  const auto &e = sched.events[i];
+  const auto &ep = plan.event_plans[i];
+  auto &rec = result.records[i];
+  const auto decoder_id = e.decoder_id;
+  auto &aborted = st.aborted;
+  auto &logs_mu = st.logs_mu;
 
-  // Lazily created: only decoders with at least one stream_until need one,
-  // and it must never be shared with another decoder's thread.
-  std::optional<listener_worker> listener;
+  const std::uint64_t deadline_ns = e.trig == trigger::tick
+                                        ? e.deadline_ns
+                                        : add_sat(prev_return_ns, e.deadline_ns);
+  rec.deadline_ns = deadline_ns;
 
-  // This decoder's own previous event's actual completion, for resolving a
-  // relative-tick deadline -- t0 (0) until this decoder has dispatched
-  // anything.
-  std::uint64_t prev_return_ns = 0;
+  wait_until(add_sat(t0, deadline_ns));
+  rec.call_ns = now_ns() - t0;
+  rec.dispatched = true;
 
-  for (std::size_t k = 0; k < indices.size() && !aborted.load(std::memory_order_relaxed);
-      ++k) {
-    const std::uint32_t i = indices[k];
-    const auto &e = sched.events[i];
-    const auto &ep = plan.event_plans[i];
-    auto &rec = result.records[i];
+  // Set by a `signal=` read: its record is finished by a reader thread when
+  // the answer lands, so this thread must not stamp it as done here.
+  bool async_reply = false;
 
-    const std::uint64_t deadline_ns =
-        e.relative_deadline ? prev_return_ns + e.deadline_ns : e.deadline_ns;
-    rec.deadline_ns = deadline_ns;
-
-    wait_until(t0 + deadline_ns, slack);
-    rec.call_ns = now_ns() - t0;
-    rec.dispatched = true;
-
-    switch (e.op) {
-    case operation::reset: {
-      const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
-      set_request_id(plan.frame_arena.data() + ep.frame_offset, rid);
-      const frame f{plan.frame_arena.data() + ep.frame_offset, ep.frame_len};
-      std::size_t reply_len = 0;
-      const auto status = s.send_sync(f, {}, reply_len);
-      rec.status = static_cast<std::int32_t>(status);
-      rec.first_request_id = rid;
-      abort_on_hard_error(status, i, "reset", decoder_id, result, aborted, logs_mu);
+  switch (e.op) {
+  case operation::reset: {
+    const std::uint32_t rid = issue_request_id(st, result, rec);
+    set_request_id(plan.frame_arena.data() + ep.rounds[0].frame_offset, rid);
+    const frame f{plan.frame_arena.data() + ep.rounds[0].frame_offset,
+                  ep.rounds[0].frame_len};
+    const std::uint32_t t = s.submit(f);
+    if (e.signal_id != kNoSignal) {
+      st.reader(decoder_id).submit({t, i, /*return_size=*/0});
+      async_reply = true;
       break;
     }
-    case operation::enqueue:
-    case operation::enqueue_data: {
-      if (ep.has_frame) {
-        // Pre-built at plan() time (raw literal bits, or a preloadable
-        // source): memcpy + send.
-        const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
-        set_request_id(plan.frame_arena.data() + ep.frame_offset, rid);
-        rec.first_request_id = rid;
-        const frame f{plan.frame_arena.data() + ep.frame_offset, ep.frame_len};
-        s.send_async(f);
-        rec.status = static_cast<std::int32_t>(RpcStatus::OK);
-        rec.syndrome_count = e.syndrome_count;
-        {
-          std::lock_guard<std::mutex> lock(logs_mu);
-          rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
-          result.syndrome_log.insert(result.syndrome_log.end(),
-                                    sched.syndrome_arena.begin() + e.syndrome_offset,
-                                    sched.syndrome_arena.begin() + e.syndrome_offset +
-                                        e.syndrome_count);
-        }
-      } else {
-        // JIT source: resolve now and send
-        auto &src = *plan.sources.at(e.source_id);
-        auto bits = e.op == operation::enqueue_data ? src.read_data() : src.next_round();
-        const auto caps = s.caps();
-        const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
-        rec.first_request_id = rid;
-        auto f_bytes = build_enqueue_frame(decoder_id, rid, bits.data(), bits.size());
-        if (caps.max_frame_bytes != 0 && f_bytes.size() > caps.max_frame_bytes) {
-          rec.status = static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR);
-          abort_on_hard_error(RpcStatus::INTERNAL_ERROR, i, to_string(e.op), decoder_id,
-                              result, aborted, logs_mu);
-          break;
-        }
-        s.send_async({f_bytes.data(), f_bytes.size()});
-        rec.status = static_cast<std::int32_t>(RpcStatus::OK);
-        rec.syndrome_count = static_cast<std::uint32_t>(bits.size());
-        {
-          std::lock_guard<std::mutex> lock(logs_mu);
-          rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
-          result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
-        }
-      }
-      break;
-    }
-    case operation::get_corrections: {
-      const std::uint32_t return_size = return_size_for(e);
-      std::vector<std::uint8_t> reply(wire::bit_packed_bytes(return_size));
-      std::size_t reply_len = 0;
-      const std::uint64_t retry_deadline =
-          plan.params.dispatch.retry_not_ready
-              ? now_ns() + plan.params.dispatch.not_ready_deadline_ns
-              : 0;
-      RpcStatus status;
-      std::uint32_t first_rid = 0;
-      bool first_attempt = true;
-      while (true) {
-        // Each retry is its own RPC send, so it gets its own fresh
-        // request_id -- reusing one across retries would let a stale reply
-        // to an earlier attempt be mistaken for the current one.
-        const std::uint32_t rid = next_request_id.fetch_add(1, std::memory_order_relaxed);
-        if (first_attempt) {
-          first_rid = rid;
-          first_attempt = false;
-        }
-        set_request_id(plan.frame_arena.data() + ep.frame_offset, rid);
-        const frame f{plan.frame_arena.data() + ep.frame_offset, ep.frame_len};
-        const auto raw_status = s.send_sync(f, reply, reply_len);
-        status = reject_truncated_reply(raw_status, reply_len, return_size);
-        if (status != RpcStatus::NOT_READY || !plan.params.dispatch.retry_not_ready ||
-            now_ns() >= retry_deadline)
-          break;
-      }
-      rec.status = static_cast<std::int32_t>(status);
-      rec.first_request_id = first_rid;
-      if (status == RpcStatus::OK) {
-        rec.read_completed = true;
-        rec.correction_count = return_size;
-        std::lock_guard<std::mutex> lock(logs_mu);
-        rec.correction_offset = static_cast<std::uint32_t>(result.correction_log.size());
-        append_unpacked_bits(result.correction_log, reply.data(), return_size);
-        rec.correction_mismatch = mismatches_expected(
-            sched, e, result.correction_log.data() + rec.correction_offset, return_size);
-      } else {
-        abort_on_hard_error(status, i, "get_corrections", decoder_id, result, aborted,
-                            logs_mu);
-      }
-      break;
-    }
-    case operation::stream_until:
-      if (!listener)
-        listener.emplace();
-      run_stream_until(plan, e, t0 + deadline_ns, s, rec, result, slack, next_request_id,
-                       *listener, logs_mu);
-      break;
-    }
-
-    rec.return_ns = now_ns() - t0;
-    prev_return_ns = rec.return_ns;
+    collect_ack(result, st, e, i, s, rec, t);
+    break;
   }
+  case operation::stream:
+  case operation::enqueue_data: {
+    // A stream of more than one round, or one drawing from a live source,
+    // has no pre-built frame and runs its own paced loop instead.
+    if (e.op == operation::stream && ep.rounds.size() != 1) {
+      run_stream(plan, st, e, ep, t0 + deadline_ns, s, rec, result);
+      break;
+    }
+    const auto ok_status = e.op == operation::stream
+                               ? static_cast<std::int32_t>(stream_terminate::OK)
+                               : static_cast<std::int32_t>(RpcStatus::OK);
+    auto give_up_exhausted = [&] {
+      rec.status = static_cast<std::int32_t>(stream_terminate::SOURCE_EXHAUSTED);
+      warn(result, logs_mu,
+           event_label(i, to_string(e.op), decoder_id) +
+               " sent nothing: its syndrome source is exhausted");
+    };
+    if (!ep.rounds.empty()) {
+      // Drawn and serialized by plan(): stamp an id and send.
+      const auto &rp = ep.rounds[0];
+      if (e.op == operation::stream)
+        rec.rounds_streamed = 1;
+      const std::uint32_t rid = issue_request_id(st, result, rec);
+      set_request_id(plan.frame_arena.data() + rp.frame_offset, rid);
+      s.send_async({plan.frame_arena.data() + rp.frame_offset, rp.frame_len});
+      rec.status = ok_status;
+      rec.syndrome_count = rp.bits_count;
+      {
+        std::lock_guard<std::mutex> lock(logs_mu);
+        rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
+        result.syndrome_log.insert(result.syndrome_log.end(),
+                                  sched.syndrome_arena.begin() + rp.bits_offset,
+                                  sched.syndrome_arena.begin() + rp.bits_offset +
+                                      rp.bits_count);
+      }
+    } else {
+      // JIT source: resolve now and send.
+      auto &src = *plan.sources.at(e.source_id);
+      std::vector<std::uint8_t> bits =
+          e.op == operation::enqueue_data ? src.read_data() : src.next_round();
+      if (bits.empty()) {
+        give_up_exhausted();
+        break;
+      }
+      if (e.op == operation::stream)
+        rec.rounds_streamed = 1;
+      // Built with a placeholder id and stamped only once it is going out, so
+      // a frame rejected for size does not burn an id the record would then
+      // claim to have sent.
+      auto f_bytes = build_enqueue_frame(decoder_id, 0, bits.data(), bits.size());
+      if (s.max_frame_bytes != 0 && f_bytes.size() > s.max_frame_bytes) {
+        rec.status = static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR);
+        abort_on_hard_error(RpcStatus::INTERNAL_ERROR, i, to_string(e.op), decoder_id,
+                            result, aborted, logs_mu);
+        break;
+      }
+      set_request_id(f_bytes.data(), issue_request_id(st, result, rec));
+      s.send_async({f_bytes.data(), f_bytes.size()});
+      rec.status = ok_status;
+      rec.syndrome_count = static_cast<std::uint32_t>(bits.size());
+      {
+        std::lock_guard<std::mutex> lock(logs_mu);
+        rec.syndrome_offset = static_cast<std::uint32_t>(result.syndrome_log.size());
+        result.syndrome_log.insert(result.syndrome_log.end(), bits.begin(), bits.end());
+      }
+    }
+    break;
+  }
+  case operation::get_corrections: {
+    const std::uint32_t return_size = return_size_for(e);
+    const std::uint32_t rid = issue_request_id(st, result, rec);
+    set_request_id(plan.frame_arena.data() + ep.rounds[0].frame_offset, rid);
+    const frame f{plan.frame_arena.data() + ep.rounds[0].frame_offset,
+                  ep.rounds[0].frame_len};
+    const std::uint32_t t = s.submit(f);
+    if (e.signal_id != kNoSignal) {
+      st.reader(decoder_id).submit({t, i, return_size});
+      async_reply = true;
+      break;
+    }
+    collect_corrections(plan, result, st, e, i, s, rec, t, return_size);
+    break;
+  }
+  }
+
+  const std::uint64_t done_ns = now_ns() - t0;
+  if (!async_reply)
+    rec.return_ns = done_ns;
+  prev_return_ns = done_ns; // the timeline is free either way
 }
 
 run_result run(std::shared_ptr<run_plan> p) {
@@ -739,9 +753,8 @@ run_result run(std::shared_ptr<run_plan> p) {
 
   run_result result;
   result.records.resize(sched.events.size());
-  // Every event gets an identified slot up front, dispatched or not -- a
-  // hard error can abort the run before some decoders' threads reach their
-  // later events, and record::dispatched is how a caller tells "ran" from
+  // Every event gets an identified slot up front, dispatched or not 
+  // record::dispatched is how a caller tells "ran" from
   // "pre-empted by the abort."
   for (std::size_t i = 0; i < sched.events.size(); ++i) {
     auto &rec = result.records[i];
@@ -752,36 +765,57 @@ run_result run(std::shared_ptr<run_plan> p) {
   result.syndrome_log.reserve(sched.syndrome_arena.size());
   result.correction_log.reserve(sched.expected_arena.size());
 
-  std::uint64_t slack = plan.params.spin_slack_ns;
-  if (slack == 0)
-    slack = calibrate_spin_slack_ns();
-
-  for (auto &[id, s] : plan.router)
-    s->warm_up();
-
   const std::uint64_t t0 = now_ns() + plan.params.lead_in_ns;
-  wait_until(t0, slack);
+  wait_until(t0);
 
-  // Shared across every decoder's thread: one global id space (uniqueness
-  // is all correlation needs -- ordering across decoders isn't meaningful
-  // once they dispatch independently), one whole-run abort flag, and one
-  // mutex for the few shared result vectors every thread appends to.
-  std::atomic<std::uint32_t> next_request_id{1};
-  std::atomic<bool> aborted{false};
-  std::mutex logs_mu;
+  // Everything the timing thread and the readers share. Populated in full
+  // here, before any reader exists.
+  run_state st;
+  st.signals.reserve(sched.signal_names.size());
+  for (std::size_t i = 0; i < sched.signal_names.size(); ++i)
+    st.signals.push_back(std::make_unique<std::atomic<bool>>(false));
 
-  std::vector<std::thread> threads;
-  threads.reserve(plan.events_by_decoder.size());
-  for (auto &[decoder_id, indices] : plan.events_by_decoder)
-    threads.emplace_back(run_decoder, std::ref(plan), std::ref(result), t0, slack,
-                         std::ref(next_request_id), std::ref(aborted), std::ref(logs_mu),
-                         decoder_id, std::cref(indices));
-  for (auto &t : threads)
-    t.join();
+  // One reader per decoder that has an unblocking request, so those
+  // requests have somewhere to be waited for other than the timing thread
+  // that issued them. Op-agnostic: `signal=` means the same thing wherever
+  // the parser accepts it.
+  for (const auto &e : sched.events) {
+    if (e.signal_id == kNoSignal || st.readers.count(e.decoder_id))
+      continue;
+    st.readers.emplace(
+        e.decoder_id,
+        std::make_unique<reader_thread>(
+            *plan.router.at(e.decoder_id),
+            [&plan, &result, &st, t0](session &s, const reader_thread::pending &pd) {
+              const auto &ev = plan.sched.events[pd.event_index];
+              auto &rec = result.records[pd.event_index];
+              if (ev.op == operation::get_corrections)
+                collect_corrections(plan, result, st, ev, pd.event_index, s,
+                                    rec, pd.request_id, pd.return_size);
+              else
+                collect_ack(result, st, ev, pd.event_index, s, rec,
+                            pd.request_id);
+              rec.return_ns = now_ns() - t0;
+              // Last: everything the signal promises is in place before a
+              // stream can see it come up.
+              st.raise_signal(ev.signal_id);
+            }));
+  }
 
-  result.meta.t0_ns = t0;
-  result.meta.tick_ns = sched.tick_ns;
-  result.meta.spin_slack_ns = slack;
+  // The whole dispatch model: one thread, schedule order. 
+  std::uint64_t prev_return_ns = 0;
+  for (std::size_t i = 0;
+       i < sched.events.size() && !st.aborted.load(std::memory_order_relaxed); ++i)
+    dispatch_event(plan, result, st, t0, static_cast<std::uint32_t>(i),
+                   *plan.router.at(sched.events[i].decoder_id), prev_return_ns);
+
+  // Dispatch is done, so no more reads can be issued; drain the ones still
+  // in flight before anybody looks at their records.
+  for (auto &[id, reader] : st.readers)
+    reader->close();
+
+  result.t0_ns = t0;
+  result.tick_ns = sched.tick_ns;
   return result;
 }
 
@@ -821,12 +855,30 @@ safe_bit_span(const std::vector<std::uint8_t> &arena, std::uint32_t offset,
   return {arena.data() + offset, std::min<std::size_t>(count, arena.size() - offset)};
 }
 
+/// One record's request_ids as a single space-separated cell: variable-length
+/// like the hex columns, and free of commas so it needs no CSV quoting.
+/// Bounds-checked the same way, so a record pointing past the log renders
+/// empty rather than reading off the end.
+std::string join_request_ids(const std::vector<std::uint32_t> &log,
+                             std::uint32_t offset, std::uint32_t count) {
+  if (log.empty() || offset >= log.size())
+    return {};
+  const std::size_t n = std::min<std::size_t>(count, log.size() - offset);
+  std::string out;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (i != 0)
+      out.push_back(' ');
+    out += std::to_string(log[offset + i]);
+  }
+  return out;
+}
+
 } // namespace
 
 void write_csv(const run_result &result, std::ostream &out) {
   out << "event_index,decoder_id,op,deadline_ns,call_ns,return_ns,"
          "lateness_ns,latency_ns,status,rounds_streamed,read_completed,"
-         "syndrome_hex,correction_hex,correction_mismatch,first_request_id,"
+         "syndrome_hex,correction_hex,correction_mismatch,request_ids,"
          "dispatched\n";
   for (const auto &r : result.records) {
     const auto [syndrome_bits, syndrome_n] =
@@ -841,7 +893,10 @@ void write_csv(const run_result &result, std::ostream &out) {
         << ',' << r.status << ',' << r.rounds_streamed << ',' << (r.read_completed ? 1 : 0)
         << ',' << hex_encode_bits(syndrome_bits, syndrome_n) << ','
         << hex_encode_bits(correction_bits, correction_n) << ','
-        << (r.correction_mismatch ? 1 : 0) << ',' << r.first_request_id << ','
+        << (r.correction_mismatch ? 1 : 0) << ','
+        << join_request_ids(result.request_id_log, r.request_id_offset,
+                            r.request_id_count)
+        << ','
         << (r.dispatched ? 1 : 0) << '\n';
   }
 }

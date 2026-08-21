@@ -13,7 +13,7 @@
 /// tools/decoding-server/decoding_server.cpp) rather than pulling in a CLI
 /// argument-parsing dependency.
 
-#include "backends.h"
+#include "session.h"
 #include "emulator.h"
 #include "syndrome_source.h"
 
@@ -47,7 +47,8 @@ void print_usage() {
       "\n"
       "Required:\n"
       "  --config=PATH       multi_decoder_config YAML (decoders section)\n"
-      "  --schedule=PATH     playback schedule text\n"
+      "  --schedule=PATH     playback schedule text, one\n"
+      "                      '<trigger> <op> [key=value...]' per line\n"
       "\n"
       "Options:\n"
       "  --tick=DURATION     wall-clock width of one tick (default: 1us)\n"
@@ -56,7 +57,6 @@ void print_usage() {
       "  --source=ID:PATH    static_source for source_id ID, one 0/1 bit\n"
       "                      string per round, one round per line in PATH\n"
       "  --out=PATH          write the run's CSV here (default: stdout)\n"
-      "  --retry-not-ready   retry direct get_corrections/reset on NOT_READY\n"
       "  --help\n";
 }
 
@@ -103,7 +103,6 @@ int main(int argc, char **argv) {
   std::string config_path, schedule_path, backend_name = "inproc";
   std::string out_path;
   std::uint64_t tick_ns = 1000;
-  bool retry_not_ready = false;
   std::unordered_map<std::uint64_t, std::string> udp_endpoints;
   std::unordered_map<std::uint32_t, std::string> source_files;
 
@@ -122,8 +121,6 @@ int main(int argc, char **argv) {
       backend_name = a.substr(10);
     } else if (starts_with(a, "--out=")) {
       out_path = a.substr(6);
-    } else if (a == "--retry-not-ready") {
-      retry_not_ready = true;
     } else if (starts_with(a, "--udp-endpoint=")) {
       const std::string v = a.substr(15);
       const auto first_colon = v.find(':');
@@ -198,7 +195,6 @@ int main(int argc, char **argv) {
     auto sched = parse(read_file(schedule_path), decoder_ids, tick_ns);
 
     run_params params;
-    params.dispatch.retry_not_ready = retry_not_ready;
     auto p = plan(sched, router, sources, params);
     auto result = run(std::move(p));
 

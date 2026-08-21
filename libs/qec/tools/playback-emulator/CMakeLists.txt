@@ -26,7 +26,20 @@ add_executable(playback-emulator
   playback_emulator_main.cpp
 )
 
-target_link_libraries(playback-emulator PRIVATE cudaq-qec-playback-emulator)
+# cudaq-qec (pulled in by cudaq_memory_source, which shares a translation
+# unit with the other syndrome sources) leaves undefined symbols for a
+# concrete NVQIR backend that the final binary has to supply -- there is no
+# C++-level equivalent of Python's cudaq.set_target() to pick one at runtime.
+# Same set libs/qec/unittests/backend-specific/stim/test_qec_stim.cpp links.
+target_link_directories(playback-emulator PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+target_link_libraries(playback-emulator PRIVATE
+  cudaq-qec-playback-emulator
+  cudaq::cudaq
+  cudaq::cudaq-common
+  cudaq-mlir-runtime
+  nvqir
+  nvqir-stim
+)
 
 set_target_properties(playback-emulator PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Per-round-count DEM templates shared by sifl_demo_pymatching.py and
-sifl_demo_nv_qldpc.py: for every r in [MIN_ROUNDS, max_rounds], a fresh r-round circuit is
+"""Per-round-count DEM templates shared by every SIFL demo: for every r in
+[MIN_ROUNDS, max_rounds], a fresh r-round circuit is
 asked for its own DEM directly -- no chunking, no seams, no stitching. multi_round_decoder.cpp
 loads those monolithic per-round matrices straight off disk."""
 import os
