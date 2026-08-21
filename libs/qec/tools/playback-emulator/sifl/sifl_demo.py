@@ -23,9 +23,7 @@ so the read has to be in front of shot i+2's rounds. Writing it in the same time
 the syndromes puts it there by construction, and not blocking is what keeps that timeline
 running while the decode happens.
 
-The server is spawned and killed per run unless persistent_server.py's --persist is
-given, in which case it is left running between runs -- see that file, which is an
-optional add-on and deletable on its own.
+The decoding server is spawned for this process and killed when it exits.
 
 Stim supplies the circuit and its noise. The two run() calls differ only in tick_ns,
 sampling one decoder-latency curve at two syndrome cadences.
@@ -34,10 +32,8 @@ Usage:
   sifl_demo.py                       # pymatching, over UDP to a decoding server
   sifl_demo.py --decoder nv-qldpc    # GPU belief propagation instead
   sifl_demo.py --inproc              # no server: decoders realized in this process
-  sifl_demo.py --persist             # leave the server running between runs
 """
 import argparse, cudaq_qec as qec, numpy as np, os, re, stim, subprocess, tempfile
-import persistent_server  # optional add-on; delete it and its three lines below
 from dem_templates import TEMPLATE_ROOT, build_templates
 
 pb = qec.playback
@@ -143,9 +139,7 @@ if __name__ == "__main__":
                              "schedule can be run as a test; the decoders are rebuilt on "
                              "every pb.run() call, which for max_rounds=150 is most of the "
                              "wall clock.")
-    persistent_server.add_arguments(parser)  # persistent_server.py
     args = parser.parse_args()
-    persistent_server.precheck(args)  # persistent_server.py -- --stop exits here
     delegate = DELEGATES[args.decoder]
     require_delegate(delegate["delegate_type"])
 
@@ -166,9 +160,7 @@ if __name__ == "__main__":
     if args.inproc:
         backend = dict(decoders=multi)
     else:
-        ports = persistent_server.endpoints(args, multi)  # persistent_server.py
-        if ports is None:
-            proc, ports = spawn_server(multi)  # nothing asked for a server that lasts
+        proc, ports = spawn_server(multi)
         backend = dict(udp_endpoints={r: f"127.0.0.1:{p}" for r, p in ports.items()})
     try:
         run(f"slow cadence [{args.decoder}]", backend, gen, MAX_ROUNDS, tick_ns=200_000)
