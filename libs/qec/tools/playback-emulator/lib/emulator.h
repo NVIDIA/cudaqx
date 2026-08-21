@@ -62,9 +62,7 @@ struct round_plan {
 /// round when its round count is fixed and its source could be drawn from
 /// ahead of time; otherwise it has none and builds its frames as it goes,
 /// which is also what a source-streamed or `until=` stream always does.
-struct event_plan {
-  std::vector<round_plan> rounds;
-};
+using event_plan = std::vector<round_plan>;
 
 /// Pre-planned, immediately-runnable schedule: frames
 /// pre-serialized into one contiguous buffer, frame sizes validated,
@@ -96,7 +94,8 @@ plan(const schedule &sched, const std::unordered_map<std::uint64_t, session *> &
 /// A `reset` or `get_corrections` carrying `signal=` submits its request and
 /// returns; the answer is collected on the routed session's own completion
 /// thread, which fills in the record and raises the signal
-/// the concurrency model: one clock, one completion thread per session.
+/// the concurrency model: one clock, and one reader thread per decoder that
+/// has at least one `signal=` event.
 /// A hard error aborts the run, but `result.records` is never truncated:
 /// every event gets a slot, and `record::dispatched` distinguishes what ran
 /// from what the abort pre-empted.

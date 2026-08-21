@@ -39,8 +39,7 @@ inline constexpr std::uint32_t kNoSignal = ~std::uint32_t(0);
 /// `enqueue_data` is wire-identical to one round of `stream` (same RPC, same
 /// frame shape) but marks a shot boundary: it pulls a source's terminal
 /// data-qubit readout (`syndrome_source::read_data()`) instead of another
-/// stabilizer round (`next_round()`). Reads `source=` exactly as `enqueue`
-/// does, literal bits included.
+/// stabilizer round (`next_round()`). 
 enum class operation : std::uint8_t {
   reset,
   stream,
@@ -131,9 +130,7 @@ struct event {
   /// accepts them); the parser defaults this to 1 tick (paced) when `every=`
   /// is omitted, and only sets it to 0 on an explicit `every=0`
   std::uint64_t stream_every_ticks = 1;
-  /// The two halves of the stop rule. A stream stops at the first round
-  /// boundary at or past `stream_min_rounds` where whatever `stop` names has
-  /// arrived, and unconditionally at `stream_max_rounds`. 
+  /// The two halves of the stop rule. 
   std::uint32_t stream_min_rounds = 1;
   std::uint32_t stream_max_rounds = 1;
 };
