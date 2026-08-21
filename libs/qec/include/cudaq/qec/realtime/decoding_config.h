@@ -113,7 +113,7 @@ struct transport_shape_override {
   /// soname is "libcudaq-realtime-bridge-" + name + ".so", with '_' in the
   /// name mapping to '-' to match the shipped hyphenated sonames (so
   /// gpu_roce loads libcudaq-realtime-bridge-gpu-roce.so).
-  /// Empty = inherit the section/CLI default.
+  /// Empty = inherit the section default.
   std::string provider;
   /// Extra provider arguments appended for this shape's rings.
   std::vector<std::string> args;
@@ -134,15 +134,29 @@ struct transport_shape_override {
 ///       provider: udp          # "gpu_roce" on an HSB rig
 ///       args: [--pinned-rings]
 ///
-/// Resolution per ring: shape override (device_graph rings) > this
-/// section's provider/args > the server's --transport CLI fallback.  The
-/// CLI flag only applies when this section names no provider; a config
-/// that names one plus an explicit --transport is rejected at startup
-/// (the deployment file is the source of truth for the wire).
+/// Resolution per ring: shape override (device_graph rings) > this section's
+/// provider/args. The standalone server permits a CLI fallback only for
+/// non-GPU-RoCE, host-only configurations whose YAML names no provider. A
+/// configuration containing device_graph dispatch or using GPU RoCE must
+/// define its provider and arguments in YAML (the deployment file is the
+/// source of truth for GPU-visible rings).
 struct transport_config {
   std::string provider;
   std::vector<std::string> args;
   transport_shape_override device_graph;
+
+  /// Resolve the provider and ordered arguments for a device-graph ring.
+  /// The shape-specific provider overrides the section provider, while its
+  /// arguments are appended to the section arguments.
+  transport_shape_override resolve_device_graph() const {
+    transport_shape_override resolved;
+    resolved.provider =
+        device_graph.provider.empty() ? provider : device_graph.provider;
+    resolved.args = args;
+    resolved.args.insert(resolved.args.end(), device_graph.args.begin(),
+                         device_graph.args.end());
+    return resolved;
+  }
 
   bool operator==(const transport_config &) const = default;
 };
@@ -150,8 +164,9 @@ struct transport_config {
 class multi_decoder_config {
 public:
   std::vector<decoder_config> decoders;
-  /// Optional server-level transport section (empty provider/args = not
-  /// specified; the server's CLI defaults apply).
+  /// Optional server-level transport section. The standalone server's CLI
+  /// defaults may fill an empty section only for non-GPU-RoCE, host-only
+  /// configurations.
   transport_config transport;
 
   bool operator==(const multi_decoder_config &) const = default;

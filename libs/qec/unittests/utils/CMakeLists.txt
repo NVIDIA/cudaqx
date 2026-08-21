@@ -195,10 +195,15 @@ target_include_directories(hsb_fpga_syndrome_playback
 
 target_link_libraries(hsb_fpga_syndrome_playback
   PRIVATE
+    cudaq-qec-realtime-decoding
     ${HSB_CORE_LIB}
     CUDA::cudart
     CUDA::cuda_driver
     Threads::Threads)
+
+set_target_properties(hsb_fpga_syndrome_playback PROPERTIES
+  BUILD_RPATH "${CMAKE_BINARY_DIR}/lib"
+  INSTALL_RPATH "$ORIGIN/../lib")
 
 # Ship the FPGA syndrome-playback tool as a deliverable alongside decoding_server
 # (see tools/decoding-server/CMakeLists.txt). This whole file is already gated by

@@ -43,8 +43,10 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -81,6 +83,26 @@ std::string env_or(const char *name, const std::string &fallback) {
   return value && *value ? std::string(value) : fallback;
 }
 
+class ScopedEnv {
+public:
+  ScopedEnv(const char *name, const char *value) : name_(name) {
+    if (const char *old_value = std::getenv(name))
+      old_value_ = old_value;
+    ::setenv(name, value, 1);
+  }
+
+  ~ScopedEnv() {
+    if (old_value_)
+      ::setenv(name_.c_str(), old_value_->c_str(), 1);
+    else
+      ::unsetenv(name_.c_str());
+  }
+
+private:
+  std::string name_;
+  std::optional<std::string> old_value_;
+};
+
 // The server binary path is baked in at configure time (the server is built
 // from libs/qec/tools/decoding-server); QEC_DECODING_SERVER overrides it. The
 // example decoder configs are placed in the same directory as the server.
@@ -99,14 +121,15 @@ std::string server_dir() {
 // and collects its stdout (for the shutdown dispatch-count line).
 class ServerProcess {
 public:
-  // `transport_cli` = false launches the server WITHOUT --transport (and
-  // without the cpu_roce endpoint args), exercising configs whose wire is
-  // named by the YAML transport section instead of the command line.
+  // `transport_cli` = false launches the server WITHOUT --transport or its
+  // default provider args, exercising configs whose wire is named and
+  // configured by the YAML transport section instead of the command line.
   // `capture_stderr` folds the server's stderr into `captured` (used by the
   // conflict-rejection test to see the startup error).
   bool start(const std::string &config_file, std::string &error,
              int ready_timeout_ms = 15000, bool transport_cli = true,
-             bool capture_stderr = false) {
+             bool capture_stderr = false,
+             const std::vector<std::string> &extra_provider_args = {}) {
     int out_pipe[2] = {-1, -1};
     if (::pipe(out_pipe) != 0) {
       error = "pipe() failed";
@@ -135,8 +158,10 @@ public:
                        env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE", "mlx5_0"));
         args.push_back("--local-ip=" +
                        env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"));
+        args.push_back("--port=0");
       }
-      args.push_back("--port=0");
+      args.insert(args.end(), extra_provider_args.begin(),
+                  extra_provider_args.end());
       args.push_back("--timeout=60");
       std::vector<char *> argv;
       for (auto &a : args)
@@ -474,7 +499,7 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchYamlTransportSection) {
     std::ofstream config_file(config_path);
     config_file << "transport:\n"
                 << "  provider: udp\n"
-                << "  args: [--num-slots=8]\n"
+                << "  args: [--num-slots=8, --port=0]\n"
                 << "decoders:\n";
     for (int id = 0; id < 2; ++id) {
       config_file << "  - id: " << id << "\n"
@@ -514,6 +539,35 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchYamlTransportSection) {
   EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
 }
 
+// Provider parsers start at argv[1]. A malformed first YAML argument must be
+// observed and rejected rather than silently becoming the program name.
+TEST(DecodingServerTwoProcess, YamlProviderParsesFirstArgument) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_yaml_first_arg.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "transport:\n"
+                << "  provider: udp\n"
+                << "  args: [--port=not-a-port]\n"
+                << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+}
+
 // A YAML that names its provider cannot be contradicted from the command
 // line: --transport alongside a transport section is a startup error, not a
 // silent precedence decision.
@@ -544,6 +598,221 @@ TEST(DecodingServerTwoProcess, TransportCliConflictsWithYamlSection) {
       << "server unexpectedly reached READY: " << server.captured;
   EXPECT_NE(0, server.exitCode()) << server.captured;
   EXPECT_NE(server.captured.find("conflicts with the transport section"),
+            std::string::npos)
+      << server.captured;
+}
+
+TEST(DecodingServerTwoProcess, DeviceGraphRequiresYamlTransportProvider) {
+  ScopedEnv legacy_provider("CUDAQ_REALTIME_BRIDGE_LIB",
+                            "/tmp/legacy-provider.so");
+  ScopedEnv legacy_device("QEC_DEVICE_GRAPH_DEVICE", "mlx5_legacy");
+  ScopedEnv legacy_peer_ip("QEC_DEVICE_GRAPH_PEER_IP", "192.0.2.1");
+  ScopedEnv legacy_remote_qp("QEC_DEVICE_GRAPH_REMOTE_QP", "17");
+  ScopedEnv legacy_frame_size("QEC_DEVICE_GRAPH_FRAME_SIZE", "384");
+  ScopedEnv legacy_num_pages("QEC_DEVICE_GRAPH_NUM_PAGES", "64");
+
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_device_graph_no_transport.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    dispatch: device_graph\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("must name its transport provider in the "
+                                 "YAML transport section"),
+            std::string::npos)
+      << server.captured;
+}
+
+// A mixed-dispatch topology must not obtain its device_graph provider from the
+// generic CLI fallback. This is the composed per-ring path rather than the
+// standalone all-device_graph path covered above.
+TEST(DecodingServerTwoProcess,
+     MixedDispatchRequiresYamlDeviceGraphTransportProvider) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_mixed_no_transport.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "  - id: 1\n"
+                << "    type: single_error_lut\n"
+                << "    dispatch: device_graph\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/true,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("device_graph dispatch must name its "
+                                 "transport provider in the YAML"),
+            std::string::npos)
+      << server.captured;
+}
+
+// Even when YAML names gpu_roce, generic provider arguments must not create a
+// second configuration path into a device_graph ring.
+TEST(DecodingServerTwoProcess, DeviceGraphRejectsCliProviderArguments) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_device_graph_cli_args.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "transport:\n"
+                << "  provider: gpu_roce\n"
+                << "  args: [--device=mlx5_yaml]\n"
+                << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    dispatch: device_graph\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true, {"--device=mlx5_cli"}))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("provider arguments for device_graph "
+                                 "or gpu_roce transport must be set in the "
+                                 "YAML"),
+            std::string::npos)
+      << server.captured;
+}
+
+// GPU placement belongs to decoder.cuda_device_id. Allowing --gpu in the
+// transport arguments would put two contradictory settings in the same YAML.
+TEST(DecodingServerTwoProcess, DeviceGraphRejectsTransportGpuArgument) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_device_graph_gpu_arg.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "transport:\n"
+                << "  provider: gpu_roce\n"
+                << "  device_graph:\n"
+                << "    args: [--gpu=1]\n"
+                << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    dispatch: device_graph\n"
+                << "    cuda_device_id: 1\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("must not set --gpu; set decoder "
+                                 "cuda_device_id in YAML instead"),
+            std::string::npos)
+      << server.captured;
+}
+
+// Host dispatch over gpu_roce has the same single source of GPU placement:
+// decoder.cuda_device_id. Reject the duplicate transport setting before the
+// provider is loaded so this regression needs no GPU or RoCE device.
+TEST(DecodingServerTwoProcess, HostGpuRoceRejectsTransportGpuArgument) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_host_gpu_roce_gpu_arg.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "transport:\n"
+                << "  provider: gpu_roce\n"
+                << "  args: [--gpu=1]\n"
+                << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    cuda_device_id: 1\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("gpu_roce transport arguments must not set "
+                                 "--gpu; set decoder cuda_device_id in YAML "
+                                 "instead"),
+            std::string::npos)
+      << server.captured;
+}
+
+// GPU RoCE remains YAML-only even if a caller tries to select it for the
+// generic host-dispatch path.
+TEST(DecodingServerTwoProcess, HostDispatchRejectsCliGpuRoceTransport) {
+  ScopedEnv transport("QEC_DECODING_SERVER_TRANSPORT", "gpu_roce");
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_host_cli_gpu_roce.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/true,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("gpu_roce transport must be selected and "
+                                 "configured in the YAML"),
             std::string::npos)
       << server.captured;
 }

@@ -64,11 +64,13 @@ public:
   void print_session_stats() const;
 
 private:
-  /// Create a transceiver for \p dispatch.  Throws for host dispatch (served
-  /// by the CQR plugin) and when the device-graph component is not linked.
-  static std::unique_ptr<ITransceiver>
-  make_transport(cudaq::qec::decoding::config::DecoderDispatch dispatch,
-                 int pinned_cuda_device);
+  /// Create a transceiver for \p dispatch and its resolved YAML transport.
+  /// Throws for host dispatch (served by the CQR plugin) and when the
+  /// device-graph component is not linked.
+  static std::unique_ptr<ITransceiver> make_transport(
+      cudaq::qec::decoding::config::DecoderDispatch dispatch,
+      int pinned_cuda_device,
+      const cudaq::qec::decoding::config::transport_shape_override &transport);
 
   // Destruction order matters: the device-graph scheduler (inside
   // owned_transports_) holds a cudaGraphExec_t captured from a session's
