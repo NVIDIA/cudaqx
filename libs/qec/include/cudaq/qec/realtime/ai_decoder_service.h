@@ -90,6 +90,10 @@ public:
   ///        compiling an ONNX. @c automatic (default) inspects the ONNX
   ///        and picks strongly-typed for any quantized (FP8/NVFP4/INT8)
   ///        or explicitly-BF16 model, weakly-typed otherwise.
+  /// @param rpc_slot_size_bytes Total mapped RPC slot size, including the
+  ///        RPC header/response. Zero (default) assumes the slot is sized
+  ///        for the request frame (@c RPCHeader + input bytes). Graph
+  ///        capture rejects models whose response frame would not fit.
   ai_decoder_service(const std::string &model_path, void **device_mailbox_slot,
                      const std::string &engine_save_path = "",
                      network_typing_override typing_override =
