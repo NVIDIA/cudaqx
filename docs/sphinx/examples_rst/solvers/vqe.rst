@@ -1,6 +1,8 @@
 Variational Quantum Eigensolver (VQE)
 -------------------------------------
 
+.. include:: /_solvers_deprecation.rst
+
 The Variational Quantum Eigensolver (VQE) is a hybrid quantum-classical algorithm designed to find the ground state energy of a quantum system. It combines quantum computation with classical optimization to iteratively improve an approximation of the ground state.
 
 Key features of VQE:

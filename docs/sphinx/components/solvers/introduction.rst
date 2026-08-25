@@ -1,6 +1,8 @@
 CUDA-Q Solvers Library
 =======================
 
+.. include:: /_solvers_deprecation.rst
+
 Overview
 --------
 The CUDA-Q Solvers library provides high-level quantum-classical hybrid 

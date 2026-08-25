@@ -1,6 +1,8 @@
 Quantum Approximate Optimization Algorithm (QAOA)
 -------------------------------------------------
 
+.. include:: /_solvers_deprecation.rst
+
 The Quantum Approximate Optimization Algorithm (QAOA) is a hybrid quantum-classical algorithm that solves combinatorial optimization problems.
 
 Key features of QAOA:

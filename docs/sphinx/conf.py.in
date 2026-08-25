@@ -108,6 +108,7 @@ exclude_patterns = [
     'api/qec/cpp_realtime_decoding_api.rst',
     'api/qec/realtime_pipeline_api.rst',
     'api/solvers/gqe_api.rst',
+    '_solvers_deprecation.rst',
 ]
 
 # The reST default role (used for this markup: `text`) to use for all documents.
