@@ -1940,8 +1940,7 @@ TEST(QECCodeTester, checkVersion) {
 
   std::string fullVersion = cudaq::qec::getFullRepositoryVersion();
   EXPECT_TRUE(fullVersion.find("NVIDIA/cudaqx") != std::string::npos);
-  EXPECT_TRUE(fullVersion.find("CUDAQX_SOLVERS_COMMIT_SHA") ==
-              std::string::npos);
+  EXPECT_TRUE(fullVersion.find("CUDAQX_QEC_COMMIT_SHA") == std::string::npos);
 }
 
 TEST(PCMUtilsTester, checkPCMToSparseString) {

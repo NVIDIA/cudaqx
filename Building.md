@@ -59,12 +59,11 @@ ctest
 # the standard docker container
 cd ..
 python3 -m pytest -v libs/qec/python/tests --ignore libs/qec/python/tests/test_tensor_network_decoder.py
-python3 -m pytest -v libs/solvers/python/tests --ignore libs/solvers/python/tests/test_gqe.py
 ```
 
 Additionally, the following CMake options can be configured:
 
-- `CUDAQX_ENABLE_LIBS`: Specify which libraries to build (`all`, `qec`, `solvers`)
+- `CUDAQX_ENABLE_LIBS`: Specify which libraries to build (`all`, `qec`)
 - `CUDAQX_INCLUDE_TESTS`: Enable building of tests
 - `CUDAQX_BINDINGS_PYTHON`: Enable Python bindings
 

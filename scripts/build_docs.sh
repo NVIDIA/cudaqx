@@ -85,7 +85,7 @@ mkdir -p "${doxygen_output_dir}"
 doxygen_input="$repo_root/docs/Doxyfile.in"
 
 # Get all the headers
-CUDAQX_ALL_LIBS="solvers qec"
+CUDAQX_ALL_LIBS="qec"
 lib_headers=""
 lib_headers="$lib_headers $(find "$repo_root/libs/core/include" -name "*.h")"
 # Add headers from each library
