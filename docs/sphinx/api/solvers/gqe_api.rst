@@ -1,3 +1,5 @@
+.. include:: /_solvers_deprecation.rst
+
 .. function:: gqe(cost, pool, config=None, **kwargs)
 
     Run the Generative Quantum Eigensolver algorithm.

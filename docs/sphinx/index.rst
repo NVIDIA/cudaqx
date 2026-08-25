@@ -8,6 +8,19 @@ libraries and Python packages that enable research, development, and application
 creation for use cases in quantum error correction and hybrid quantum-classical
 solvers.
 
+.. attention::
+
+   **CUDA-Q Solvers is deprecated.** Version 0.6.0 is the final planned
+   release of the CUDA-Q Solvers library. Development continues in **CUDA-Q
+   Algorithms**, which supersedes CUDA-Q Solvers and expands on it. Install it
+   with :code:`pip install cudaq-algorithms`
+   (`cudaq-algorithms on PyPI <https://pypi.org/project/cudaq-algorithms/>`__),
+   read the `CUDA-Q Algorithms documentation
+   <https://nvidia.github.io/cudaq-algorithms/>`__, and find the source code at
+   `NVIDIA/cudaq-algorithms on GitHub <https://github.com/NVIDIA/cudaq-algorithms>`__.
+   The CUDA-Q Solvers documentation below is retained for existing 0.6.0 users;
+   all new features and fixes land in CUDA-Q Algorithms.
+
 .. toctree::
    :maxdepth: 2
    :caption: Getting Started
@@ -59,11 +72,13 @@ APIs for common quantum-classical solver workflows.
     * Real-time decoding for active error correction on quantum hardware
     * Pre-built numerical experiment APIs
 
-* **cudaq-solvers**: Performant Quantum-Classical Simulation Workflows
+* **cudaq-solvers** (deprecated, superseded by `CUDA-Q Algorithms <https://nvidia.github.io/cudaq-algorithms/>`__): Performant Quantum-Classical Simulation Workflows
     * Variational Quantum Eigensolver (VQE)
     * ADAPT-VQE implementation that scales via CUDA-Q MQPU.
     * Quantum Approximate Optimization Algorithm (QAOA)
-    * More to come...
+    * Version 0.6.0 is the final planned release; continue with
+      `cudaq-algorithms <https://pypi.org/project/cudaq-algorithms/>`__ and its
+      `documentation <https://nvidia.github.io/cudaq-algorithms/>`__.
 
 Indices
 -------

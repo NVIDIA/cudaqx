@@ -1,6 +1,8 @@
 CUDA-Q Solvers Python API
 ******************************
 
+.. include:: /_solvers_deprecation.rst
+
 .. automodule:: cudaq_solvers
     :members:
 

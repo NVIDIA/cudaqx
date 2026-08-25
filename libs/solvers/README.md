@@ -1,5 +1,22 @@
 # CUDA-Q Solvers Library
 
+> [!IMPORTANT]
+> **CUDA-Q Solvers is deprecated.** Version 0.6.0 is the final planned
+> release of the CUDA-Q Solvers library. Development continues in **CUDA-Q
+> Algorithms**, which supersedes CUDA-Q Solvers and expands on it:
+>
+> ```bash
+> pip install cudaq-algorithms
+> ```
+>
+> * Documentation: https://nvidia.github.io/cudaq-algorithms/
+> * PyPI: https://pypi.org/project/cudaq-algorithms/
+> * GitHub: https://github.com/NVIDIA/cudaq-algorithms
+>
+> Existing code keeps working with CUDA-Q Solvers 0.6.0, but all new features
+> and fixes land in CUDA-Q Algorithms. We encourage every CUDA-Q Solvers user to
+> migrate.
+
 CUDA-Q Solvers provides GPU-accelerated implementations of common
 quantum-classical hybrid algorithms and numerical routines frequently
 used in quantum computing applications. The library is designed to
@@ -24,7 +41,11 @@ additional dependencies installed. You can install them with
 
 ## Getting Started
 
-For detailed documentation, tutorials, and API reference,
+New projects should start with the
+[CUDA-Q Algorithms documentation](https://nvidia.github.io/cudaq-algorithms/),
+which supersedes this library.
+
+For documentation, tutorials, and API reference for CUDA-Q Solvers 0.6.0,
 visit the [CUDA-Q Solvers Documentation](https://nvidia.github.io/cudaqx/components/solvers/introduction.html).
 
 ## License
