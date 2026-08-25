@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-profiling-perf",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "nvtx-realtime-loop",
+      "prompt": "How do I add NVTX ranges to my real-time decoding loop?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "nsys-vs-ncu",
+      "prompt": "What does nsys show me that ncu doesn't, and when should I use each?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "pytorch-profiler-decoder",
+      "prompt": "How do I profile a PyTorch decoder training loop to find the bottleneck?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "Why is my CUDA Graph not capturing the decoder kernel as expected?"
+    },
+    {
+      "id": "A2",
+      "prompt": "Pick a basis set for water with the 6-31g basis"
+    },
+    {
+      "id": "A3",
+      "prompt": "Generate an nsys timeline for my real-time decoding pipeline"
+    }
+  ]
+}

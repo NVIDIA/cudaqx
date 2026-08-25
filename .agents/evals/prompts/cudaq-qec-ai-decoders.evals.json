@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-qec-ai-decoders",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "stim-training-data",
+      "prompt": "How do I generate training data from a Stim circuit for a neural decoder?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "onnx-trt-op-coverage",
+      "prompt": "What ONNX ops do I need to match TensorRT for the trt_decoder path?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "mlp-onnx-export",
+      "prompt": "How do I export an MLP decoder to ONNX with the right input shape?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "Build a TensorRT engine from an ONNX file with build_engine_from_onnx.py"
+    },
+    {
+      "id": "A2",
+      "prompt": "Wire AIDecoderService for in-kernel deployment of a trained decoder"
+    },
+    {
+      "id": "A3",
+      "prompt": "Train a transformer decoder on Stim circuit data and export to ONNX"
+    }
+  ]
+}

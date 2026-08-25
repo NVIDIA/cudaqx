@@ -1,0 +1,49 @@
+{
+  "skill_name": "cudaq-skills-authoring",
+  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. Loaded by .agents/evals/graders/ only.",
+  "activation_marker": "cudaq-skills-authoring",
+  "scenarios": {
+    "S1": {
+      "must_include": [
+        "SKILL.md",
+        "frontmatter",
+        "references/",
+        "sync_agents_skills.sh"
+      ],
+      "must_not_include": [
+        "just create a markdown file"
+      ]
+    },
+    "S2": {
+      "must_include": [
+        "name:",
+        "description:",
+        "trigger phrases",
+        "Do NOT use"
+      ],
+      "must_not_include": [
+        "frontmatter is optional"
+      ]
+    },
+    "S3": {
+      "must_include": [
+        "TARGETS",
+        ".gitignore"
+      ],
+      "must_not_include": [
+        "edit the SKILL.md files"
+      ]
+    }
+  },
+  "activation": {
+    "A1": {
+      "should_activate": true
+    },
+    "A2": {
+      "should_activate": false
+    },
+    "A3": {
+      "should_activate": true
+    }
+  }
+}

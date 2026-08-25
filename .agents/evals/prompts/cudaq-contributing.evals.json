@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-contributing",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "dco-sign-off-mechanics",
+      "prompt": "How do I sign off a commit and what does the DCO bot check on PRs?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "where-add-pytest",
+      "prompt": "Where do I add a new pytest test for a QEC code, and how do I run it locally?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "ci-subset-locally",
+      "prompt": "How do I run only the subset of tests that CI runs, before pushing?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "Add a regression test for a surface code decoder fix"
+    },
+    {
+      "id": "A2",
+      "prompt": "Train a transformer decoder on Stim circuit data"
+    },
+    {
+      "id": "A3",
+      "prompt": "Run yapf and clang-format on my Python and C++ files before pushing"
+    }
+  ]
+}

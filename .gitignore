@@ -119,3 +119,9 @@ libs/*/pyproject.toml
 
 # This file is cloned from the qec dir; do not commit after cloning.
 libs/solvers/python/metapackages/setup.py
+
+# Skill evaluation runtime artifacts (per-iteration responses, gradings, reports)
+.agents/evals/workspaces/
+
+# Per-agent skill mirrors under /.claude/skills/ and /.cursor/skills/ are
+# tracked so a fresh clone is immediately usable by those agents.

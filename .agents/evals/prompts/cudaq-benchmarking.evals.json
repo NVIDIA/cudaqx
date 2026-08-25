@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-benchmarking",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "reproducible-threshold-sweep",
+      "prompt": "How do I make my decoder threshold sweep reproducible across runs?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "compare-decoders-paper",
+      "prompt": "What's the right way to compare pymatching vs nv-qldpc-decoder for a paper plot, with error bars?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "shots-for-error-bars",
+      "prompt": "How many shots do I need so the error bars on my LER plot are statistically meaningful?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "Generate a pseudo-threshold sweep with 1e-3 to 1e-1 physical error rates"
+    },
+    {
+      "id": "A2",
+      "prompt": "Add a yapf format check to my CI pipeline"
+    },
+    {
+      "id": "A3",
+      "prompt": "Plot conventions for paper-grade figures with reproducible seeds"
+    }
+  ]
+}
