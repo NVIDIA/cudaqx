@@ -12,11 +12,50 @@ on:
         type: string
         description: Base tag; defaults to wiring-<run number>, with -cu<version> added
         required: false
+      dev_base_image_version:
+        type: string
+        description: >-
+          Version segment of the ghcr.io/nvidia/cudaqx-dev base image tag:
+          "latest" (tracks main) or a release version like "0.7.0" (no
+          leading "v") for a reproducible release build
+        default: latest
+        required: false
+      assets_repo:
+        type: string
+        description: Retrieve decoder assets from a draft release in this repo (e.g. NVIDIA/cudaqx)
+        default: 'NVIDIA/cudaqx'
+        required: false
+      assets_tag:
+        type: string
+        description: Retrieve decoder assets from a draft release with this tag (e.g. docker-files-123)
+        required: false
 
 jobs:
+  fetch-assets:
+    name: Fetch release assets
+    if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoding-server-release-assets
+          path: '*.tar.gz'
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build decoding-server image (${{ matrix.platform }}, CUDA ${{ matrix.cuda_version }})
-    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    needs: fetch-assets
+    if: ${{ !cancelled() && github.repository == 'NVIDIA/cudaqx' && (needs.fetch-assets.result == 'success' || needs.fetch-assets.result == 'skipped') }}
     runs-on: linux-${{ matrix.platform }}-cpu8
     permissions:
       contents: read
@@ -26,9 +65,38 @@ jobs:
       matrix:
         platform: [amd64, arm64]
         cuda_version: ['12.6', '13.0']
+        include:
+          - cuda_version: '12.6'
+            cuda_runtime_image_tag: 12.6.3-runtime-ubuntu24.04
+          - cuda_version: '13.0'
+            cuda_runtime_image_tag: 13.0.3-runtime-ubuntu24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download release assets
+        if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: decoding-server-release-assets
+          path: .
+
+      - name: Extract decoder assets
+        run: |
+          set -euo pipefail
+
+          # Always create the dir (even empty) so build-contexts below has
+          # something to point at regardless of whether assets were supplied.
+          mkdir -p artifacts
+
+          if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
+            tar -C artifacts -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_release.tar.gz
+            test -f artifacts/libcudaq-qec-nv-qldpc-decoder.so
+            test -f artifacts/libcudaq-qec-realtime-cudevice-proprietary.a
+          else
+            echo "No assets_repo/assets_tag supplied; building without decoder artifacts."
+          fi
+        shell: bash
 
       - name: Set up context for buildx
         run: docker context create builder_context
@@ -56,8 +124,12 @@ jobs:
           context: .
           file: docker/decoding-server/Dockerfile
           platforms: linux/${{ matrix.platform }}
+          build-contexts: |
+            artifacts=./artifacts
           build-args: |
             CUDA_VERSION=${{ matrix.cuda_version }}
+            cuda_runtime_image_tag=${{ matrix.cuda_runtime_image_tag }}
+            dev_base_image_version=${{ inputs.dev_base_image_version }}
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
