@@ -1,6 +1,8 @@
 Generating Molecular Hamiltonians
 ----------------------------------
 
+.. include:: /_solvers_deprecation.rst
+
 The CUDA-Q Solvers library accelerates a wide range of applications in the domain of quantum chemistry.
 To facilitate these calculations, CUDA-Q Solvers provides the `solver.create_molecule` function to allow users to generate the electronic Hamiltonians for many systems of interest.
 The molecule class contains informations about the Hamiltonian (`molecule.hamiltonian`) for the target systems.

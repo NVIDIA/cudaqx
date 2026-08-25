@@ -18,11 +18,29 @@ install individual components:
     # Install QEC library
     pip install cudaq-qec
 
-    # Install Solvers library
+    # Install Solvers library (deprecated - see the note below)
     pip install cudaq-solvers
 
     # Install both libraries
     pip install cudaq-qec cudaq-solvers
+
+.. attention::
+
+   **CUDA-Q Solvers is deprecated.** Version 0.6.0 is the final planned
+   release of the CUDA-Q Solvers library. New users should install **CUDA-Q
+   Algorithms** instead, which supersedes CUDA-Q Solvers and is where
+   development continues:
+
+   .. code-block:: bash
+
+       pip install cudaq-algorithms
+
+   See the `CUDA-Q Algorithms documentation
+   <https://nvidia.github.io/cudaq-algorithms/>`__ for installation
+   instructions, tutorials, and examples, `cudaq-algorithms on PyPI
+   <https://pypi.org/project/cudaq-algorithms/>`__ for the package, and
+   `NVIDIA/cudaq-algorithms on GitHub
+   <https://github.com/NVIDIA/cudaq-algorithms>`__ for the source code.
 
 CUDA-QX provides optional pip-installable components:
 
@@ -66,7 +84,8 @@ CUDA-QX is available as a Docker container with all dependencies pre-installed:
 
 The container includes:
     * CUDA-Q compiler and runtime
-    * CUDA-QX libraries (QEC and Solvers)
+    * CUDA-QX libraries (QEC and Solvers; note that Solvers is deprecated in
+      favor of `CUDA-Q Algorithms <https://nvidia.github.io/cudaq-algorithms/>`__)
     * All required dependencies
     * Example notebooks and tutorials
 
