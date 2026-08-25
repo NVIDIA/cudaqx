@@ -66,6 +66,15 @@ struct stim_memory_source::impl {
           "stim_memory_source: circuit has no REPEAT block; a "
           "syndrome-extraction round can only be derived from a repeating "
           "block.");
+    // Only the first REPEAT can be the round. A later one is copied into
+    // terminal_body by safe_append(), which does not carry the block body it
+    // refers to, so its measurements would silently go missing.
+    for (std::size_t j = i + 1; j < full.operations.size(); ++j)
+      if (full.operations[j].gate_type == stim::GateType::REPEAT)
+        throw std::runtime_error(
+            "stim_memory_source: circuit has more than one REPEAT block; "
+            "exactly one is required, and it is the syndrome-extraction "
+            "round.");
     for (std::size_t j = 0; j < i; ++j)
       prefix.safe_append(full.operations[j]);
     round_body = full.operations[i].repeat_block_body(full);

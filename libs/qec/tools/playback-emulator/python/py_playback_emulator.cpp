@@ -56,29 +56,17 @@ run_result run_schedule(
         "run: specify exactly one of decoders=, udp_endpoints=, or "
         "null_decoder_ids= to select the session backend");
 
-  std::vector<std::unique_ptr<session>> owned_sessions;
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> owned_sessions;
   std::unordered_map<std::uint64_t, session *> router;
-  auto adopt = [&](std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> sessions) {
-    for (auto &[id, s] : sessions) {
-      router[id] = s.get();
-      owned_sessions.push_back(std::move(s));
-    }
-  };
 
   if (decoders) {
-    adopt(make_inproc_sessions(*decoders));
+    owned_sessions = make_inproc_sessions(*decoders);
   } else if (udp_endpoints) {
-    adopt(make_udp_sessions(*udp_endpoints, udp_timeout_ms));
+    owned_sessions = make_udp_sessions(*udp_endpoints, udp_timeout_ms);
   } else {
-    // One session per decoder_id, same as the other backends -- each
-    // decoder dispatches on its own thread, so sharing one instance
-    // across decoder_ids is never safe.
-    for (auto id : *null_decoder_ids) {
-      auto null_sess = make_null_session();
-      router[id] = null_sess.get();
-      owned_sessions.push_back(std::move(null_sess));
-    }
+    owned_sessions = make_null_sessions(*null_decoder_ids);
   }
+  route_sessions(owned_sessions, router);
 
   std::vector<std::uint64_t> known_decoder_ids;
   known_decoder_ids.reserve(router.size());
@@ -184,7 +172,8 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def("reset", &stim_memory_source::reset);
 
   m.def(
-      "run", &run_schedule, nb::arg("schedule"), nb::arg("tick_ns"),
+      "run", &run_schedule, nb::call_guard<nb::gil_scoped_release>(),
+      nb::arg("schedule"), nb::arg("tick_ns"),
       nb::arg("sources"), nb::arg("decoders") = nb::none(),
       nb::arg("udp_endpoints") = nb::none(), nb::arg("udp_timeout_ms") = 200,
       nb::arg("null_decoder_ids") = nb::none(),

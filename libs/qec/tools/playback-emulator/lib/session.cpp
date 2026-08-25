@@ -82,6 +82,22 @@ std::unique_ptr<session> make_null_session() {
   return std::make_unique<null_session>();
 }
 
+std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+make_null_sessions(const std::vector<std::uint64_t> &decoder_ids) {
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> out;
+  out.reserve(decoder_ids.size());
+  for (auto id : decoder_ids)
+    out.emplace_back(id, make_null_session());
+  return out;
+}
+
+void route_sessions(
+    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> &sessions,
+    std::unordered_map<std::uint64_t, session *> &router) {
+  for (const auto &[id, s] : sessions)
+    router[id] = s.get();
+}
+
 // ─── inproc_session ────────────────────────────────────────────────────────
 //
 // The in-process backend: one session per decoder,
@@ -232,17 +248,20 @@ private:
     std::condition_variable done_cv;
   };
 
-  /// Publish one frame. 
+  /// Publish one frame.
   std::uint32_t push(const frame &f, bool wants_reply) {
+    // Too short to carry a request_id -- see udp_session::submit for why
+    // this is rejected outright rather than keyed under a placeholder id.
+    if (f.size < sizeof(cudaq::realtime::RPCHeader))
+      throw std::invalid_argument(
+          "inproc_session: frame is smaller than RPCHeader");
     auto j = std::make_shared<job>();
     j->bytes.assign(f.bytes, f.bytes + f.size);
     if (wants_reply)
       j->reply.resize(reply_capacity_for(f.bytes, f.size));
     const std::uint32_t rid =
-        f.size >= sizeof(cudaq::realtime::RPCHeader)
-            ? reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
-                  ->request_id
-            : 0;
+        reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
+            ->request_id;
     {
       std::lock_guard<std::mutex> lock(mu_);
       queue_.push_back(j);
@@ -402,18 +421,17 @@ public:
   }
 
   std::uint32_t submit(const frame &f) override {
+    if (f.size < sizeof(RPCHeader))
+      throw std::invalid_argument(
+          "udp_session::submit: frame is smaller than RPCHeader");
     const std::uint32_t request_id =
-        f.size >= sizeof(RPCHeader)
-            ? reinterpret_cast<const RPCHeader *>(f.bytes)->request_id
-            : 0;
+        reinterpret_cast<const RPCHeader *>(f.bytes)->request_id;
     auto w = std::make_shared<waiter>();
     {
       std::lock_guard<std::mutex> lock(mu_);
       pending_[request_id] = w;
     }
-    if (f.size < sizeof(RPCHeader))
-      finish(*w, RpcStatus::BAD_REQUEST, nullptr, 0);
-    else if (::send(fd_, f.bytes, f.size, 0) < 0)
+    if (::send(fd_, f.bytes, f.size, 0) < 0)
       finish(*w, RpcStatus::INTERNAL_ERROR, nullptr, 0);
     return request_id;
   }
@@ -491,7 +509,12 @@ private:
       if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
           continue; // SO_RCVTIMEO tick: just re-check stop_
-        return;     // socket shut down under us
+        if (stop_.load(std::memory_order_acquire))
+          return; // intentional shutdown
+        // A connected UDP socket also surfaces async ICMP errors here (e.g.
+        // ECONNREFUSED while the server is briefly down); that is not a
+        // reason to stop listening.
+        continue;
       }
       if (static_cast<std::size_t>(n) < sizeof(RPCResponse))
         continue; // short/garbage datagram

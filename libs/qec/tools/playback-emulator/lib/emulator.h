@@ -31,9 +31,9 @@ namespace cudaq::qec::playback {
 ///
 /// The trigger reads three ways. An integer is a deadline, resolved here to
 /// `deadline_ns = tick * tick_ns`. An integer with a `+` before it, i.e. `+N` is relative instead:
-/// resolved at run time to `N` ticks after the previous line's actual
-/// completion (its `return_ns`). Finally, a `-` means execute as fast as possible,
-/// equivalent to `+0`. 
+/// resolved at run time to `N` ticks after the previous line finished being
+/// dispatched on the timing thread (not necessarily when it got a response).
+/// Finally, a `-` means execute as fast as possible, equivalent to `+0`.
 ///
 /// `session=N` picks which decoder the line talks to, defaulting to 0.
 /// `known_decoder_ids` is the set the config declares, and a `session=`
@@ -78,8 +78,8 @@ struct run_plan {
 };
 
 /// Validate `sched` against `router`'s session frame limits and pre-build
-/// everything run()'s timing loop must not do on the hot path. Throws
-/// std::invalid_argument on any gap. `router` maps decoder_id -> session;
+/// everything run()'s timing loop must not do on the hot path. `router` maps
+/// decoder_id -> session;
 /// `sources` maps a schedule's `event::source_id` to the syndrome_source
 /// instance it reads from. 
 /// Ownership of both the sessions and the sources stays with the caller for
@@ -91,12 +91,11 @@ plan(const schedule &sched, const std::unordered_map<std::uint64_t, session *> &
 
 /// Run the plan on one timing thread: wait_until(t0 + deadline), dispatch,
 /// record, in schedule order, with nothing done between deadlines but wait.
-/// A `reset` or `get_corrections` carrying `signal=` submits its request and
-/// returns; the answer is collected on the routed session's own completion
-/// thread, which fills in the record and raises the signal
-/// the concurrency model: one clock, and one reader thread per decoder that
-/// has at least one `signal=` event.
-/// A hard error aborts the run, but `result.records` is never truncated:
+/// A `reset` or `get_corrections` always submits its request and returns
+/// without waiting; the answer is collected on a session's own
+/// reader thread, which reads the response, fills in the record and, only if the event
+/// carries `signal=`, raises it.
+/// A hard error aborts the run, but `result.records` is not truncated:
 /// every event gets a slot, and `record::dispatched` distinguishes what ran
 /// from what the abort pre-empted.
 run_result run(std::shared_ptr<run_plan> plan);

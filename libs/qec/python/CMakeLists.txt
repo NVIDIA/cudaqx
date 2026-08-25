@@ -49,6 +49,22 @@ target_link_libraries(${MODULE_NAME}
     cudaq::cudaq-mlir-runtime
 )
 
+if(TARGET cudaq-qec-playback-emulator)
+  target_sources(${MODULE_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python/py_playback_emulator.cpp
+  )
+  target_include_directories(${MODULE_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python
+  )
+  # The emulator's own headers (emulator.h, session.h, syndrome_source.h)
+  # ride in on this target's PUBLIC include directories.
+  target_link_libraries(${MODULE_NAME} PRIVATE cudaq-qec-playback-emulator)
+  target_compile_definitions(${MODULE_NAME} PRIVATE CUDAQX_QEC_HAS_PLAYBACK)
+else()
+  message(STATUS "Skipping cudaq_qec.playback bindings: "
+                 "cudaq-qec-playback-emulator not available")
+endif()
+
 find_package(CUDAToolkit REQUIRED)
 target_link_libraries(${MODULE_NAME} PRIVATE CUDA::cudart)
 target_include_directories(${MODULE_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})

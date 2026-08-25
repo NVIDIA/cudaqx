@@ -285,8 +285,7 @@ void read_source(operands &ops, const std::string &op_name, schedule &sched,
 }
 
 /// The bare 0/1 token, appended to `arena`. Which arena it lands in is the
-/// caller's business: under `enqueue` it is the syndrome to send, everywhere
-/// else the correction expected back.
+/// caller's business 
 void read_bits(operands &ops, std::vector<std::uint8_t> &arena,
                std::uint32_t &offset, std::uint32_t &count, const char *what) {
   const std::string &bits = ops.bare();
@@ -331,6 +330,10 @@ void read_round_bounds(operands &ops, event &e) {
       throw std::invalid_argument(
           "'stream' with 'max_rounds=' but no 'until=' has nothing to stop it "
           "early -- use 'rounds=' for a fixed count");
+    if (have_min && have_max && e.stream_min_rounds != e.stream_max_rounds)
+      throw std::invalid_argument(
+          "'stream' with 'min_rounds=' and 'max_rounds=' but no 'until=' has "
+          "nothing to stop it early before max_rounds.");
     if (!have_max)
       e.stream_max_rounds = e.stream_min_rounds;
   } else if (!have_max) {
@@ -417,9 +420,6 @@ schedule parse(std::string_view text,
         e.until_signal_id = read_signal(ops, "until", sched.signal_names);
         read_round_bounds(ops, e);
         if (e.source_id == kNoSource) {
-          // Literal bits are one round, repeated. How many times has to be
-          // known here, so anything that decides the count at run time is a
-          // contradiction rather than something to resolve later.
           if (e.until_signal_id != kNoSignal)
             throw std::invalid_argument(
                 "'stream' with literal syndromes cannot wait on 'until=': "
@@ -429,17 +429,12 @@ schedule parse(std::string_view text,
                 "'stream' with literal syndromes needs a fixed 'rounds=N', "
                 "not a min/max range");
         }
-        // A stream takes no bit string at all. Its syndromes come from
-        // `source=N`, so literal bits here would be a second, contradictory
-        // source; and it reads no corrections, so an expected one has
-        // nothing to be compared against. Both belong elsewhere, and saying
-        // so is better than accepting the operand and ignoring it.
         if (!ops.bare().empty())
           throw std::invalid_argument(
               "'stream' does not take a bit string: its syndromes come from "
-              "'source=N' (use 'enqueue <bits>' to send literal ones), and an "
-              "expected correction belongs on the 'get_corrections' that "
-              "reads it");
+              "'source=N' (use 'enqueue source=0b<bits>' to send literal "
+              "ones), and an expected correction belongs on the "
+              "'get_corrections' that reads it");
       } else {
         throw std::invalid_argument("unknown operation '" + op_name + "'");
       }

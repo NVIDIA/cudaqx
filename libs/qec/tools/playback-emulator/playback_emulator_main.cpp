@@ -161,28 +161,18 @@ int main(int argc, char **argv) {
     std::unordered_map<std::uint64_t, session *> router;
 
     if (backend_name == "null") {
-      // One session per decoder_id, same as every other backend -- each
-      // decoder now dispatches on its own thread, so sharing one instance
-      // across decoder_ids is never safe.
-      for (auto id : decoder_ids) {
-        auto s = make_null_session();
-        router[id] = s.get();
-        owned_sessions.emplace_back(id, std::move(s));
-      }
+      owned_sessions = make_null_sessions(decoder_ids);
     } else if (backend_name == "inproc") {
       owned_sessions = make_inproc_sessions(config);
-      for (auto &[id, sess] : owned_sessions)
-        router[id] = sess.get();
     } else if (backend_name == "udp") {
       if (udp_endpoints.empty())
         throw std::runtime_error("--backend=udp requires at least one "
                                  "--udp-endpoint=ID:HOST:PORT");
       owned_sessions = make_udp_sessions(udp_endpoints);
-      for (auto &[id, sess] : owned_sessions)
-        router[id] = sess.get();
     } else {
       throw std::runtime_error("unknown --backend='" + backend_name + "'");
     }
+    route_sessions(owned_sessions, router);
 
     std::vector<std::unique_ptr<syndrome_source>> owned_sources;
     std::unordered_map<std::uint32_t, syndrome_source *> sources;

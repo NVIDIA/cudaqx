@@ -189,7 +189,9 @@ public:
   /// rounds from the current one.
   void reset() override;
 
-  bool is_streamed() const override { return true; }
+  /// False: data is pregenerated, and cannot be used in contexts where the 
+  /// number of rounds is not known ahead of time
+  bool is_streamed() const override { return false; }
 
   /// The `max_rounds` given at construction: how many `next_round()` calls
   /// a shot can serve before exhausting.

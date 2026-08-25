@@ -116,10 +116,7 @@ struct event {
                                  // expected_count when larger
 
   /// The signal this event raises, an index into `schedule::signal_names`,
-  /// set by the `signal=NAME` operand in the playback text.
-  /// Blocking RPC behavior depends on if `signal=` is set: having a signal_id
-  /// makes the RPC asynchronous, and the signal is raised once it returns.
-  /// Anything needing the answer waits on that signal.
+  /// set by the `signal=NAME` operand in the playback text. 
   std::uint32_t signal_id = kNoSignal;
 
   // -- stream only; meaningless (left default) for every other op --

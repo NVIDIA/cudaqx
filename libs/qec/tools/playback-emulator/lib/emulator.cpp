@@ -340,10 +340,11 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
 
 namespace {
 
-/// Collects the answers to one decoder's `get_corrections ... signal=`
-/// reads, off the timing thread that issued them. One thread per session,
-/// because a decoder answers its own requests in the order they arrived, so
-/// awaiting them in submission order never waits on the wrong one.
+/// Collects the answers to one decoder's blocking responses, keeping the block
+/// off of the timing thread that issued them.
+/// One thread per session, because a decoder answers its own requests in the
+/// order they arrived, so awaiting them in submission order never waits on
+/// the wrong one.
 class reader_thread {
 public:
   struct pending {
@@ -351,9 +352,9 @@ public:
     std::uint32_t event_index = 0;
   };
 
-  /// `collect` fills in the record and raises the signal; it runs on this
-  /// thread, one reply at a time. It may only ever `await` on the session it
-  /// is handed 
+  /// `collect` fills in the record and raises the signal, if the event
+  /// carries one; it runs on this thread, one reply at a time. It may only
+  /// ever `await` on the session it is handed
   reader_thread(session &s, std::function<void(session &, const pending &)> collect)
       : session_(s), collect_(std::move(collect)), thread_([this] { loop(); }) {}
 
@@ -539,17 +540,29 @@ void run_stream(const run_ctx &c, std::uint32_t i,
       break;
     }
     std::vector<std::uint8_t> drawn;
+    std::vector<std::uint8_t> built;
     if (!prebuilt) {
-      drawn = e.op == operation::enqueue_data ? source->read_data()
-                                              : source->next_round();
+      try {
+        drawn = e.op == operation::enqueue_data ? source->read_data()
+                                                : source->next_round();
+      } catch (const std::exception &ex) {
+        term = stream_terminate::ERROR;
+        st.aborted.store(true, std::memory_order_relaxed);
+        warn(c, event_label(c, i) + " threw while drawing from its source: " +
+                    ex.what() + "; aborting the run");
+        break;
+      }
       if (drawn.empty()) {
         term = stream_terminate::SOURCE_EXHAUSTED;
         break;
       }
-      if (s.max_frame_bytes != 0 &&
-          build_enqueue_frame(e.decoder_id, 0, drawn.data(), drawn.size()).size() >
-              s.max_frame_bytes) {
+      built = build_enqueue_frame(e.decoder_id, 0, drawn.data(), drawn.size());
+      if (s.max_frame_bytes != 0 && built.size() > s.max_frame_bytes) {
         term = stream_terminate::ERROR;
+        st.aborted.store(true, std::memory_order_relaxed);
+        warn(c, event_label(c, i) +
+                    " drew a round exceeding the session's max_frame_bytes; "
+                    "aborting the run");
         break;
       }
     }
@@ -563,7 +576,6 @@ void run_stream(const run_ctx &c, std::uint32_t i,
     const std::uint32_t rid = issue_request_id(c, rec);
     const std::uint8_t *bits;
     std::size_t n_bits;
-    std::vector<std::uint8_t> built;
     if (prebuilt) {
       const round_plan &rp = ep[rounds];
       bits = plan.sched.syndrome_arena.data() + rp.bits_offset;
@@ -573,7 +585,7 @@ void run_stream(const run_ctx &c, std::uint32_t i,
     } else {
       bits = drawn.data();
       n_bits = drawn.size();
-      built = build_enqueue_frame(e.decoder_id, rid, bits, n_bits);
+      set_request_id(built.data(), rid);
       s.send_async({built.data(), built.size()});
     }
     log_syndromes(c, rec, bits, n_bits, /*first=*/rounds == 0);
@@ -648,8 +660,7 @@ void collect_reply(const run_ctx &c, std::uint32_t i, session &s,
 } // namespace
 
 /// One event, dispatched on run()'s single timing thread. `prev_return_ns`
-/// is the previous event's actual completion, for resolving a relative-tick
-/// deadline (0 until anything has dispatched).
+/// is when the previous event finished being dispatched here.
 void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
                     std::uint64_t &prev_return_ns) {
   auto &plan = c.plan;
@@ -670,8 +681,9 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
   rec.call_ns = now_ns() - t0;
   rec.dispatched = true;
 
-  // Set by a `signal=` read: its record is finished by a reader thread when
-  // the answer lands, so this thread must not stamp it as done here.
+  // True for `reset`/`get_corrections`: their record is finished by a
+  // reader thread instead of here, so this thread must not stamp it as
+  // done below.
   bool async_reply = false;
 
   switch (e.op) {
@@ -681,12 +693,8 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
     set_request_id(plan.frame_arena.data() + rp.frame_offset,
                    issue_request_id(c, rec));
     const std::uint32_t req = s.submit(frame_of(plan, rp));
-    if (e.signal_id != kNoSignal) {
-      st.reader(decoder_id).submit({req, i});
-      async_reply = true;
-      break;
-    }
-    collect_reply(c, i, s, req);
+    st.reader(decoder_id).submit({req, i});
+    async_reply = true;
     break;
   }
   case operation::stream:
@@ -730,12 +738,12 @@ run_result run(std::shared_ptr<run_plan> p) {
 
   const run_ctx c{plan, result, st, t0};
 
-  // One reader per decoder that has an unblocking request, so those
-  // requests have somewhere to be waited for other than the timing thread
-  // that issued them. Op-agnostic: `signal=` means the same thing wherever
-  // the parser accepts it.
+  // One reader per decoder that has a `reset` or `get_corrections` event that
+  // could block the timing thread.
   for (const auto &e : sched.events) {
-    if (e.signal_id == kNoSignal || st.readers.count(e.decoder_id))
+    const bool unblocking =
+        e.op == operation::reset || e.op == operation::get_corrections;
+    if (!unblocking || st.readers.count(e.decoder_id))
       continue;
     st.readers.emplace(
         e.decoder_id,
@@ -744,9 +752,9 @@ run_result run(std::shared_ptr<run_plan> p) {
             [c](session &s, const reader_thread::pending &pd) {
               collect_reply(c, pd.event_index, s, pd.request_id);
               c.rec(pd.event_index).return_ns = now_ns() - c.t0;
-              // Last: everything the signal promises is in place before a
-              // stream can see it come up.
-              c.st.raise_signal(c.ev(pd.event_index).signal_id);
+              const auto signal_id = c.ev(pd.event_index).signal_id;
+              if (signal_id != kNoSignal)
+                c.st.raise_signal(signal_id);
             }));
   }
 

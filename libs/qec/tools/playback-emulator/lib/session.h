@@ -113,6 +113,12 @@ public:
 /// event and checksums it so the compiler cannot elide the work.
 std::unique_ptr<session> make_null_session();
 
+/// One `make_null_session()` per decoder_id -- each decoder dispatches on
+/// its own thread, so sharing one instance across decoder_ids is never
+/// safe. Same shape as make_inproc_sessions()/make_udp_sessions() below.
+std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+make_null_sessions(const std::vector<std::uint64_t> &decoder_ids);
+
 /// Realizes the decoders named in `config` in this process, one session per
 /// decoder, each dispatching directly to that decoder's own DecodingSession
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
@@ -126,5 +132,12 @@ make_inproc_sessions(
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
 make_udp_sessions(const std::unordered_map<std::uint64_t, std::string> &endpoints,
                    std::uint32_t timeout_ms = 200);
+
+/// Points `router[id]` at each session's owning pointer, for a
+/// make_*_sessions() result the caller is keeping alive elsewhere. The
+/// shared last step of adopting any backend's sessions into a run.
+void route_sessions(
+    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> &sessions,
+    std::unordered_map<std::uint64_t, session *> &router);
 
 } // namespace cudaq::qec::playback
