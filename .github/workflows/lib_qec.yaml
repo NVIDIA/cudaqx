@@ -73,7 +73,7 @@ jobs:
       - name: Install build requirements
         run: |
           apt update
-          apt install -y --no-install-recommends gfortran libblas-dev wget jq
+          apt install -y --no-install-recommends wget jq
 
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
