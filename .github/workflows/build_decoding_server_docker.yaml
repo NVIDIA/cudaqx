@@ -155,6 +155,7 @@ jobs:
   publish:
     name: Publish decoding-server multi-platform image (CUDA ${{ matrix.cuda_version }})
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
