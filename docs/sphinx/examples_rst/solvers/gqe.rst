@@ -1,6 +1,8 @@
 Generative Quantum Eigensolver (GQE)
 -------------------------------------
 
+.. include:: /_solvers_deprecation.rst
+
 The GQE algorithm has presented a novel approach to variational optimization that leverages generative AI. It is an active research topic. 
 A core aspect of this research is with regards to the core cost / loss function the algorithm leverages. The current implementation provides 
 a cost function suitable to small scale simulation. The GQE implementation in CUDA-Q Solvers is based on this paper: `The generative quantum eigensolver 

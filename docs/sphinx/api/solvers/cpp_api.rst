@@ -1,6 +1,8 @@
 CUDA-Q Solvers C++ API
 ******************************
 
+.. include:: /_solvers_deprecation.rst
+
 .. doxygenclass:: cudaq::solvers::operator_pool 
     :members:
 
