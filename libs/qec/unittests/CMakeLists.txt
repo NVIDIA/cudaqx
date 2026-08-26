@@ -800,14 +800,7 @@ add_subdirectory(backend-specific)
 add_subdirectory(realtime)
 add_subdirectory(decoders/pymatching)
 add_subdirectory(decoders/chromobius)
-# The playback-emulator tool is self-contained under tools/playback-emulator/
-# (headers, lib, CLI, python bindings, and tests all live there) rather than
-# under unittests/; pull its test directory in out-of-tree so it still
-# builds here, after GTest (FetchContent'd above) exists.
-add_subdirectory(
-  ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/tests
-  ${CMAKE_CURRENT_BINARY_DIR}/playback-emulator-tests
-)
+add_subdirectory(playback-emulator)
 
 # HSB rig tools (FPGA playback + graph-launched QLDPC bridge)
 if(CUDAQX_QEC_ENABLE_HSB_TOOLS)

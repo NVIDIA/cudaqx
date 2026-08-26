@@ -9,12 +9,10 @@
 #pragma once
 
 /// @file session.h
-/// @brief The `session` interface and the factories for the backends
-/// that implement it. A session is anything that can carry an RPC frame
-/// (cudaq::realtime::RPCHeader followed by the operation's payload, followed
-/// for `enqueue` by bit-packed syndrome bytes) to a decoder and bring a reply
-/// back. The concrete session classes are private to their .cpp files; only
-/// the factories at the bottom of this header are public.
+/// @brief The `session` interface and its backend factories. A session
+/// carries an RPC frame (RPCHeader + payload, + bit-packed syndrome bytes
+/// for `enqueue`) to a decoder and brings a reply back. Concrete classes are
+/// private to their .cpp files; only the factories below are public.
 
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -58,26 +56,12 @@ struct frame {
   std::size_t size = 0;
 };
 
-/// Anything that can carry an RPC frame to a decoder and bring a reply back.
-/// Both backends (in-process, UDP) implement this; `null` does too.
-/// This interface is deliberately ignorant of which RPC a
-/// frame holds --  only "fire-and-forget" vs. "blocking with a reply".
-///
-/// SINGLE PUBLISHER. `send_async`/`submit` must be called from one thread (or
-/// be externally serialized); `await` is the only method safe to call
-/// concurrently, and only for distinct request_ids. Given that, a session
-/// delivers frames in the order the caller returned from `send_async`/
-/// `submit` -- the publisher's own program order is wire order, so no backend
-/// needs a lock to establish it -- and `await` neither influences that order
-/// nor delays a later submission. The emulator upholds this: one timing
-/// thread publishes, and at most one reader thread per session awaits.
-/// Two publishers would not corrupt anything, they would just get arbitrary
-/// wire order -- a silent ordering bug in a latency tool, which is why the
-/// constraint is written here rather than left to be inferred.
-///
-/// LIFETIME. No thread may be inside any method when the session is
-/// destroyed. The emulator upholds this too: `run()` finishes dispatching and
-/// joins every reader before the router that owns the sessions goes away.
+/// Anything that can carry an RPC frame to a decoder and bring a reply back,
+/// ignorant of which RPC it holds -- only "fire-and-forget" vs. "blocking
+/// with a reply". SINGLE PUBLISHER: `send_async`/`submit` from one thread
+/// only, so program order is wire order; `await` alone is safe from other
+/// threads, one per distinct request_id. LIFETIME: no thread may be inside
+/// any method when the session is destroyed.
 class session {
 public:
   virtual ~session() = default;

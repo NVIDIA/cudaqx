@@ -9,14 +9,10 @@
 #pragma once
 
 /// @file syndrome_source.h
-/// @brief `syndrome_source` and its implementations: `static_source`
-/// (replay pre-supplied rounds) and `stim_memory_source` (JIT round
-/// generation from a Stim memory circuit, produced strictly on demand so
-/// the persistent simulator's state never advances further than what has
-/// actually been consumed), and `cudaq_memory_source` (syndrome streams
-/// derived from CUDA-Q's own `memory_circuit` kernel, for tests and tools
-/// that want a stream tied to the actual kernel rather than a hand-supplied
-/// or independently-derived Stim circuit).
+/// @brief `syndrome_source` and its implementations: `static_source` (replay
+/// pre-supplied rounds), `stim_memory_source` (JIT rounds from a Stim memory
+/// circuit, produced strictly on demand), and `cudaq_memory_source` (streams
+/// derived from CUDA-Q's own `memory_circuit` kernel).
 
 #include <cstdint>
 #include <memory>
@@ -44,21 +40,18 @@ public:
   virtual std::vector<std::uint8_t> next_round() = 0;
 
   /// The terminal data-qubit readout that ends a shot (`enqueue_data`'s
-  /// source call. 
-  /// Default just pulls the next produced item, same as `next_round()`
-  /// A source with a genuine two-phase circuit (stabilizer
-  /// rounds vs. a distinct terminal segment against a live simulator, e.g.
-  /// `stim_memory_source`) overrides this to run that segment instead.
+  /// source call). Default just pulls the next produced item, same as
+  /// `next_round()`. A two-phase source (e.g. `stim_memory_source`) overrides
+  /// this to run its distinct terminal segment instead.
   virtual std::vector<std::uint8_t> read_data() { return next_round(); }
 
   /// Rewind for a new shot.
   virtual void reset() {}
 
   /// True for a source that generates data on demand rather than replaying
-  /// pre-supplied rounds (e.g. stim_memory_source's persistent simulator),
-  /// required for a `stream ... until=NAME`.
-  /// A source that isn't streamed runs dry mid-runaway and reports
-  /// SOURCE_EXHAUSTED where the experiment needs continued growth.
+  /// pre-supplied rounds; required for a `stream ... until=NAME`. A
+  /// non-streamed source runs dry mid-runaway and reports SOURCE_EXHAUSTED
+  /// where the experiment needs continued growth.
   virtual bool is_streamed() const { return false; }
 };
 
@@ -77,26 +70,17 @@ private:
   std::size_t next_ = 0;
 };
 
-/// Just-in-time round generation from a Stim memory circuit. Each
-/// `next_round()` call generates the next round of measurement outcomes at
-/// the time of the call by advancing a persistent
-/// Pauli-frame simulator by exactly one round, always returning exactly
-/// `round_width()` bits. On the first call after construction or a shot
-/// boundary, the circuit's prefix (if any) is folded in as warm-up
-/// simulation.
-/// `read_data()` runs the circuit's terminal segment
-/// (everything after the `REPEAT` block) against that same simulator's
-/// current state -- i.e. exactly however many rounds have actually been
-/// consumed via `next_round()` so far -- and then starts a fresh simulator
-/// for the next shot.
+/// Just-in-time round generation from a Stim memory circuit: each
+/// `next_round()` advances a persistent Pauli-frame simulator by one round
+/// (folding in the circuit's prefix on the first call after a shot
+/// boundary). `read_data()` runs the terminal segment against that same
+/// state, then starts a fresh simulator for the next shot.
 class stim_memory_source : public syndrome_source {
 public:
-  /// `stim_circuit_text` is a Stim circuit whose body is exactly one
-  /// `REPEAT N { ... }` syndrome-extraction block, optionally preceded by a
-  /// prefix and optionally followed by a terminal data-qubit readout segment
-  /// A circuit with nothing after the `REPEAT` block is a valid
-  /// stabilizer-only source whose `read_data()` just returns zero bits
-  /// (and still starts a fresh simulator for the next shot). 
+  /// `stim_circuit_text` must have a body of exactly one `REPEAT N { ... }`
+  /// syndrome-extraction block, optionally preceded by a prefix and followed
+  /// by a terminal readout segment. No terminal segment is valid too --
+  /// `read_data()` then just returns zero bits and starts a fresh simulator.
   stim_memory_source(std::string stim_circuit_text, std::uint64_t seed);
   ~stim_memory_source() override;
 
@@ -124,42 +108,12 @@ private:
   std::unique_ptr<impl> impl_;
 };
 
-/// Emulates streaming raw measurements out of CUDA-Q's `memory_circuit`
-/// kernel under the `stim` target -- ancilla measurement outcomes per round
-/// and data-qubit measurement outcomes at readout, the same granularity
-/// `stim_memory_source` streams, not the XOR-combined detector values
-/// `sample_memory_circuit` returns.
-///
-/// A single kernel launch can't be driven round-by-round: the Stim NVQIR
-/// backend has no amplitude-based state to snapshot (state injection is
-/// unconditionally rejected for it), and CUDA-Q has no hook to extract
-/// results mid-execution. So instead of one persistent simulator advanced
-/// incrementally (`stim_memory_source`'s approach), this runs the
-/// `memory_circuit` kernel once per candidate round count `r`, for every
-/// `1 <= r <= max_rounds`, all under the same seed -- at construction, and
-/// again on every `reset()`/shot boundary. `memory_circuit` allocates every
-/// qubit up front, before its round loop, so `numRounds` never changes
-/// *when* a qubit is allocated during the shared rounds; that keeps the
-/// stim backend's per-instruction RNG draws bit-identical across those
-/// separate launches for any prefix the runs share. So each run for round
-/// count `r` only contributes two genuinely new pieces of information: its
-/// own round-`r` raw ancilla measurements, and its own raw data-qubit
-/// measurements (what a data readout would have been, had the shot ended at
-/// round `r`). Both are cached; `next_round()` and `read_data()` just serve
-/// slices of the cache built this way -- no circuit executes on those calls
-/// themselves.
-///
-/// The assembled output -- every next_round() block plus whichever
-/// read_data() call ends the shot -- IS bit-identical to what a single real
-/// memory_circuit shot of that length would have produced at the same seed:
-/// the seed fixes the whole noise trajectory, not just the first run's. The
-/// cost is purely computational, not a fidelity gap: producing those
-/// `max_rounds` round blocks and `max_rounds` possible data-readouts takes
-/// `max_rounds` separate kernel launches (paid at construction/reset, not
-/// spread across next_round() calls), each re-simulating its rounds from
-/// scratch rather than resuming -- O(max_rounds^2) circuit-instruction work
-/// for O(max_rounds) useful outputs, where a true incremental simulator
-/// would do O(max_rounds).
+/// Streams raw `memory_circuit` measurements (ancilla per round, data at
+/// readout) by re-launching the kernel once per `1 <= r <= max_rounds` under
+/// the same seed at construction/reset -- the stim backend has no state to
+/// snapshot mid-execution, so round-by-round output is cached per launch
+/// instead. Output is bit-identical to one real shot at that seed and length,
+/// at O(max_rounds^2) cost rather than an incremental simulator's O(max_rounds).
 class cudaq_memory_source : public syndrome_source {
 public:
   /// `code` must outlive this object; `statePrep` and `noise` are copied.
@@ -179,10 +133,9 @@ public:
   std::vector<std::uint8_t> next_round() override;
 
   /// Raw data-qubit measurement bits (data_width() of them) for a shot
-  /// ending after however many rounds have actually been consumed via
-  /// `next_round()` so far, then starts a fresh shot. Throws if called
-  /// before any `next_round()` call (`memory_circuit` always performs at
-  /// least one round before readout).
+  /// ending after however many `next_round()` calls have actually been made,
+  /// then starts a fresh shot. Throws if called before any `next_round()`
+  /// (`memory_circuit` always performs at least one round before readout).
   std::vector<std::uint8_t> read_data() override;
 
   /// Starts a fresh shot (new seed generation), discarding any unconsumed

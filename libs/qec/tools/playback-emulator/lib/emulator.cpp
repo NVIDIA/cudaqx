@@ -54,11 +54,9 @@ void sleep_until(std::uint64_t target_ns) {
 }
 
 /// How much of a wait `wait_until` spins rather than sleeps: a little above
-/// typical clock_nanosleep overshoot. Fixed rather than measured or
-/// configurable -- a calibration samples whatever the host happens to be
-/// doing at startup, and on a loaded or virtualized box one bad preemption
-/// pushes it into the milliseconds, which then gets spent spinning at every
-/// deadline for the rest of the run.
+/// typical clock_nanosleep overshoot. Fixed, not measured/configurable --
+/// a startup calibration risks sampling one bad preemption and spinning on
+/// every later deadline for the rest of the run.
 constexpr std::uint64_t kSpinSlackNs = 50'000;
 
 /// Saturating add. A deadline far enough out to overflow the clock is
@@ -234,11 +232,9 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
   }
 
   // -- Draw and serialize everything whose bytes are known before t0, in
-  // file order, so a source is consumed in exactly the order the schedule
-  // sends it. A source stops being pre-drawable the moment an event on it
-  // decides its own round count at run time (a `stream ... until=`): every
-  // later event on that source has to draw at dispatch time too, or it would
-  // take rounds belonging to the stream in front of it.
+  // file order, so a source is consumed in the order the schedule sends it.
+  // A source stops being pre-drawable once an event on it decides its round
+  // count at run time (`until=`); every later event on it must then draw live.
   impl->event_plans.resize(sched.events.size());
   std::unordered_map<std::uint32_t, bool> predrawable;
 
@@ -340,11 +336,10 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
 
 namespace {
 
-/// Collects the answers to one decoder's blocking responses, keeping the block
-/// off of the timing thread that issued them.
-/// One thread per session, because a decoder answers its own requests in the
-/// order they arrived, so awaiting them in submission order never waits on
-/// the wrong one.
+/// Collects one decoder's blocking responses, keeping the wait off the
+/// timing thread that issued them. One thread per session: a decoder answers
+/// its own requests in arrival order, so awaiting in submission order never
+/// waits on the wrong one.
 class reader_thread {
 public:
   struct pending {
@@ -498,15 +493,10 @@ void log_syndromes(const run_ctx &c, record &rec, const std::uint8_t *bits,
   rec.syndrome_count += static_cast<std::uint32_t>(n);
 }
 
-/// One `stream` or `enqueue_data` event: draw a round from the source, send
-/// it, decide whether to send another. Returns once a terminal status is
-/// reached; `rec` and `result` are updated in place.
-///
-/// The two ops share this loop because they are the same wire operation.
-/// `enqueue_data` differs in exactly one respect -- it pulls the source's
-/// terminal data-qubit readout instead of its next stabilizer round -- and
-/// the parser leaves its round bounds at 1/1 with no `until=`, so the loop
-/// below sends one round and stops without needing to know which op it is.
+/// One `stream` or `enqueue_data` event: draw a round, send it, decide
+/// whether to send another, until a terminal status is reached; `rec` and
+/// `result` are updated in place. Both ops share this loop since they are the
+/// same wire operation; `enqueue_data` just pulls a data readout with 1/1 bounds.
 void run_stream(const run_ctx &c, std::uint32_t i,
                 std::uint64_t deadline_abs_ns, session &s) {
   auto &plan = c.plan;

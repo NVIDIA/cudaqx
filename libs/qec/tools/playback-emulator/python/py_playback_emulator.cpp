@@ -8,11 +8,9 @@
 
 /// @file py_playback_emulator.cpp
 /// @brief Python binding for the playback emulator. `parse()`/`plan()` and
-/// the session/schedule/capabilities/run_params machinery that ties them
-/// together are internal, C++-only plumbing (see emulator.h) -- the Python
-/// surface is just `run()`: a schedule string plus flags selecting the
-/// session backend, run against the given syndrome sources, returning the
-/// same `run_result` the CLI tool gets.
+/// their supporting machinery stay internal C++-only plumbing (see
+/// emulator.h) -- the Python surface is just `run()`, returning the same
+/// `run_result` the CLI tool gets.
 
 #include "py_playback_emulator.h"
 
@@ -110,7 +108,7 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def_prop_ro("status",
                    [](const record &r) {
                      // The two status spaces are disjoint by value
-                     // (RpcStatus 0..7, stream_terminate 100..103), so the
+                     // (RpcStatus 0..6, stream_terminate 100..103), so the
                      // value picks the enum -- not the op, since a dry
                      // source gives even an enqueue a SOURCE_EXHAUSTED.
                      if (r.status == kNoStatus)

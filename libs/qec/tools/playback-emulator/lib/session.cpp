@@ -7,11 +7,10 @@
  ******************************************************************************/
 
 /// @file session.cpp
-/// @brief All three session backends: `null` (discard every frame), the
-/// in-process one (dispatch straight to a decoder's own DecodingSession), and
-/// UDP (connected datagram sockets to a decoding server). Each concrete class
-/// lives in its own anonymous namespace here; only the factories declared in
-/// session.h are reachable from outside.
+/// @brief All three session backends: `null` (discard every frame), inproc
+/// (dispatch to a decoder's own DecodingSession), and UDP (a decoding
+/// server). Concrete classes are anonymous-namespace private; the factories
+/// in session.h are the only public surface.
 
 #include "RpcSlot.h"
 #include "SessionRegistry.h"
@@ -59,7 +58,7 @@ public:
   RpcStatus await(std::uint32_t, std::span<std::uint8_t> reply,
                   std::size_t &reply_len) override {
     std::fill(reply.begin(), reply.end(), std::uint8_t{0});
-    reply_len = 0;
+    reply_len = reply.size();
     return RpcStatus::OK;
   }
 
@@ -100,15 +99,10 @@ void route_sessions(
 
 // ─── inproc_session ────────────────────────────────────────────────────────
 //
-// The in-process backend: one session per decoder,
-// dispatching straight to that decoder's own DecodingSession payload-level
-// cores, skipping shared-memory rings and CUDA graph dispatch entirely.
-// A decoder's own decode work may run on its own thread internally (e.g.
-// a background "decode" sleep); that is the decoder implementation's
-// business, not this class's -- an inproc_session is a
-// thin, synchronous dispatcher to one already-resolved DecodingSession,
-// mirroring how a udp_session is bound to exactly one remote decoder
-// (a session always corresponds to exactly one decoder).
+// One session per decoder, dispatching straight to that decoder's own
+// DecodingSession payload-level cores (skipping shared-memory rings and CUDA
+// graph dispatch). A thin, synchronous dispatcher to one already-resolved
+// DecodingSession -- any internal decode threading is that class's business.
 
 namespace {
 
@@ -325,13 +319,10 @@ make_inproc_sessions(
 
 // ─── udp_session ───────────────────────────────────────────────────────────
 //
-// The UDP backend: connected datagram socket(s) to a
-// decoding server speaking the wire format in decoder_rpc_wire_format.h.
-// Replies are matched by request_id
-//
-// Pure transport: this file never looks at a frame's contents beyond the
-// generic RPCHeader/RPCResponse framing needed to match a reply to its
-// request. It has no notion of which RPC a frame holds.
+// Connected UDP socket(s) to a decoding server speaking decoder_rpc_wire_
+// format.h; replies are matched by request_id. Pure transport: this file
+// looks no further than the generic RPCHeader/RPCResponse framing and has
+// no notion of which RPC a frame holds.
 
 namespace {
 

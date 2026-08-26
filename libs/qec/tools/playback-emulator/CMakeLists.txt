@@ -7,8 +7,9 @@
 # ============================================================================ #
 
 # The playback emulator. Everything specific to
-# this tool -- headers, library implementation, CLI, python bindings, and
-# tests -- lives under this directory.
+# this tool -- headers, library implementation, CLI, and python bindings --
+# lives under this directory. Its tests live under
+# libs/qec/unittests/playback-emulator/, alongside the other QEC unit tests.
 
 # Only built where the in-process/UDP backends' dependency is: a
 # realtime-enabled CUDA-Q install (see lib/realtime/decoding-server-cqr's own
@@ -26,11 +27,9 @@ add_executable(playback-emulator
   playback_emulator_main.cpp
 )
 
-# cudaq-qec (pulled in by cudaq_memory_source, which shares a translation
-# unit with the other syndrome sources) leaves undefined symbols for a
-# concrete NVQIR backend that the final binary has to supply -- there is no
-# C++-level equivalent of Python's cudaq.set_target() to pick one at runtime.
-# Same set libs/qec/unittests/backend-specific/stim/test_qec_stim.cpp links.
+# cudaq-qec (pulled in by cudaq_memory_source) leaves undefined symbols for
+# a concrete NVQIR backend that the final binary must supply -- there is no
+# C++-level cudaq.set_target(). Same set test_qec_stim.cpp links.
 target_link_directories(playback-emulator PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
 target_link_libraries(playback-emulator PRIVATE
   cudaq-qec-playback-emulator

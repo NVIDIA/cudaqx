@@ -8,13 +8,9 @@
 
 # The playback emulator core: parser, timing loop, dispatch (polling streams),
 # the three required session backends, syndrome sources, and the downstream
-# CSV analyzer.
-#
-# This whole tool -- headers, lib, CLI, python bindings, tests -- lives
-# self-contained under tools/playback-emulator/; this file is the one
-# exception that reaches outside it, for the pieces it borrows from the
-# existing decoding-server (RpcSlot.h et al.) and core (heterogeneous_map
-# et al.), which are not this tool's to own a copy of.
+# CSV analyzer. This file is the one place that reaches outside this tool's
+# own directory, for pieces it borrows rather than owns a copy of: the
+# existing decoding-server (RpcSlot.h et al.) and core (heterogeneous_map).
 
 if(CUDAQX_QEC_STANDALONE_BUILD)
   set(_playback_core_include_dir "${CMAKE_SOURCE_DIR}/../core/include")
@@ -58,11 +54,10 @@ target_link_libraries(cudaq-qec-playback-emulator
   PUBLIC
     cudaq-qec-decoding-server
     cudaq-qec-realtime-decoding
-    # cudaq_memory_source sits in syndrome_source.cpp alongside the other two
-    # sources, so cudaq-qec is a dependency of this library as a whole. Note
-    # cudaq-qec.so ships with undefined symbols that a concrete NVQIR backend
-    # has to supply at executable-link time, so every executable linking this
-    # needs one -- see the CLI's own link list.
+    # cudaq_memory_source sits in syndrome_source.cpp alongside the other
+    # two sources, so cudaq-qec is a dependency of this library as a whole --
+    # and every executable linking this needs a concrete NVQIR backend too
+    # (see the CLI's own link list).
     cudaq-qec
   PRIVATE
     cudaq-qec-decoders

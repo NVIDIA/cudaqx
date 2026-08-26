@@ -26,19 +26,10 @@
 
 namespace cudaq::qec::playback {
 
-/// Parse a line-oriented playback description directly into a `schedule`.
-/// A line is `<trigger> <op> [key=value...]`
-///
-/// The trigger reads three ways. An integer is a deadline, resolved here to
-/// `deadline_ns = tick * tick_ns`. An integer with a `+` before it, i.e. `+N` is relative instead:
-/// resolved at run time to `N` ticks after the previous line finished being
-/// dispatched on the timing thread (not necessarily when it got a response).
-/// Finally, a `-` means execute as fast as possible, equivalent to `+0`.
-///
-/// `session=N` picks which decoder the line talks to, defaulting to 0.
-/// `known_decoder_ids` is the set the config declares, and a `session=`
-/// outside it is a parse error. Throws std::invalid_argument naming the
-/// offending line on any parse error.
+/// Parse a line-oriented playback description into a `schedule`. A line is
+/// `<trigger> <op> [key=value...]`: the trigger is a tick (`deadline_ns =
+/// tick*tick_ns`), a run-time-resolved `+N` delta, or `-` for `+0`; `session=N`
+/// (default 0) must be in `known_decoder_ids`. Throws std::invalid_argument.
 schedule parse(std::string_view text,
                const std::vector<std::uint64_t> &known_decoder_ids,
                std::uint64_t tick_ns);
@@ -58,10 +49,9 @@ struct round_plan {
 };
 
 /// Per-event plan-time state: every frame whose bytes are known before t0.
-/// `reset` and `get_corrections` have exactly one. A `stream` has one per
-/// round when its round count is fixed and its source could be drawn from
-/// ahead of time; otherwise it has none and builds its frames as it goes,
-/// which is also what a source-streamed or `until=` stream always does.
+/// `reset`/`get_corrections` have exactly one. A `stream` has one per round
+/// only when its round count is fixed and its source is pre-drawable;
+/// otherwise (streamed source, or `until=`) it has none and builds live.
 using event_plan = std::vector<round_plan>;
 
 /// Pre-planned, immediately-runnable schedule: frames
@@ -79,25 +69,18 @@ struct run_plan {
 
 /// Validate `sched` against `router`'s session frame limits and pre-build
 /// everything run()'s timing loop must not do on the hot path. `router` maps
-/// decoder_id -> session;
-/// `sources` maps a schedule's `event::source_id` to the syndrome_source
-/// instance it reads from. 
-/// Ownership of both the sessions and the sources stays with the caller for
-/// the lifetime of the returned run_plan.
+/// decoder_id -> session, `sources` maps source_id -> syndrome_source. Caller
+/// keeps both alive for the returned run_plan's lifetime.
 std::shared_ptr<run_plan>
 plan(const schedule &sched, const std::unordered_map<std::uint64_t, session *> &router,
      const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
      const run_params &params = {});
 
-/// Run the plan on one timing thread: wait_until(t0 + deadline), dispatch,
-/// record, in schedule order, with nothing done between deadlines but wait.
-/// A `reset` or `get_corrections` always submits its request and returns
-/// without waiting; the answer is collected on a session's own
-/// reader thread, which reads the response, fills in the record and, only if the event
-/// carries `signal=`, raises it.
-/// A hard error aborts the run, but `result.records` is not truncated:
-/// every event gets a slot, and `record::dispatched` distinguishes what ran
-/// from what the abort pre-empted.
+/// Run the plan on one timing thread: wait_until(t0+deadline), dispatch,
+/// record, in schedule order. `reset`/`get_corrections` submit and return
+/// without waiting; a reader thread per session collects the answer and
+/// raises `signal=` if carried. A hard error aborts without truncating
+/// `result.records`; `record::dispatched` marks what actually ran.
 run_result run(std::shared_ptr<run_plan> plan);
 
 /// Downstream analysis writes CSV. One row per record: identity, timings, derived lateness/latency, status,

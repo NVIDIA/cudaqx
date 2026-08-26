@@ -10,9 +10,8 @@
 
 /// @file types.h
 /// @brief Playback emulator data model: `schedule` (parsed input), `record`
-/// (per-event output), and `run_result` (what `run()` returns). These three
-/// types carry everything, are flat, and are allocation-free on the hot
-/// path.
+/// (per-event output), and `run_result` (what `run()` returns) -- flat,
+/// allocation-free on the hot path.
 
 #include <cstdint>
 #include <string>
@@ -25,21 +24,17 @@ inline constexpr std::uint32_t kNoSource = ~std::uint32_t(0);
 
 /// Sentinel for `record::status`: this event never dispatched, so it has no
 /// outcome at all. Disjoint from both status spaces below (RpcStatus is
-/// 0..7, stream_terminate 100..103), so it cannot be read as success.
+/// 0..6, stream_terminate 100..103), so it cannot be read as success.
 inline constexpr std::int32_t kNoStatus = -1;
 
 /// Sentinel: this event neither raises nor waits on a signal.
 inline constexpr std::uint32_t kNoSignal = ~std::uint32_t(0);
 
-/// The four operations a schedule line can name. 
-/// `stream` is client-side logic built from repeated `enqueue`s. a stream with no `until=` 
-/// operand sends exactly `stream_min_rounds` and returns. The schedule spelling `enqueue` 
-/// lowers to exactly one round. With an `until=` runs on to `stream_max_rounds` unless 
-/// that signal (from an asynchronous RPC response) comes up first.
-/// `enqueue_data` is wire-identical to one round of `stream` (same RPC, same
-/// frame shape) but marks a shot boundary: it pulls a source's terminal
-/// data-qubit readout (`syndrome_source::read_data()`) instead of another
-/// stabilizer round (`next_round()`). 
+/// The four operations a schedule line can name. `stream` sends
+/// `stream_min_rounds` and returns, or continues to `stream_max_rounds`
+/// unless `until=` arrives first; `enqueue` is its one-round spelling.
+/// `enqueue_data` is wire-identical but marks a shot boundary, pulling a
+/// source's terminal readout instead of another stabilizer round.
 enum class operation : std::uint8_t {
   reset,
   stream,
@@ -70,14 +65,10 @@ inline const char *to_string(operation op) {
   return "unknown";
 }
 
-/// Final outcome of one record. For `reset`/`enqueue_data`/`get_corrections`
-/// this is the wire `RpcStatus` (see decoder_rpc_wire_format.h) cast into
-/// this field. For `stream` it is instead one of four termination reasons,
-/// as it is for any single-round enqueue whose source has run dry. The two
-/// enumerations are disjoint by value (RpcStatus occupies 0..7,
-/// stream_terminate 100..103), so the value itself says which one a record
-/// used; `kNoStatus` (-1) means the event never dispatched at all. A
-/// fixed-round `stream` only ever reports OK, SOURCE_EXHAUSTED, or ERROR.
+/// Final outcome of one record: the wire `RpcStatus` for `reset`/
+/// `enqueue_data`/`get_corrections`, or one of these four termination
+/// reasons for `stream`. Disjoint by value (RpcStatus 0..6, this 100..103),
+/// so the value alone says which; `kNoStatus` (-1) means never dispatched.
 enum class stream_terminate : std::int32_t {
   OK = 100,
   SOURCE_EXHAUSTED = 101,

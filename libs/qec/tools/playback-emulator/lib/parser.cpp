@@ -8,11 +8,8 @@
 
 /// @file parser.cpp
 /// @brief parse(): line-oriented, `<trigger> <op> [key=value...]`. Unknown
-/// operation, malformed bit string, or a `session=` absent from the config is
-/// a parse error. The trigger is the only operand written without a keyword,
-/// and is either a tick or a `+N` delta (`-` for `+0`). Signal names are
-/// interned here into `schedule::signal_names`; every event downstream
-/// carries indices, never strings.
+/// op, malformed bits, or an unlisted `session=` is a parse error. Signal
+/// names are interned into `schedule::signal_names`; events carry indices only.
 
 #include "emulator.h"
 
@@ -252,11 +249,10 @@ std::uint32_t read_signal(operands &ops, const char *key,
 /// Marks a `source=` value as literal syndrome bits rather than a source id.
 constexpr std::string_view kLiteralPrefix = "0b";
 
-/// `source=` says where an op's syndrome bits come from, and reads two ways:
-/// a plain integer names a registered syndrome_source, and `0b<bits>` carries
-/// one round of them inline. Literal bits land in the schedule's syndrome
-/// arena and leave `source_id` at kNoSource, which is what every later stage
-/// reads to tell the two apart.
+/// `source=` says where an op's syndrome bits come from: a plain integer
+/// names a registered syndrome_source; `0b<bits>` carries one round inline
+/// and lands in the syndrome arena, leaving `source_id` at kNoSource -- the
+/// flag every later stage reads to tell the two apart.
 void read_source(operands &ops, const std::string &op_name, schedule &sched,
                  event &e) {
   const std::string value = ops.name("source");

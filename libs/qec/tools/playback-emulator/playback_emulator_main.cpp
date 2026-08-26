@@ -7,11 +7,9 @@
  ******************************************************************************/
 
 /// @file playback_emulator_main.cpp
-/// @brief CLI entry point for the playback emulator ("callable
-/// both from the CLI and from a Python binding"). Hand-parsed `--flag=value`
-/// arguments, matching this repo's convention (see
-/// tools/decoding-server/decoding_server.cpp) rather than pulling in a CLI
-/// argument-parsing dependency.
+/// @brief CLI entry point for the playback emulator. Hand-parsed
+/// `--flag=value` arguments, matching this repo's convention (see
+/// tools/decoding-server/decoding_server.cpp) rather than a CLI-parsing dependency.
 
 #include "session.h"
 #include "emulator.h"
@@ -83,16 +81,23 @@ std::vector<std::vector<std::uint8_t>> read_rounds(const std::string &path) {
   if (!in)
     throw std::runtime_error("cannot open source file: " + path);
   std::string line;
+  std::size_t line_number = 0;
   while (std::getline(in, line)) {
+    ++line_number;
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
     if (line.empty())
       continue;
     std::vector<std::uint8_t> bits;
     bits.reserve(line.size());
-    for (char c : line)
-      if (c == '0' || c == '1')
-        bits.push_back(static_cast<std::uint8_t>(c - '0'));
-    if (!bits.empty())
-      rounds.push_back(std::move(bits));
+    for (char c : line) {
+      if (c != '0' && c != '1')
+        throw std::runtime_error(path + ":" + std::to_string(line_number) +
+                                 ": malformed bit string '" + line +
+                                 "': expected only '0'/'1'");
+      bits.push_back(static_cast<std::uint8_t>(c - '0'));
+    }
+    rounds.push_back(std::move(bits));
   }
   return rounds;
 }

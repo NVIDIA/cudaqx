@@ -37,10 +37,9 @@ void static_source::reset() { next_ = 0; }
 
 // ─── stim_memory_source ─────────────────────────────────────────────────────
 //
-// Drives a live stim::FrameSimulator, advanced by exactly one round 
-// per next_round() call, or by the
-// circuit's terminal segment per
-// read_data() call. Both happen synchronously on the calling thread.
+// Drives a live stim::FrameSimulator, advanced by exactly one round per
+// next_round() call, or by the circuit's terminal segment per read_data()
+// call. Both happen synchronously on the calling thread.
 
 constexpr std::size_t kSimdWidth = stim::MAX_BITWORD_WIDTH;
 
