@@ -57,6 +57,7 @@ ${python} -m pip install --no-cache-dir pytest
 # The following packages are needed for our tests. They are not true
 # dependencies for our delivered package.
 ${python} -m pip install onnxscript # for trt decoder tests
+${python} -m pip install matplotlib # for pseudo_threshold.py
 
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 

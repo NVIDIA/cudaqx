@@ -93,6 +93,8 @@ test_examples() {
 
         # Needed for tests:
         pip install pytest
+        # Needed by docs/sphinx/examples/qec/python/pseudo_threshold.py.
+        pip install matplotlib
 
         if [[ "$(uname -m)" == "x86_64" ]]; then
             # Stim is not currently available on manylinux ARM wheels, so don't

@@ -97,6 +97,8 @@ test_examples() {
     docker exec ${container_name} bash -c "pip install onnxscript"
     # Install other required packages
     docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==26.03.1'"
+    # Needed by docs/sphinx/examples/qec/python/pseudo_threshold.py.
+    docker exec ${container_name} bash -c "pip install matplotlib"
     if [ "${CURRENT_ARCH}" == "x86_64" ]; then
         docker exec ${container_name} bash -c "pip install 'stim' 'beliefmatching'"
     fi
