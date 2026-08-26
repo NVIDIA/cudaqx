@@ -179,6 +179,11 @@ TEST(PyMatchingRealtime, ConfiguresViaRealtimeDecoderConfig) {
   pymatching_args.insert("merge_strategy", "smallest_weight");
   decoder_config.decoder_custom_args = pymatching_args;
 
+  auto direct_decoder =
+      cudaq::qec::decoding::host::create_realtime_decoder(decoder_config);
+  EXPECT_EQ(direct_decoder->get_result_type(),
+            cudaq::qec::decoder::decode_to_obs);
+
   config::multi_decoder_config multi_config;
   multi_config.decoders.push_back(decoder_config);
 

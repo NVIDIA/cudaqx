@@ -193,7 +193,8 @@ TEST(PyMatchingDecoder, RejectsObservableMatrixWithWrongBlockSize) {
 // Regression test: when two H columns share the same edge (parallel columns),
 // edge2col_idx must record the column that the graph actually retains after the
 // merge, not always the last one seen. Under KEEP_ORIGINAL / INDEPENDENT the
-// first column wins; under REPLACE the last column wins.
+// first column wins; under SMALLEST_WEIGHT the lower-weight column wins; under
+// REPLACE the last column wins.
 TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
   using cudaq::qec::float_t;
 
@@ -223,6 +224,26 @@ TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
     EXPECT_EQ(result.result[1], 0.0)
         << strategy << ": col 1 must not be flagged";
     EXPECT_EQ(result.result[2], 0.0) << strategy;
+  }
+
+  // Under SMALLEST_WEIGHT the lower-weight parallel column wins. The higher
+  // error rate for col 1 gives it the lower matching weight.
+  {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", std::string("smallest_weight"));
+    params.insert("error_rate_vec", std::vector<double>{0.01, 0.1, 0.01});
+    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    ASSERT_NE(d, nullptr);
+
+    std::vector<float_t> syndrome = {1.0, 1.0, 0.0};
+    auto result = d->decode(syndrome);
+    ASSERT_TRUE(result.converged);
+    ASSERT_EQ(result.result.size(), 3u);
+    EXPECT_EQ(result.result[0], 0.0)
+        << "col 0 must not be flagged under smallest_weight";
+    EXPECT_EQ(result.result[1], 1.0)
+        << "col 1 must be flagged under smallest_weight";
+    EXPECT_EQ(result.result[2], 0.0);
   }
 
   // Under REPLACE the graph adopts the last column's edge — result must name

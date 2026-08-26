@@ -140,28 +140,26 @@ public:
     // in their original order. This guarantees by construction that result
     // index `col` always maps back to the caller's column `col`.
     std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
+    std::vector<double> column_weights(block_size, 1.0);
 
     // Track which column index the graph will associate with a given edge after
     // merging. The correct column depends on the merge strategy:
     //   REPLACE        → last column seen wins (overwrite every time)
     //   SMALLEST_WEIGHT → lower-weight column wins
-    //   KEEP_ORIGINAL, INDEPENDENT, DISALLOW → first column seen wins (no
-    //   overwrite)
+    //   KEEP_ORIGINAL, INDEPENDENT → first column seen wins (no overwrite)
+    //   DISALLOW                  → duplicate edges are rejected
     auto update_edge2col = [&](auto key, double weight, std::size_t col) {
       auto [it, inserted] = edge2col_idx.emplace(key, col);
       if (!inserted) {
         if (merge_strategy_enum == pm::MERGE_STRATEGY::REPLACE) {
           it->second = col;
         } else if (merge_strategy_enum == pm::MERGE_STRATEGY::SMALLEST_WEIGHT) {
-          std::size_t prev_col = it->second;
-          double prev_weight = (prev_col < error_rate_vec.size())
-                                   ? -std::log(error_rate_vec[prev_col] /
-                                               (1.0 - error_rate_vec[prev_col]))
-                                   : 1.0;
+          const double prev_weight = column_weights[it->second];
           if (weight < prev_weight)
             it->second = col;
         }
-        // KEEP_ORIGINAL / INDEPENDENT / DISALLOW: first column wins; no update.
+        // KEEP_ORIGINAL / INDEPENDENT retain the first column. DISALLOW
+        // rejects duplicate edges in add_or_merge_* below.
       }
     };
 
@@ -170,6 +168,7 @@ public:
       if (col < error_rate_vec.size()) {
         weight = -std::log(error_rate_vec[col] / (1.0 - error_rate_vec[col]));
       }
+      column_weights[col] = weight;
 
       const auto &col_rows = H_e2d[col];
       if (col_rows.size() == 2) {
