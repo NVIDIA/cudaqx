@@ -183,6 +183,7 @@ TEST(PyMatchingRealtime, ConfiguresViaRealtimeDecoderConfig) {
       cudaq::qec::decoding::host::create_realtime_decoder(decoder_config);
   EXPECT_EQ(direct_decoder->get_result_type(),
             cudaq::qec::decoder::decode_to_obs);
+  EXPECT_EQ(direct_decoder->get_num_observables(), 3u);
 
   config::multi_decoder_config multi_config;
   multi_config.decoders.push_back(decoder_config);

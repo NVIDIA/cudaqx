@@ -269,7 +269,11 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
   auto decoder = cudaq::qec::get_decoder(decoder_config.type, pcm, params);
   decoder->set_decoder_id(decoder_config.id);
-  decoder->set_O_sparse(decoder_config.O_sparse);
+  const bool pymatching_configured_observables =
+      decoder_config.type == "pymatching" && !decoder_config.O_sparse.empty() &&
+      num_observables > 0;
+  if (!pymatching_configured_observables)
+    decoder->set_O_sparse(decoder_config.O_sparse);
   decoder->set_D_sparse(decoder_config.D_sparse);
 
   // Force plugin initialization before the caller publishes the decoder for

@@ -232,7 +232,7 @@ TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
     cudaqx::heterogeneous_map params;
     params.insert("merge_strategy", std::string("disallow"));
     EXPECT_THROW((void)cudaq::qec::decoder::get("pymatching", H, params),
-                 std::runtime_error);
+                 std::invalid_argument);
   }
 
   // Under SMALLEST_WEIGHT the lower-weight parallel column wins. The higher
