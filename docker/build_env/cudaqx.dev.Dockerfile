@@ -19,7 +19,7 @@ LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
 RUN apt-get update && CUDA_DASH=$(echo $cuda_version | tr '.' '-') \
-  && apt-get install -y gfortran libblas-dev jq cuda-nvtx-${CUDA_DASH} \
+  && apt-get install -y jq cuda-nvtx-${CUDA_DASH} \
   && apt-get install -y git-lfs \
   && apt-get autoremove -y --purge && apt-get clean && rm -rf /var/lib/apt/lists/*
 

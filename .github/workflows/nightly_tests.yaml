@@ -94,16 +94,6 @@ jobs:
       cache_key_suffix: nightly
     secrets: inherit
 
-  cudaq-main-solvers:
-    name: Solvers against CUDA-Q main
-    needs: [resolve-cudaq-main, build-cudaq-main]
-    uses: ./.github/workflows/lib_solvers.yaml
-    with:
-      cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
-      cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly
-    secrets: inherit
-
   cudaq-main-docs:
     name: Docs against CUDA-Q main
     needs: [resolve-cudaq-main, build-cudaq-main]
@@ -143,7 +133,6 @@ jobs:
       - build-cudaq-main
       - cudaq-main-all-libs
       - cudaq-main-qec
-      - cudaq-main-solvers
       - cudaq-main-docs
       - cudaq-main-wheels
     runs-on: ubuntu-latest

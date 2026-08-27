@@ -13,11 +13,12 @@ To learn more about how to work with the CUDA-QX libraries, please take a look a
 [cudaqx_docs]: https://nvidia.github.io/cudaqx
 [official_install]: https://nvidia.github.io/cudaqx/quickstart/installation.html
 
-## CUDA-Q Solvers is deprecated
+## Looking for CUDA-Q Solvers?
 
-CUDA-Q Solvers 0.6.0 is the final planned release of that library. Development
-continues in [CUDA-Q Algorithms][cudaq_algorithms_github], which supersedes
-CUDA-Q Solvers and expands on it:
+The CUDA-Q Solvers library has been removed from this repository; version 0.6.0
+was its final planned release. Development continues in
+[CUDA-Q Algorithms][cudaq_algorithms_github], which supersedes CUDA-Q Solvers
+and expands on it:
 
 ```bash
 pip install cudaq-algorithms
@@ -26,8 +27,7 @@ pip install cudaq-algorithms
 See the [CUDA-Q Algorithms documentation][cudaq_algorithms_docs] for tutorials
 and examples, [cudaq-algorithms on PyPI][cudaq_algorithms_pypi] for the package,
 and [NVIDIA/cudaq-algorithms on GitHub][cudaq_algorithms_github] for the source
-code. The CUDA-Q QEC library in this repository is unaffected and continues to
-be developed here.
+code. The CUDA-Q QEC library continues to be developed in this repository.
 
 [cudaq_algorithms_docs]: https://nvidia.github.io/cudaq-algorithms/
 [cudaq_algorithms_pypi]: https://pypi.org/project/cudaq-algorithms/
