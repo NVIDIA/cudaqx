@@ -27,34 +27,12 @@ on:
         required: false
 
 jobs:
-  fetch-assets:
-    name: Fetch release assets
-    if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
-
-      - name: Upload release assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: decoding-server-release-assets
-          path: '*.tar.gz'
-          if-no-files-found: error
-          retention-days: 1
-
   build:
     name: Build decoding-server image (${{ matrix.platform }}, CUDA ${{ matrix.cuda_version }})
-    needs: fetch-assets
-    if: ${{ !cancelled() && github.repository == 'NVIDIA/cudaqx' && (needs.fetch-assets.result == 'success' || needs.fetch-assets.result == 'skipped') }}
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     runs-on: linux-${{ matrix.platform }}-cpu8
     permissions:
-      contents: read
+      contents: write
       packages: write
     strategy:
       fail-fast: false
@@ -70,29 +48,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download release assets
-        if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: decoding-server-release-assets
-          path: .
+      # Always create the dir (even empty) so build-contexts below has
+      # something to point at regardless of whether assets were supplied.
+      - name: Create artifacts dir
+        run: mkdir -p artifacts
 
-      - name: Extract decoder assets
+      # TEMPORARY: fetching directly in this job (instead of a separate
+      # fetch-assets job + actions/upload-artifact hand-off) while testing
+      - name: Fetch and extract decoder assets
+        if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          bash .github/workflows/scripts/install_git_cli.sh
+          gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
+          gh release view -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}" >> $GITHUB_STEP_SUMMARY
 
-          # Always create the dir (even empty) so build-contexts below has
-          # something to point at regardless of whether assets were supplied.
-          mkdir -p artifacts
-
-          if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
-            tar -C artifacts -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_release.tar.gz
-            test -f artifacts/libcudaq-qec-nv-qldpc-decoder.so
-            test -f artifacts/libcudaq-qec-realtime-cudevice-proprietary.a
+          # nv-qldpc-decoder-<arch>_ubuntu24.04_cuda<version>_py3.<pyver>_release.tar.gz --
+          # per-Python-version variants (verified: the .so differs by
+          # build, not just incidentally). decoding_server dlopens this as
+          # a plugin and never touches Python, so any variant should be
+          # functionally equivalent; py3.12 picked for consistency with
+          # the dev image's own default interpreter.
+          tar -C artifacts -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_py3.12_release.tar.gz
+          test -f artifacts/libcudaq-qec-nv-qldpc-decoder.so
+          # The cudevice archive is NOT bundled in this tarball (verified
+          # against both docker-files-* and wheels-* releases) -- it's a
+          # separate, independently-optional artifact. Don't hard-require it.
+          if [ -f artifacts/libcudaq-qec-realtime-cudevice-proprietary.a ]; then
+            echo "cudevice archive: present"
           else
-            echo "No assets_repo/assets_tag supplied; building without decoder artifacts."
+            echo "cudevice archive: absent (device_graph dispatch will not be linked)"
           fi
-        shell: bash
 
       - name: Set up context for buildx
         run: docker context create builder_context
