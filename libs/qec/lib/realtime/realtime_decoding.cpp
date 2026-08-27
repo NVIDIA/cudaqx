@@ -182,10 +182,13 @@ cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
   // Placement knob: surfaced for every decoder type (deliberately before the
-  // trt-only early return below); consumed by decoder::get() at construction.
+  // decoder-type early return below); consumed by decoder::get() at
+  // construction.
   if (decoder_config.cuda_device_id.has_value())
     params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
-  if (decoder_config.type != "trt_decoder")
+  const bool is_trt_decoder = decoder_config.type == "trt_decoder";
+  const bool is_pymatching_decoder = decoder_config.type == "pymatching";
+  if (!is_trt_decoder && !is_pymatching_decoder)
     return params;
 
   // batch_size > 1 has no effect on the realtime path: enqueue_syndrome decodes
@@ -193,7 +196,7 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   // all but slot 0. Warn rather than reject -- the result is correct, just
   // wasteful. (Offline decode_batch users set batch_size via a raw params map,
   // not this realtime config path.)
-  if (params.contains("batch_size") &&
+  if (is_trt_decoder && params.contains("batch_size") &&
       params.get<std::size_t>("batch_size") > 1)
     CUDA_QEC_WARN(
         "trt_decoder batch_size > 1 has no effect on the realtime decode path "
@@ -206,7 +209,7 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   // provide a hand-built map with only "global_decoder"; synthesize params here
   // before the O_sparse early return so that decoder still attaches.
   const bool has_global_decoder =
-      params.contains("global_decoder") &&
+      is_trt_decoder && params.contains("global_decoder") &&
       !params.get<std::string>("global_decoder").empty();
   const bool has_pymatching_global =
       has_global_decoder &&
@@ -305,6 +308,9 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
   if (closed_dem && !params.contains("error_rate_vec"))
     params.insert("error_rate_vec", closed_dem->error_rates);
 
+  const auto num_observables = std::count(decoder_config.O_sparse.begin(),
+                                          decoder_config.O_sparse.end(), -1);
+
   std::unique_ptr<cudaq::qec::decoder> decoder;
   if (!decoder_config.stim_dem_path.empty()) {
     // A DEM-native decoder is constructed from the model text itself. It
@@ -324,8 +330,6 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
     auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
                                                decoder_config.syndrome_size,
                                                decoder_config.block_size);
-    const auto num_observables = std::count(decoder_config.O_sparse.begin(),
-                                            decoder_config.O_sparse.end(), -1);
     // Materialize O before decoder construction to validate its sparse shape
     // and column indices for every decoder type. TRT also receives this matrix
     // in its constructor parameters through prepare_decoder_params() above.
@@ -339,7 +343,10 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
   // map from the DEM it read), so installing an empty one here would drop it
   // and leave get_corrections with nowhere to write.
   if (!decoder_config.O_sparse.empty()) {
-    decoder->set_O_sparse(decoder_config.O_sparse);
+    const bool pymatching_configured_observables =
+        decoder_config.type == "pymatching" && num_observables > 0;
+    if (!pymatching_configured_observables)
+      decoder->set_O_sparse(decoder_config.O_sparse);
   } else if (!stim_dem_text.empty() && decoder->get_num_observables() == 0) {
     // DEM form names no O_sparse and the LUT decoders install none, leaving the
     // realtime path nothing to project onto. dem_from_stim_text() is what
