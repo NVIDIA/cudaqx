@@ -61,7 +61,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash .github/workflows/scripts/install_git_cli.sh
+          sudo bash .github/workflows/scripts/install_git_cli.sh
           gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
           gh release view -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}" >> $GITHUB_STEP_SUMMARY
 
