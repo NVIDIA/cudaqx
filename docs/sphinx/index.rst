@@ -3,10 +3,20 @@ CUDA-QX - The CUDA-Q Libraries Collection
 
 CUDA-QX is a collection of libraries that build upon the CUDA-Q programming model
 to enable the rapid development of hybrid quantum-classical application code leveraging
-state-of-the-art CPUs, GPUs, and QPUs. It provides a collection of C++
-libraries and Python packages that enable research, development, and application
-creation for use cases in quantum error correction and hybrid quantum-classical
-solvers.
+state-of-the-art CPUs, GPUs, and QPUs. It provides C++ libraries and Python
+packages that enable research, development, and application creation for use
+cases in quantum error correction.
+
+.. note::
+
+   **Looking for CUDA-Q Solvers?** The CUDA-Q Solvers library has been removed
+   from CUDA-QX; version 0.6.0 was its final planned release. Development
+   continues in **CUDA-Q Algorithms**, which supersedes CUDA-Q Solvers and
+   expands on it. Install it with :code:`pip install cudaq-algorithms`
+   (`cudaq-algorithms on PyPI <https://pypi.org/project/cudaq-algorithms/>`__),
+   read the `CUDA-Q Algorithms documentation
+   <https://nvidia.github.io/cudaq-algorithms/>`__, and find the source code at
+   `NVIDIA/cudaq-algorithms on GitHub <https://github.com/NVIDIA/cudaq-algorithms>`__.
 
 .. toctree::
    :maxdepth: 2
@@ -18,15 +28,19 @@ solvers.
    :maxdepth: 1
    :caption: Libraries
 
-   components/qec/introduction
-   components/solvers/introduction
+   components/qec/index
 
 .. toctree::
    :maxdepth: 2
    :caption: Examples
 
    examples_rst/qec/examples
-   examples_rst/solvers/examples
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Performance Studies
+
+   performance/index
 
 .. toctree::
    :maxdepth: 1
@@ -35,16 +49,12 @@ solvers.
    api/core/cpp_api
    api/qec/cpp_api
    api/qec/python_api
-   api/solvers/cpp_api
-   api/solvers/python_api
 
 Key Features
 -------------
 
-CUDA-QX is composed of two distinct libraries that build upon CUDA-Q programming model.
-The libraries provided are cudaq-qec, a library enabling performant research workflows
-for quantum error correction, and cudaq-solvers, a library that provides high-level
-APIs for common quantum-classical solver workflows.
+CUDA-QX provides cudaq-qec, a library enabling performant research workflows for
+quantum error correction, built upon the CUDA-Q programming model.
 
 * **cudaq-qec**: Quantum Error Correction Library
     * Extensible framework describing quantum error correcting codes as a collection of CUDA-Q kernels.
@@ -53,15 +63,8 @@ APIs for common quantum-classical solver workflows.
     * Real-time decoding for active error correction on quantum hardware
     * Pre-built numerical experiment APIs
 
-* **cudaq-solvers**: Performant Quantum-Classical Simulation Workflows
-    * Variational Quantum Eigensolver (VQE)
-    * ADAPT-VQE implementation that scales via CUDA-Q MQPU.
-    * Quantum Approximate Optimization Algorithm (QAOA)
-    * More to come...
-
-Indices and Tables
-------------------
+Indices
+-------
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`

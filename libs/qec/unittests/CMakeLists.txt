@@ -35,6 +35,7 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
+target_include_directories(test_decoders PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../lib)
 target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec-decoders libstim CUDA::cudart)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
@@ -53,6 +54,11 @@ if(TARGET cudaq-qec-decoding-server)
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq)
+  # The DEM-source test constructs chromobius through the plugin loader.
+  if(TARGET cudaq-qec-chromobius)
+    add_dependencies(test_decoders_yaml cudaq-qec-chromobius)
+    target_compile_definitions(test_decoders_yaml PRIVATE CUDAQX_QEC_HAS_CHROMOBIUS)
+  endif()
   add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
   gtest_discover_tests(test_decoders_yaml)
 

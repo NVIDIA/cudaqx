@@ -10,79 +10,52 @@
 
 #include "DeviceGraphTransceiver.h"
 #include "cudaq/qec/logger.h"
-#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
+#include <fstream>
 #include <iostream>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <unistd.h>
 #include <vector>
 
-// CUDAQ device-graph scheduler types (cudaq-realtime-dispatch) and the
-// RPCHeader wire struct the provider's --payload-size argument is defined
-// against.
+// CUDA-Q realtime bridge-provider interface.
 #include "cudaq/realtime/gpu_roce_bridge_common.h"
 
 namespace cudaq::qec::decoding_server {
 
-// ---------------------------------------------------------------------------
-// Internal helpers (same pattern as gpu_roce_qldpc_graph_decoder_bridge.cpp)
-// ---------------------------------------------------------------------------
+namespace {
 
-// ---------------------------------------------------------------------------
-// DeviceGraphConfig::from_env
-// ---------------------------------------------------------------------------
+std::string resolve_provider_library(const std::string &provider) {
+  if (provider.find('/') != std::string::npos)
+    return provider;
 
-// Each knob reads QEC_DEVICE_GRAPH_<NAME>; the values are forwarded to
-// whatever transport provider is loaded.
-static const char *env_raw(const char *name) {
-  const std::string full = std::string("QEC_DEVICE_GRAPH_") + name;
-  return std::getenv(full.c_str());
-}
-static std::string env_str(const char *name, const char *def = "") {
-  const char *v = env_raw(name);
-  return v ? v : def;
-}
-static uint32_t env_u32(const char *name, uint32_t def) {
-  const char *v = env_raw(name);
-  return v ? static_cast<uint32_t>(std::stoul(v)) : def;
-}
-static size_t env_size(const char *name, size_t def) {
-  const char *v = env_raw(name);
-  return v ? static_cast<size_t>(std::stoull(v)) : def;
-}
-
-DeviceGraphConfig DeviceGraphConfig::from_env() {
-  DeviceGraphConfig c;
-  c.device_name = env_str("DEVICE");
-  c.peer_ip = env_str("PEER_IP");
-  c.remote_qp = env_u32("REMOTE_QP", 0);
-  // gpu_id is not read from the environment: the device is the decoder's
-  // cuda_device_id, resolved by resolve_decode_device() at transport
-  // creation.
-  c.frame_size = env_size("FRAME_SIZE", 0);
-  c.page_size = env_size("PAGE_SIZE", 0); // 0 → derived from frame_size
-  c.num_pages = env_size("NUM_PAGES", 0);
-  // Generic pass-through channel for providers whose argument surface does
-  // not match the named knobs above: whitespace-separated tokens, forwarded
-  // to the provider verbatim (after the named arguments).
-  if (const char *extra = env_raw("PROVIDER_ARGS")) {
-    std::istringstream in(extra);
-    std::string token;
-    while (in >> token)
-      c.extra_args.push_back(token);
+  std::string hyphenated = provider;
+  std::replace(hyphenated.begin(), hyphenated.end(), '_', '-');
+  const std::string soname = "libcudaq-realtime-bridge-" + hyphenated + ".so";
+#ifdef QEC_BRIDGE_PROVIDER_DIR
+  const std::string literal = "libcudaq-realtime-bridge-" + provider + ".so";
+  for (const auto &name : {soname, literal}) {
+    const std::string candidate =
+        std::string(QEC_BRIDGE_PROVIDER_DIR) + "/" + name;
+    if (std::ifstream(candidate).good())
+      return candidate;
   }
-  return c;
+#endif
+  return soname;
 }
+
+bool is_gpu_argument(const std::string &arg) {
+  return arg == "--gpu" || arg.rfind("--gpu=", 0) == 0;
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // DeviceGraphTransceiver constructor
@@ -90,48 +63,15 @@ DeviceGraphConfig DeviceGraphConfig::from_env() {
 
 DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
     : gpu_id_(config.gpu_id) {
-  if (config.device_name.empty())
+  if (config.provider.empty())
     throw std::runtime_error(
-        "DeviceGraphTransceiver: QEC_DEVICE_GRAPH_DEVICE not set");
-  if (config.peer_ip.empty())
+        "DeviceGraphTransceiver: device_graph transport provider must be set "
+        "in YAML");
+  if (std::any_of(config.provider_args.begin(), config.provider_args.end(),
+                  is_gpu_argument))
     throw std::runtime_error(
-        "DeviceGraphTransceiver: QEC_DEVICE_GRAPH_PEER_IP not set");
-  if (config.remote_qp == 0)
-    throw std::runtime_error(
-        "DeviceGraphTransceiver: QEC_DEVICE_GRAPH_REMOTE_QP not set");
-
-  // Derive page_size from frame_size if not overridden, then round up to the
-  // 128-byte GpuRoceTransceiver granularity.  Mirrors the derivation in
-  // gpu_roce_qldpc_graph_decoder_bridge.cpp (lines 279-282).
-  size_t page_size = config.page_size ? config.page_size : config.frame_size;
-  page_size = (page_size + 127) & ~static_cast<size_t>(127);
-
-  if (page_size != 0 &&
-      config.num_pages > std::numeric_limits<size_t>::max() / page_size)
-    throw std::runtime_error(
-        "DeviceGraphTransceiver: ring size overflow for "
-        "QEC_DEVICE_GRAPH_FRAME_SIZE/QEC_DEVICE_GRAPH_PAGE_SIZE=" +
-        std::to_string(page_size) +
-        " and QEC_DEVICE_GRAPH_NUM_PAGES=" + std::to_string(config.num_pages));
-  const size_t ring_bytes = page_size * config.num_pages;
-  const long host_page_size = ::sysconf(_SC_PAGESIZE);
-  if (host_page_size > 0 &&
-      ring_bytes % static_cast<size_t>(host_page_size) != 0)
-    throw std::runtime_error("DeviceGraphTransceiver: ring buffer size " +
-                             std::to_string(ring_bytes) +
-                             " bytes is not aligned to host page size " +
-                             std::to_string(host_page_size) +
-                             " bytes; adjust QEC_DEVICE_GRAPH_NUM_PAGES or "
-                             "QEC_DEVICE_GRAPH_PAGE_SIZE");
-
-  // The provider computes frame_size = sizeof(RPCHeader) + payload_size, so
-  // hand it the payload remainder of our frame budget.
-  if (config.frame_size < sizeof(cudaq::realtime::RPCHeader))
-    throw std::runtime_error(
-        "DeviceGraphTransceiver: QEC_DEVICE_GRAPH_FRAME_SIZE smaller than "
-        "the RPC header");
-  const size_t payload_size =
-      config.frame_size - sizeof(cudaq::realtime::RPCHeader);
+        "DeviceGraphTransceiver: transport arguments must not set --gpu; "
+        "set decoder cuda_device_id in YAML instead");
 
   // Bring the GpuRoceTransceiver up through the bridge-provider interface:
   // create() = gpu_roce_create_transceiver + gpu_roce_start (3-kernel shape:
@@ -141,40 +81,25 @@ DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
   // follows the C argv convention and starts parsing at argv[1] -- without
   // the placeholder the first real option would be silently skipped (and the
   // bridge would fall back to its built-in device default).
-  const std::vector<std::string> args = {
-      "device-graph-transceiver",
-      "--device=" + config.device_name,
-      "--peer-ip=" + config.peer_ip,
-      "--remote-qp=" + std::to_string(config.remote_qp),
-      "--gpu=" + std::to_string(config.gpu_id),
-      "--page-size=" + std::to_string(page_size),
-      "--num-pages=" + std::to_string(config.num_pages),
-      "--payload-size=" + std::to_string(payload_size),
-  };
+  std::vector<std::string> args{"device-graph-transceiver"};
+  args.insert(args.end(), config.provider_args.begin(),
+              config.provider_args.end());
+  // The decoder's YAML cuda_device_id is authoritative for graph capture,
+  // provider rings, and scheduler launch, so place it last.
+  args.push_back("--gpu=" + std::to_string(config.gpu_id));
   std::vector<char *> argv;
   argv.reserve(args.size());
   for (auto &a : args)
-    argv.push_back(const_cast<char *>(a.c_str()));
+    argv.push_back(a.data());
 
-  // A provider is just a library name/path to the loader (cached per
-  // process, keyed by that string).  Default to the gpu_roce
-  // (GpuRoceTransceiver) provider shipped with cudaq-realtime;
-  // CUDAQ_REALTIME_BRIDGE_LIB names a replacement library (same mechanism as
-  // the decoding server's
-  // --transport=<path>.so partner drop-in).
-  const char *env_lib = std::getenv("CUDAQ_REALTIME_BRIDGE_LIB");
-  const std::string provider_lib =
-      env_lib ? env_lib : "libcudaq-realtime-bridge-gpu-roce.so";
+  const std::string provider_lib = resolve_provider_library(config.provider);
   if (cudaq_bridge_create_from_library(&bridge_, provider_lib.c_str(),
                                        static_cast<int>(argv.size()),
                                        argv.data()) != CUDAQ_OK ||
       !bridge_)
     throw std::runtime_error(
-        "DeviceGraphTransceiver: bridge provider create failed for device=" +
-        config.device_name + " peer=" + config.peer_ip + " (is " +
-        provider_lib +
-        " on the loader path, and "
-        "does the IB netdev have an IPv4 address assigned for RoCE v2 GID?)");
+        "DeviceGraphTransceiver: bridge provider create failed for '" +
+        config.provider + "' (resolved as " + provider_lib + ")");
 
   // Adopt the DOCA ring buffer GPU VRAM pointers from the provider.
   cudaq_ringbuffer_t ring{};

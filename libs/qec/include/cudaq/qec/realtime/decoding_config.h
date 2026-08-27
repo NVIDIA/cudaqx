@@ -71,7 +71,7 @@ struct decoder_config {
   /// GPU-accelerated decoder, hence at this level rather than inside the
   /// per-decoder custom args. Unset = unpinned.
   std::optional<int> cuda_device_id;
-  /// The five fields below describe the DEM two alternative ways, and exactly
+  /// The fields below describe the DEM three alternative ways, and exactly
   /// one of them applies:
   ///
   ///   - Flat form: H_sparse plus block_size, syndrome_size, O_sparse and
@@ -79,11 +79,21 @@ struct decoder_config {
   ///   - Chunk form: dem_chunks (which carries phases, connections, seam, and
   ///     num_rounds internally). The other five flat fields are derived by
   ///     expanding the phases, and must be omitted.
+  ///   - DEM form: stim_dem_path, the Stim model text itself. The decoder
+  ///     derives its own dimensions and observable mapping from it, so all of
+  ///     the flat fields except D_sparse must be omitted.
   ///
-  /// See expand_dem_chunks() for the derivation, which runs at decoder
-  /// construction so the rest of the pipeline only ever sees the flat form.
+  /// See expand_dem_chunks() for the chunk-form derivation, which runs at
+  /// decoder construction so the rest of the pipeline only ever sees the flat
+  /// form. DEM form stays as it is: the model text is what the decoder is
+  /// built from.
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
+  /// Path to a Stim detector error model. When set, the decoder is
+  /// constructed from the DEM text rather than from `H_sparse`, which is what
+  /// a DEM-native decoder such as Chromobius requires. Interpreted like the
+  /// other model paths in a configuration, relative to the working directory.
+  std::string stim_dem_path;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
@@ -131,7 +141,7 @@ struct transport_shape_override {
   /// soname is "libcudaq-realtime-bridge-" + name + ".so", with '_' in the
   /// name mapping to '-' to match the shipped hyphenated sonames (so
   /// gpu_roce loads libcudaq-realtime-bridge-gpu-roce.so).
-  /// Empty = inherit the section/CLI default.
+  /// Empty = inherit the section default.
   std::string provider;
   /// Extra provider arguments appended for this shape's rings.
   std::vector<std::string> args;
@@ -152,15 +162,29 @@ struct transport_shape_override {
 ///       provider: udp          # "gpu_roce" on an HSB rig
 ///       args: [--pinned-rings]
 ///
-/// Resolution per ring: shape override (device_graph rings) > this
-/// section's provider/args > the server's --transport CLI fallback.  The
-/// CLI flag only applies when this section names no provider; a config
-/// that names one plus an explicit --transport is rejected at startup
-/// (the deployment file is the source of truth for the wire).
+/// Resolution per ring: shape override (device_graph rings) > this section's
+/// provider/args. The standalone server permits a CLI fallback only for
+/// non-GPU-RoCE, host-only configurations whose YAML names no provider. A
+/// configuration containing device_graph dispatch or using GPU RoCE must
+/// define its provider and arguments in YAML (the deployment file is the
+/// source of truth for GPU-visible rings).
 struct transport_config {
   std::string provider;
   std::vector<std::string> args;
   transport_shape_override device_graph;
+
+  /// Resolve the provider and ordered arguments for a device-graph ring.
+  /// The shape-specific provider overrides the section provider, while its
+  /// arguments are appended to the section arguments.
+  transport_shape_override resolve_device_graph() const {
+    transport_shape_override resolved;
+    resolved.provider =
+        device_graph.provider.empty() ? provider : device_graph.provider;
+    resolved.args = args;
+    resolved.args.insert(resolved.args.end(), device_graph.args.begin(),
+                         device_graph.args.end());
+    return resolved;
+  }
 
   bool operator==(const transport_config &) const = default;
 };
@@ -168,8 +192,9 @@ struct transport_config {
 class multi_decoder_config {
 public:
   std::vector<decoder_config> decoders;
-  /// Optional server-level transport section (empty provider/args = not
-  /// specified; the server's CLI defaults apply).
+  /// Optional server-level transport section. The standalone server's CLI
+  /// defaults may fill an empty section only for non-GPU-RoCE, host-only
+  /// configurations.
   transport_config transport;
 
   bool operator==(const multi_decoder_config &) const = default;

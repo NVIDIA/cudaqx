@@ -56,9 +56,8 @@ ${python} -m pip install --no-cache-dir pytest
 
 # The following packages are needed for our tests. They are not true
 # dependencies for our delivered package.
-${python} -m pip install openfermion
-${python} -m pip install openfermionpyscf
 ${python} -m pip install onnxscript # for trt decoder tests
+${python} -m pip install matplotlib # for pseudo_threshold.py
 
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 
@@ -116,26 +115,6 @@ if [ "$package_installed" != "$package_expected" ]; then
   exit 1
 fi
 
-# Solvers library
-# ======================================
-# Test the base solvers library without optional dependencies
-echo "Installing Solvers library without GQE"
-${python} -m pip install ${FIND_LINKS} "cudaq-solvers==${cudaqx_version}"
-${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/python/tests/test_gqe.py
-
-# Verify that the correct version of cudaq-solvers was installed.
-package_installed=$(python${python_version} -m pip list | grep cudaq-solvers-cu | cut -d ' ' -f1)
-package_expected=cudaq-solvers-cu${cuda_major}
-if [ "$package_installed" != "$package_expected" ]; then
-  echo "::error Expected installation of $package_expected package, but got $package_installed."
-  exit 1
-fi
-
-# Test the solvers library with GQE
-echo "Installing Solvers library with GQE"
-${python} -m pip install ${FIND_LINKS} "cudaq-solvers[gqe]==${cudaqx_version}"
-${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
-
 # Test the libraries with examples
 # ======================================
 echo "Testing libraries with examples"
@@ -146,7 +125,7 @@ if echo $platform | grep -qi "amd64"; then
   ${python} -m pip install stim beliefmatching
 fi
 
-for domain in "solvers" "qec"; do
+for domain in "qec"; do
     echo "Testing ${domain} Python examples with Python ${python_version} ..."
     cd examples/${domain}/python
     shopt -s nullglob # don't throw errors if no Python files exist

@@ -11,8 +11,8 @@
 // exposed to Python as a class, so every binding that accepts or returns one
 // goes through these helpers.
 //
-// These live here rather than in type_casters.h because that header is shared
-// with libs/solvers, which must not pick up a dependency on the QEC headers.
+// These live here rather than in type_casters.h so that the general-purpose
+// casters in that header do not pick up a dependency on the QEC headers.
 
 #pragma once
 
