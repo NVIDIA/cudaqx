@@ -190,6 +190,109 @@ TEST(PyMatchingDecoder, RejectsObservableMatrixWithWrongBlockSize) {
                std::runtime_error);
 }
 
+// Regression test: when two H columns share the same edge (parallel columns),
+// edge2col_idx must record the column that the graph actually retains after the
+// merge, not always the last one seen. Under KEEP_ORIGINAL / INDEPENDENT the
+// first column wins; under SMALLEST_WEIGHT the lower-weight column wins; under
+// REPLACE the last column wins.
+TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
+  using cudaq::qec::float_t;
+
+  // Cols 0 and 1 are parallel — both connect detectors {row0, row1}.
+  // Col 2 connects {row1, row2}.
+  // clang-format off
+  std::vector<uint8_t> H_vec = {1, 1, 0,
+                                1, 1, 1,
+                                0, 0, 1};
+  // clang-format on
+  cudaqx::tensor<uint8_t> H;
+  H.copy(H_vec.data(), {3, 3});
+
+  // KEEP_ORIGINAL retains the first column. INDEPENDENT's decoded edge
+  // representation cannot distinguish parallel caller columns, so CUDA-QX
+  // deterministically attributes it to the first column. Both name col 0.
+  for (const std::string &strategy : {"keep_original", "independent"}) {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", strategy);
+    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    ASSERT_NE(d, nullptr) << strategy;
+
+    std::vector<float_t> syndrome = {1.0, 1.0, 0.0};
+    auto result = d->decode(syndrome);
+    ASSERT_TRUE(result.converged) << strategy;
+    ASSERT_EQ(result.result.size(), 3u) << strategy;
+    EXPECT_EQ(result.result[0], 1.0) << strategy << ": col 0 must be flagged";
+    EXPECT_EQ(result.result[1], 0.0)
+        << strategy << ": col 1 must not be flagged";
+    EXPECT_EQ(result.result[2], 0.0) << strategy;
+  }
+
+  // DISALLOW rejects a second parallel edge during graph construction.
+  {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", std::string("disallow"));
+    EXPECT_THROW((void)cudaq::qec::decoder::get("pymatching", H, params),
+                 std::invalid_argument);
+  }
+
+  // Under SMALLEST_WEIGHT the lower-weight parallel column wins. The higher
+  // error rate for col 1 gives it the lower matching weight.
+  {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", std::string("smallest_weight"));
+    params.insert("error_rate_vec", std::vector<double>{0.01, 0.1, 0.01});
+    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    ASSERT_NE(d, nullptr);
+
+    std::vector<float_t> syndrome = {1.0, 1.0, 0.0};
+    auto result = d->decode(syndrome);
+    ASSERT_TRUE(result.converged);
+    ASSERT_EQ(result.result.size(), 3u);
+    EXPECT_EQ(result.result[0], 0.0)
+        << "col 0 must not be flagged under smallest_weight";
+    EXPECT_EQ(result.result[1], 1.0)
+        << "col 1 must be flagged under smallest_weight";
+    EXPECT_EQ(result.result[2], 0.0);
+  }
+
+  // With equal weights, SMALLEST_WEIGHT keeps the existing edge, so the first
+  // parallel column remains the result column.
+  {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", std::string("smallest_weight"));
+    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    ASSERT_NE(d, nullptr);
+
+    std::vector<float_t> syndrome = {1.0, 1.0, 0.0};
+    auto result = d->decode(syndrome);
+    ASSERT_TRUE(result.converged);
+    ASSERT_EQ(result.result.size(), 3u);
+    EXPECT_EQ(result.result[0], 1.0)
+        << "col 0 must be flagged on a smallest_weight tie";
+    EXPECT_EQ(result.result[1], 0.0)
+        << "col 1 must not be flagged on a smallest_weight tie";
+    EXPECT_EQ(result.result[2], 0.0);
+  }
+
+  // Under REPLACE the graph adopts the last column's edge — result must name
+  // col 1.
+  {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", std::string("replace"));
+    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    ASSERT_NE(d, nullptr);
+
+    std::vector<float_t> syndrome = {1.0, 1.0, 0.0};
+    auto result = d->decode(syndrome);
+    ASSERT_TRUE(result.converged);
+    ASSERT_EQ(result.result.size(), 3u);
+    EXPECT_EQ(result.result[0], 0.0)
+        << "col 0 must not be flagged under replace";
+    EXPECT_EQ(result.result[1], 1.0) << "col 1 must be flagged under replace";
+    EXPECT_EQ(result.result[2], 0.0);
+  }
+}
+
 TEST(PyMatchingDecoder, DecodesHighObservableIndicesAcrossPaths) {
   using cudaq::qec::float_t;
 
