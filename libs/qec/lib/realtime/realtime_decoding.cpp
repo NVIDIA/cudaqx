@@ -164,8 +164,9 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   // construction.
   if (decoder_config.cuda_device_id.has_value())
     params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
-  if (decoder_config.type != "trt_decoder" &&
-      decoder_config.type != "pymatching")
+  const bool is_trt_decoder = decoder_config.type == "trt_decoder";
+  const bool is_pymatching_decoder = decoder_config.type == "pymatching";
+  if (!is_trt_decoder && !is_pymatching_decoder)
     return params;
 
   // batch_size > 1 has no effect on the realtime path: enqueue_syndrome decodes
@@ -173,7 +174,7 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   // all but slot 0. Warn rather than reject -- the result is correct, just
   // wasteful. (Offline decode_batch users set batch_size via a raw params map,
   // not this realtime config path.)
-  if (params.contains("batch_size") &&
+  if (is_trt_decoder && params.contains("batch_size") &&
       params.get<std::size_t>("batch_size") > 1)
     CUDA_QEC_WARN(
         "trt_decoder batch_size > 1 has no effect on the realtime decode path "
@@ -186,7 +187,7 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   // provide a hand-built map with only "global_decoder"; synthesize params here
   // before the O_sparse early return so that decoder still attaches.
   const bool has_global_decoder =
-      params.contains("global_decoder") &&
+      is_trt_decoder && params.contains("global_decoder") &&
       !params.get<std::string>("global_decoder").empty();
   const bool has_pymatching_global =
       has_global_decoder &&

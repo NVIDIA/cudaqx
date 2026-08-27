@@ -208,8 +208,9 @@ TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
   cudaqx::tensor<uint8_t> H;
   H.copy(H_vec.data(), {3, 3});
 
-  // Under KEEP_ORIGINAL and INDEPENDENT the graph retains the first column's
-  // edge — so the result must name col 0, not col 1.
+  // KEEP_ORIGINAL retains the first column. INDEPENDENT's decoded edge
+  // representation cannot distinguish parallel caller columns, so CUDA-QX
+  // deterministically attributes it to the first column. Both name col 0.
   for (const std::string &strategy : {"keep_original", "independent"}) {
     cudaqx::heterogeneous_map params;
     params.insert("merge_strategy", strategy);
@@ -224,6 +225,14 @@ TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
     EXPECT_EQ(result.result[1], 0.0)
         << strategy << ": col 1 must not be flagged";
     EXPECT_EQ(result.result[2], 0.0) << strategy;
+  }
+
+  // DISALLOW rejects a second parallel edge during graph construction.
+  {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", std::string("disallow"));
+    EXPECT_THROW((void)cudaq::qec::decoder::get("pymatching", H, params),
+                 std::runtime_error);
   }
 
   // Under SMALLEST_WEIGHT the lower-weight parallel column wins. The higher
@@ -243,6 +252,25 @@ TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
         << "col 0 must not be flagged under smallest_weight";
     EXPECT_EQ(result.result[1], 1.0)
         << "col 1 must be flagged under smallest_weight";
+    EXPECT_EQ(result.result[2], 0.0);
+  }
+
+  // With equal weights, SMALLEST_WEIGHT keeps the existing edge, so the first
+  // parallel column remains the result column.
+  {
+    cudaqx::heterogeneous_map params;
+    params.insert("merge_strategy", std::string("smallest_weight"));
+    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    ASSERT_NE(d, nullptr);
+
+    std::vector<float_t> syndrome = {1.0, 1.0, 0.0};
+    auto result = d->decode(syndrome);
+    ASSERT_TRUE(result.converged);
+    ASSERT_EQ(result.result.size(), 3u);
+    EXPECT_EQ(result.result[0], 1.0)
+        << "col 0 must be flagged on a smallest_weight tie";
+    EXPECT_EQ(result.result[1], 0.0)
+        << "col 1 must not be flagged on a smallest_weight tie";
     EXPECT_EQ(result.result[2], 0.0);
   }
 

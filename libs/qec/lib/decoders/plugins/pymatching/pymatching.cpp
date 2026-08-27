@@ -140,7 +140,9 @@ public:
     // in their original order. This guarantees by construction that result
     // index `col` always maps back to the caller's column `col`.
     std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
-    std::vector<double> column_weights(block_size, 1.0);
+    std::vector<double> column_weights;
+    if (!decode_to_observables)
+      column_weights.resize(block_size, 1.0);
 
     // Track which column index the graph will associate with a given edge after
     // merging. The correct column depends on the merge strategy:
@@ -168,17 +170,20 @@ public:
       if (col < error_rate_vec.size()) {
         weight = -std::log(error_rate_vec[col] / (1.0 - error_rate_vec[col]));
       }
-      column_weights[col] = weight;
+      if (!decode_to_observables)
+        column_weights[col] = weight;
 
       const auto &col_rows = H_e2d[col];
       if (col_rows.size() == 2) {
-        update_edge2col(make_canonical_edge(col_rows[0], col_rows[1]), weight,
-                        col);
+        if (!decode_to_observables)
+          update_edge2col(make_canonical_edge(col_rows[0], col_rows[1]), weight,
+                          col);
         user_graph.add_or_merge_edge(col_rows[0], col_rows[1],
                                      errs2observables.at(col), weight, 0.0,
                                      merge_strategy_enum);
       } else if (col_rows.size() == 1) {
-        update_edge2col(make_canonical_edge(col_rows[0], -1), weight, col);
+        if (!decode_to_observables)
+          update_edge2col(make_canonical_edge(col_rows[0], -1), weight, col);
         user_graph.add_or_merge_boundary_edge(col_rows[0],
                                               errs2observables.at(col), weight,
                                               0.0, merge_strategy_enum);
