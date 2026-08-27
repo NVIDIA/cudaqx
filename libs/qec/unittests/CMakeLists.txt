@@ -54,6 +54,11 @@ if(TARGET cudaq-qec-decoding-server)
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq)
+  # The DEM-source test constructs chromobius through the plugin loader.
+  if(TARGET cudaq-qec-chromobius)
+    add_dependencies(test_decoders_yaml cudaq-qec-chromobius)
+    target_compile_definitions(test_decoders_yaml PRIVATE CUDAQX_QEC_HAS_CHROMOBIUS)
+  endif()
   add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
   gtest_discover_tests(test_decoders_yaml)
 
