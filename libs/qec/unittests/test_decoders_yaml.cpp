@@ -13,6 +13,7 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -1711,10 +1712,12 @@ TEST(DecoderChunkFormTest, StreamingConfigParsesWithoutNumRounds) {
 // stim_dem_path: the DEM text itself as the model a decoder is built from
 // ---------------------------------------------------------------------------
 
-#ifdef CUDAQX_QEC_HAS_CHROMOBIUS
-// Four detectors carrying the colour/basis annotation chromobius decodes from,
-// matching the model used by the chromobius unit tests.
-constexpr const char *kChromobiusDem = R"DEM(
+namespace {
+
+// Four detectors, six error mechanisms and one observable. The fourth detector
+// coordinate is the colour/basis annotation chromobius decodes from, matching
+// the model used by the chromobius unit tests; other decoders ignore it.
+constexpr const char *kStimDem = R"DEM(
 error(0.1) D0 D1
 error(0.1) D0 D1 D2
 error(0.1) D0 L0
@@ -1727,15 +1730,23 @@ detector(2, 0, 0, 0) D2
 detector(3, 0, 0, 1) D3
 )DEM";
 
+// One D row per detector in kStimDem, mapping detector i to measurement bit i.
+const std::vector<std::int64_t> kStimDemDSparse{0, -1, 1, -1, 2, -1, 3, -1};
+
 /// Writes the model to a file, since a config names a DEM by path.
 class ScopedDemFile {
 public:
   ScopedDemFile() {
-    static int counter = 0;
+    static std::atomic<int> counter{0};
     path_ = std::filesystem::temp_directory_path() /
-            ("unblock-" + std::to_string(getpid()) + "-" +
+            ("cudaqx-qec-test-" + std::to_string(getpid()) + "-" +
              std::to_string(counter++) + ".dem");
-    std::ofstream(path_) << kChromobiusDem;
+    std::ofstream out(path_);
+    out << kStimDem;
+    out.close();
+    // Everything below reads this back through the config, so a failed write
+    // has to fail here rather than as a confusing DEM parse error later.
+    EXPECT_TRUE(out) << "could not write " << path_;
   }
   ~ScopedDemFile() {
     std::error_code ec;
@@ -1747,6 +1758,223 @@ private:
   std::filesystem::path path_;
 };
 
+std::string dem_form_yaml(const std::string &dem_path,
+                          const std::string &extra_keys = {}) {
+  return R"(
+decoders:
+  - id: 0
+    type: multi_error_lut
+    stim_dem_path: )" +
+         dem_path + R"(
+    D_sparse: [0, -1, 1, -1, 2, -1, 3, -1]
+)" + extra_keys;
+}
+
+} // namespace
+
+TEST(DecoderDemFormTest, ParsesADemFormDocument) {
+  ScopedDemFile dem;
+  const auto config = parse_one(dem_form_yaml(dem.path()));
+  EXPECT_EQ(config.stim_dem_path, dem.path());
+  EXPECT_TRUE(config.H_sparse.empty());
+  EXPECT_TRUE(config.O_sparse.empty());
+  EXPECT_EQ(config.block_size, 0u);
+  EXPECT_EQ(config.syndrome_size, 0u);
+  EXPECT_EQ(config.D_sparse, kStimDemDSparse);
+}
+
+TEST(DecoderDemFormTest, EmittedDocumentReParsesAsDemForm) {
+  ScopedDemFile dem;
+  cudaq::qec::decoding::config::multi_decoder_config multi_config;
+  multi_config.decoders.push_back(parse_one(dem_form_yaml(dem.path())));
+
+  // The fields DEM form derives have to stay absent, or the emitted document
+  // would come back as an incomplete flat configuration.
+  const auto emitted = multi_config.to_yaml_str(200);
+  EXPECT_NE(emitted.find("stim_dem_path"), std::string::npos) << emitted;
+  EXPECT_EQ(emitted.find("H_sparse"), std::string::npos) << emitted;
+  EXPECT_EQ(emitted.find("O_sparse"), std::string::npos) << emitted;
+  EXPECT_EQ(emitted.find("block_size"), std::string::npos) << emitted;
+  EXPECT_EQ(emitted.find("syndrome_size"), std::string::npos) << emitted;
+
+  auto round_tripped =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          emitted);
+  EXPECT_EQ(round_tripped, multi_config);
+  EXPECT_EQ(round_tripped.to_yaml_str(200), emitted);
+}
+
+TEST(DecoderDemFormTest, RejectsStimDemPathTogetherWithDemChunks) {
+  ScopedDemFile dem;
+  // Each names the whole DEM on its own, and there is no precedence between
+  // them the way a flat H_sparse wins over dem_chunks.
+  const auto yaml =
+      dem_chunks_yaml(3) + R"(    stim_dem_path: )" + dem.path() + "\n";
+  try {
+    cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+    ADD_FAILURE() << "expected dem_chunks + stim_dem_path to be rejected";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("stim_dem_path"),
+              std::string::npos)
+        << error.what();
+  }
+}
+
+TEST(DecoderDemFormTest, RejectsStimDemPathTogetherWithFlatMatrices) {
+  ScopedDemFile dem;
+  for (const char *derived :
+       {"    block_size: 6\n", "    syndrome_size: 4\n",
+        "    H_sparse: [0, 1, 2, -1]\n", "    O_sparse: [2, -1]\n"}) {
+    const auto yaml = dem_form_yaml(dem.path(), derived);
+    try {
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+      ADD_FAILURE() << "expected rejection of " << derived;
+    } catch (const std::runtime_error &error) {
+      EXPECT_NE(std::string(error.what()).find("stim_dem_path"),
+                std::string::npos)
+          << error.what();
+    }
+  }
+}
+
+TEST(DecoderDemFormTest, RequiresDSparseAlongsideStimDemPath) {
+  ScopedDemFile dem;
+  // The DEM describes detectors but not which measurement bits form them, so
+  // this is the one model field DEM form cannot derive.
+  const auto yaml = R"(
+decoders:
+  - id: 0
+    type: multi_error_lut
+    stim_dem_path: )" +
+                    dem.path() + "\n";
+  try {
+    cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+    ADD_FAILURE() << "expected a missing D_sparse to be rejected";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("D_sparse"), std::string::npos)
+        << error.what();
+  }
+}
+
+TEST(DecoderDemFormTest, JsonSchemaAcceptsDemFormAlongsideTheOtherTwo) {
+  const auto schema =
+      cudaq::qec::decoding::config::decoder_config_json_schema();
+  EXPECT_NE(schema.find("\"stim_dem_path\""), std::string::npos);
+
+  // The three forms are alternatives, so none of them may appear in the
+  // envelope's own required list -- that would invalidate the other two.
+  // Keys are emitted alphabetically at a two-space indent, so allOf and anyOf
+  // come first and carry required arrays of their own; the envelope's is the
+  // one indented six spaces, directly under the $defs entry.
+  const auto at = schema.find("\n    \"decoder_config\": {");
+  ASSERT_NE(at, std::string::npos) << schema;
+  const auto required = schema.find("\n      \"required\": [", at);
+  ASSERT_NE(required, std::string::npos) << schema;
+  const auto required_end = schema.find(']', required);
+  ASSERT_NE(required_end, std::string::npos);
+  const auto envelope = schema.substr(required, required_end - required);
+
+  // Without this the checks below pass on any string, including the wrong
+  // required array or none at all.
+  EXPECT_NE(envelope.find("\"id\""), std::string::npos) << envelope;
+  EXPECT_NE(envelope.find("\"type\""), std::string::npos) << envelope;
+
+  for (const char *key :
+       {"stim_dem_path", "dem_chunks", "H_sparse", "D_sparse"})
+    EXPECT_EQ(envelope.find(key), std::string::npos)
+        << key << " in " << envelope;
+}
+
+TEST(DecoderDemFormTest, DerivesObservablesForADecoderThatInstallsNone) {
+  ScopedDemFile dem;
+
+  // The LUT decoders return error frames and never install an observable
+  // mapping of their own, and DEM form names no O_sparse to install for them.
+  // Without deriving one from the model, this decoder would come back with
+  // nothing to project onto and every realtime correction would be empty.
+  cudaq::qec::decoding::config::decoder_config dc;
+  dc.id = 0;
+  dc.type = "multi_error_lut";
+  dc.stim_dem_path = dem.path();
+  dc.D_sparse = kStimDemDSparse;
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
+  EXPECT_EQ(decoder->get_syndrome_size(), 4u);
+  EXPECT_EQ(decoder->get_num_observables(), 1u);
+}
+
+TEST(DecoderDemFormTest, ReportsAStimDemPathThatIsNotAFile) {
+  cudaq::qec::decoding::config::decoder_config dc;
+  dc.id = 0;
+  dc.type = "multi_error_lut";
+  dc.stim_dem_path = std::filesystem::temp_directory_path().string();
+  dc.D_sparse = kStimDemDSparse;
+
+  // A directory opens as a stream and only fails on the first read, so the
+  // error has to name the key and the path rather than the stream buffer.
+  try {
+    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    ADD_FAILURE() << "expected a directory to be rejected";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("stim_dem_path"),
+              std::string::npos)
+        << error.what();
+    EXPECT_NE(std::string(error.what()).find(dc.stim_dem_path),
+              std::string::npos)
+        << error.what();
+  }
+}
+
+// The parser's exclusivity rules reached the other way: decoder_config has
+// writable fields, so a caller can build one that never was a document.
+TEST(DecoderDemFormTest, RejectsDemChunksWithStimDemPathAtConstruction) {
+  ScopedDemFile dem;
+
+  // Four rounds close to four detectors, as many as kStimDem declares, so the
+  // D row check downstream cannot catch this. What reaches the decoder is the
+  // chunk-derived O_sparse and error_rate_vec over an unrelated model.
+  auto dc = parse_one(dem_chunks_yaml(4));
+  dc.stim_dem_path = dem.path();
+
+  try {
+    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    ADD_FAILURE() << "expected dem_chunks + stim_dem_path to be rejected";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("stim_dem_path"),
+              std::string::npos)
+        << error.what();
+    EXPECT_NE(std::string(error.what()).find("dem_chunks"), std::string::npos)
+        << error.what();
+  }
+}
+
+// block_size, syndrome_size and H_sparse are inert beside a DEM -- the DEM
+// branch reads none of them -- so O_sparse is the only flat field worth
+// rejecting: it overwrites the mapping a DEM-native decoder installed for
+// itself.
+TEST(DecoderDemFormTest, RejectsOSparseWithStimDemPathAtConstruction) {
+  ScopedDemFile dem;
+
+  cudaq::qec::decoding::config::decoder_config dc;
+  dc.id = 0;
+  dc.type = "multi_error_lut";
+  dc.stim_dem_path = dem.path();
+  dc.D_sparse = kStimDemDSparse;
+  dc.O_sparse = {2, -1};
+
+  try {
+    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    ADD_FAILURE() << "expected O_sparse + stim_dem_path to be rejected";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("O_sparse"), std::string::npos)
+        << error.what();
+    EXPECT_NE(std::string(error.what()).find("stim_dem_path"),
+              std::string::npos)
+        << error.what();
+  }
+}
+
+#ifdef CUDAQX_QEC_HAS_CHROMOBIUS
 TEST(ChromobiusOnDecodingServer, ConstructsFromARawDemSource) {
   ScopedDemFile dem;
 
@@ -1756,12 +1984,30 @@ TEST(ChromobiusOnDecodingServer, ConstructsFromARawDemSource) {
   dc.id = 0;
   dc.type = "chromobius";
   dc.stim_dem_path = dem.path();
-  dc.D_sparse = {0, -1, 1, -1, 2, -1, 3, -1};
+  dc.D_sparse = kStimDemDSparse;
 
   cudaq::qec::decoding::config::multi_decoder_config mc;
   mc.decoders.push_back(dc);
   ASSERT_EQ(cudaq::qec::decoding::config::configure_decoders(mc), 0);
   cudaq::qec::decoding::config::finalize_decoders();
+}
+
+TEST(ChromobiusOnDecodingServer, KeepsItsOwnObservableMapping) {
+  ScopedDemFile dem;
+
+  // Chromobius predicts observables directly and installs an identity mapping
+  // over them, which is expressed in a different space than the DEM-derived
+  // matrix other decoders get. Deriving one here would have to leave it alone.
+  cudaq::qec::decoding::config::decoder_config dc;
+  dc.id = 0;
+  dc.type = "chromobius";
+  dc.stim_dem_path = dem.path();
+  dc.D_sparse = kStimDemDSparse;
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
+  EXPECT_EQ(decoder->get_syndrome_size(), 4u);
+  EXPECT_EQ(decoder->get_num_observables(), 1u);
+  EXPECT_EQ(decoder->get_block_size(), 1u);
 }
 
 TEST(ChromobiusOnDecodingServer, MatrixOnlyConfigStillFails) {
@@ -1775,6 +2021,17 @@ TEST(ChromobiusOnDecodingServer, MatrixOnlyConfigStillFails) {
   mc.decoders.push_back(dc);
   EXPECT_NE(cudaq::qec::decoding::config::configure_decoders(mc), 0);
   cudaq::qec::decoding::config::finalize_decoders();
+
+  // configure_decoders() only reports a status code, so check that the refusal
+  // came from chromobius rejecting a matrix and not from something incidental.
+  try {
+    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    ADD_FAILURE() << "expected chromobius to reject a matrix-only config";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("detector error model"),
+              std::string::npos)
+        << error.what();
+  }
 }
 
 TEST(ChromobiusOnDecodingServer, DemReachesANestedGlobalDecoder) {
@@ -1786,7 +2043,7 @@ TEST(ChromobiusOnDecodingServer, DemReachesANestedGlobalDecoder) {
   dc.id = 0;
   dc.type = "trt_decoder";
   dc.stim_dem_path = dem.path();
-  dc.D_sparse = {0, -1, 1, -1, 2, -1, 3, -1};
+  dc.D_sparse = kStimDemDSparse;
   dc.decoder_custom_args.map().insert("global_decoder",
                                       std::string{"chromobius"});
   dc.decoder_custom_args.map().insert("global_decoder_params",

@@ -9,6 +9,7 @@
 #include "realtime_decoding.h"
 #include "../hardware_guards.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -17,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <filesystem>
 #include <fmt/core.h>
 #include <fstream>
 #include <iterator>
@@ -161,6 +163,13 @@ namespace cudaq::qec::decoding::host {
 /// Read the DEM a decoder entry names.
 std::string read_stim_dem(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
+  // A directory opens as a stream and fails only when read, past the check
+  // below.
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(decoder_config.stim_dem_path, ec))
+    throw std::runtime_error(
+        fmt::format("stim_dem_path is not a readable file: {}",
+                    decoder_config.stim_dem_path));
   std::ifstream file(decoder_config.stim_dem_path);
   if (!file)
     throw std::runtime_error(fmt::format(
@@ -247,6 +256,17 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
     throw std::invalid_argument("Decoder ID is outside the uint32_t range: " +
                                 std::to_string(config_in.id));
 
+  // The parser rejects a config describing two forms, but a programmatically
+  // built one never passes through it. These two are what corrupt: chunk
+  // priors over an unrelated model, and an O_sparse that overwrites the
+  // mapping a DEM-native decoder installed for itself.
+  if (!config_in.stim_dem_path.empty() &&
+      (config_in.dem_chunks.has_value() || !config_in.O_sparse.empty()))
+    throw std::runtime_error(
+        "dem_chunks and O_sparse must not be set with stim_dem_path for "
+        "decoder " +
+        std::to_string(config_in.id));
+
   // A chunk-form configuration names its DEM one round at a time. Expand it
   // here so everything below is written against the flat form only.
   auto expanded_config = config_in;
@@ -273,6 +293,11 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
   CUDA_QEC_INFO("Creating decoder {} of type {}", decoder_config.id,
                 decoder_config.type);
 
+  // Needed both to construct the decoder and to derive its observable mapping.
+  const std::string stim_dem_text = decoder_config.stim_dem_path.empty()
+                                        ? std::string{}
+                                        : read_stim_dem(decoder_config);
+
   auto params = prepare_decoder_params(decoder_config);
   // The phases carry a prior per fault, which the derived matrices do not. A
   // hand-written flat configuration would have had to pass these through
@@ -285,8 +310,8 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
     // A DEM-native decoder is constructed from the model text itself. It
     // derives its own dimensions and, like chromobius, installs the observable
     // mapping its results are expressed in, so neither is supplied here.
-    decoder = cudaq::qec::get_decoder(decoder_config.type,
-                                      read_stim_dem(decoder_config), params);
+    decoder =
+        cudaq::qec::get_decoder(decoder_config.type, stim_dem_text, params);
     const auto num_D_rows = std::count(decoder_config.D_sparse.begin(),
                                        decoder_config.D_sparse.end(), -1);
     if (num_D_rows != static_cast<std::int64_t>(decoder->get_syndrome_size()))
@@ -309,12 +334,20 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
     decoder = cudaq::qec::get_decoder(decoder_config.type, pcm, params);
   }
   decoder->set_decoder_id(decoder_config.id);
-  // Decoders that predict observables directly install the mapping their
+  // A decoder that predicts observables directly installs the mapping its
   // results are expressed in at construction (chromobius derives an identity
   // map from the DEM it read), so installing an empty one here would drop it
   // and leave get_corrections with nowhere to write.
-  if (!decoder_config.O_sparse.empty())
+  if (!decoder_config.O_sparse.empty()) {
     decoder->set_O_sparse(decoder_config.O_sparse);
+  } else if (!stim_dem_text.empty() && decoder->get_num_observables() == 0) {
+    // DEM form names no O_sparse and the LUT decoders install none, leaving the
+    // realtime path nothing to project onto. dem_from_stim_text() is what
+    // make_pcm_decoder() used, so the columns line up with the decoder's own.
+    const auto dem = cudaq::qec::dem_from_stim_text(stim_dem_text);
+    decoder->set_O_sparse(
+        cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix));
+  }
   decoder->set_D_sparse(decoder_config.D_sparse);
 
   // Force plugin initialization before the caller publishes the decoder for
