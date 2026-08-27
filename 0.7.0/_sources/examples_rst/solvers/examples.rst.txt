@@ -2,6 +2,8 @@
 CUDA-Q Solvers by Example
 *************************
 
+.. include:: /_solvers_deprecation.rst
+
 Examples that illustrate how to use CUDA-QX for application development are available in C++ and Python.
 
 .. toctree::

@@ -653,6 +653,22 @@
              
   <section id="generative-quantum-eigensolver-gqe">
 <h1>Generative Quantum Eigensolver (GQE)<a class="headerlink" href="#generative-quantum-eigensolver-gqe" title="Permalink to this heading"></a></h1>
+<div class="admonition attention">
+<p class="admonition-title">Attention</p>
+<p><strong>CUDA-Q Solvers is deprecated.</strong> Version 0.6.0 is the final planned
+release of the CUDA-Q Solvers library. Development continues in <strong>CUDA-Q
+Algorithms</strong>, which supersedes CUDA-Q Solvers and expands on it.</p>
+<ul class="simple">
+<li><p>Documentation, tutorials, and examples:
+<a class="reference external" href="https://nvidia.github.io/cudaq-algorithms/">CUDA-Q Algorithms documentation</a>.</p></li>
+<li><p>Install it with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">cudaq-algorithms</span></code>
+(<a class="reference external" href="https://pypi.org/project/cudaq-algorithms/">cudaq-algorithms on PyPI</a>).</p></li>
+<li><p>Source code: <a class="reference external" href="https://github.com/NVIDIA/cudaq-algorithms">NVIDIA/cudaq-algorithms on GitHub</a>.</p></li>
+</ul>
+<p>Existing code continues to work with CUDA-Q Solvers 0.6.0, but all new
+features and fixes land in CUDA-Q Algorithms. We encourage every CUDA-Q
+Solvers user to migrate.</p>
+</div>
 <p>The GQE algorithm has presented a novel approach to variational optimization that leverages generative AI. It is an active research topic.
 A core aspect of this research is with regards to the core cost / loss function the algorithm leverages. The current implementation provides
 a cost function suitable to small scale simulation. The GQE implementation in CUDA-Q Solvers is based on this paper: <a class="reference external" href="https://arxiv.org/abs/2401.09253">The generative quantum eigensolver

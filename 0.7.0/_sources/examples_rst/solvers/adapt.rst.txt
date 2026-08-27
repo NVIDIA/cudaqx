@@ -1,6 +1,8 @@
 ADAPT-VQE
 ---------
 
+.. include:: /_solvers_deprecation.rst
+
 ADAPT-VQE is an advanced quantum algorithm designed to improve upon the
 standard Variational Quantum Eigensolver (VQE) approach for solving quantum
 chemistry problems. It addresses key challenges faced by traditional VQE

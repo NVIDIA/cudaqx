@@ -663,12 +663,25 @@ install individual components:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install QEC library</span>
 pip<span class="w"> </span>install<span class="w"> </span>cudaq-qec
 
-<span class="c1"># Install Solvers library</span>
+<span class="c1"># Install Solvers library (deprecated - see the note below)</span>
 pip<span class="w"> </span>install<span class="w"> </span>cudaq-solvers
 
 <span class="c1"># Install both libraries</span>
 pip<span class="w"> </span>install<span class="w"> </span>cudaq-qec<span class="w"> </span>cudaq-solvers
 </pre></div>
+</div>
+<div class="admonition attention">
+<p class="admonition-title">Attention</p>
+<p><strong>CUDA-Q Solvers is deprecated.</strong> Version 0.6.0 is the final planned
+release of the CUDA-Q Solvers library. New users should install <strong>CUDA-Q
+Algorithms</strong> instead, which supersedes CUDA-Q Solvers and is where
+development continues:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>cudaq-algorithms
+</pre></div>
+</div>
+<p>See the <a class="reference external" href="https://nvidia.github.io/cudaq-algorithms/">CUDA-Q Algorithms documentation</a> for installation
+instructions, tutorials, and examples, <a class="reference external" href="https://pypi.org/project/cudaq-algorithms/">cudaq-algorithms on PyPI</a> for the package, and
+<a class="reference external" href="https://github.com/NVIDIA/cudaq-algorithms">NVIDIA/cudaq-algorithms on GitHub</a> for the source code.</p>
 </div>
 <p>CUDA-QX provides optional pip-installable components:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install the Tensor Network Decoder from the QEC library</span>
@@ -710,7 +723,8 @@ argument.</p>
 <dl class="simple">
 <dt>The container includes:</dt><dd><ul class="simple">
 <li><p>CUDA-Q compiler and runtime</p></li>
-<li><p>CUDA-QX libraries (QEC and Solvers)</p></li>
+<li><p>CUDA-QX libraries (QEC and Solvers; note that Solvers is deprecated in
+favor of <a class="reference external" href="https://nvidia.github.io/cudaq-algorithms/">CUDA-Q Algorithms</a>)</p></li>
 <li><p>All required dependencies</p></li>
 <li><p>Example notebooks and tutorials</p></li>
 </ul>

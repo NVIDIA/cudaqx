@@ -648,9 +648,25 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="module-cudaq_solvers">
-<span id="cuda-q-solvers-python-api"></span><h1>CUDA-Q Solvers Python API<a class="headerlink" href="#module-cudaq_solvers" title="Permalink to this heading"></a></h1>
-<dl class="py function">
+  <section id="cuda-q-solvers-python-api">
+<h1>CUDA-Q Solvers Python API<a class="headerlink" href="#cuda-q-solvers-python-api" title="Permalink to this heading"></a></h1>
+<div class="admonition attention">
+<p class="admonition-title">Attention</p>
+<p><strong>CUDA-Q Solvers is deprecated.</strong> Version 0.6.0 is the final planned
+release of the CUDA-Q Solvers library. Development continues in <strong>CUDA-Q
+Algorithms</strong>, which supersedes CUDA-Q Solvers and expands on it.</p>
+<ul class="simple">
+<li><p>Documentation, tutorials, and examples:
+<a class="reference external" href="https://nvidia.github.io/cudaq-algorithms/">CUDA-Q Algorithms documentation</a>.</p></li>
+<li><p>Install it with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">cudaq-algorithms</span></code>
+(<a class="reference external" href="https://pypi.org/project/cudaq-algorithms/">cudaq-algorithms on PyPI</a>).</p></li>
+<li><p>Source code: <a class="reference external" href="https://github.com/NVIDIA/cudaq-algorithms">NVIDIA/cudaq-algorithms on GitHub</a>.</p></li>
+</ul>
+<p>Existing code continues to work with CUDA-Q Solvers 0.6.0, but all new
+features and fixes land in CUDA-Q Algorithms. We encourage every CUDA-Q
+Solvers user to migrate.</p>
+</div>
+<span class="target" id="module-cudaq_solvers"></span><dl class="py function">
 <dt class="sig sig-object py" id="cudaq_solvers.jordan_wigner">
 <span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">jordan_wigner</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">hpq:</span> <span class="pre">numpy.ndarray[dtype=complex128],</span> <span class="pre">hpqrs:</span> <span class="pre">numpy.ndarray[dtype=complex128],</span> <span class="pre">core_energy:</span> <span class="pre">float</span> <span class="pre">=</span> <span class="pre">0.0,</span> <span class="pre">****kwargs</span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">cudaq.SpinOperator</span></span></span><a class="headerlink" href="#cudaq_solvers.jordan_wigner" title="Permalink to this definition"></a></dt>
 <dt class="sig sig-object py">

@@ -656,6 +656,18 @@ state-of-the-art CPUs, GPUs, and QPUs. It provides a collection of C++
 libraries and Python packages that enable research, development, and application
 creation for use cases in quantum error correction and hybrid quantum-classical
 solvers.</p>
+<div class="admonition attention">
+<p class="admonition-title">Attention</p>
+<p><strong>CUDA-Q Solvers is deprecated.</strong> Version 0.6.0 is the final planned
+release of the CUDA-Q Solvers library. Development continues in <strong>CUDA-Q
+Algorithms</strong>, which supersedes CUDA-Q Solvers and expands on it. Install it
+with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">cudaq-algorithms</span></code>
+(<a class="reference external" href="https://pypi.org/project/cudaq-algorithms/">cudaq-algorithms on PyPI</a>),
+read the <a class="reference external" href="https://nvidia.github.io/cudaq-algorithms/">CUDA-Q Algorithms documentation</a>, and find the source code at
+<a class="reference external" href="https://github.com/NVIDIA/cudaq-algorithms">NVIDIA/cudaq-algorithms on GitHub</a>.
+The CUDA-Q Solvers documentation below is retained for existing 0.6.0 users;
+all new features and fixes land in CUDA-Q Algorithms.</p>
+</div>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
 <ul>
@@ -728,11 +740,13 @@ APIs for common quantum-classical solver workflows.</p>
 </dl>
 </li>
 <li><dl class="simple">
-<dt><strong>cudaq-solvers</strong>: Performant Quantum-Classical Simulation Workflows</dt><dd><ul>
+<dt><strong>cudaq-solvers</strong> (deprecated, superseded by <a class="reference external" href="https://nvidia.github.io/cudaq-algorithms/">CUDA-Q Algorithms</a>): Performant Quantum-Classical Simulation Workflows</dt><dd><ul>
 <li><p>Variational Quantum Eigensolver (VQE)</p></li>
 <li><p>ADAPT-VQE implementation that scales via CUDA-Q MQPU.</p></li>
 <li><p>Quantum Approximate Optimization Algorithm (QAOA)</p></li>
-<li><p>More to come…</p></li>
+<li><p>Version 0.6.0 is the final planned release; continue with
+<a class="reference external" href="https://pypi.org/project/cudaq-algorithms/">cudaq-algorithms</a> and its
+<a class="reference external" href="https://nvidia.github.io/cudaq-algorithms/">documentation</a>.</p></li>
 </ul>
 </dd>
 </dl>
