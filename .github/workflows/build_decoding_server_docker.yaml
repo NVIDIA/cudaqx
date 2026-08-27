@@ -62,8 +62,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo bash .github/workflows/scripts/install_git_cli.sh
-          gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
-          gh release view -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}" >> $GITHUB_STEP_SUMMARY
+          # Suppress gh's own download progress output (filenames/sizes) --
+          # public job logs, same reasoning as not logging `gh release view`.
+          # stderr is left alone so auth/network failures are still visible.
+          gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}" > /dev/null
 
           # nv-qldpc-decoder-<arch>_ubuntu24.04_cuda<version>_py3.<pyver>_release.tar.gz --
           # per-Python-version variants (verified: the .so differs by
