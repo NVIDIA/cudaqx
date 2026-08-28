@@ -12,10 +12,8 @@
 ///        self-relaunching device-graph scheduler.
 ///
 /// This bridge wires the per-round decode-server protocol onto a real
-/// (or emulated) FPGA over RoCE.  Unlike the inproc_rpc path
-/// (qec_realtime_session, which allocates its own pinned ring), the bridge
-/// runs the SAME device-graph scheduler directly on the GpuRoceTransceiver DOCA
-/// ring:
+/// (or emulated) FPGA over RoCE.  The bridge runs the device-graph scheduler
+/// directly on the GpuRoceTransceiver DOCA ring:
 ///
 ///   FPGA --RDMA--> GpuRoceTransceiver RX kernel --writes rx_flags--> scheduler
 ///   graph scheduler graph --DEVICE_CALL append/get/reset; fires decode on a
@@ -83,9 +81,9 @@ std::string read_file(const std::string &path) {
 }
 
 // Resolve a proprietary DEVICE_CALL populate shim by name and stamp the entry.
-// Same dlsym(RTLD_DEFAULT) contract as qec_realtime_session: the symbols are
-// exported from this executable because it absorbs the cudevice proprietary
-// archive (WHOLE_ARCHIVE) and links with --export-dynamic.
+// dlsym(RTLD_DEFAULT) contract: the symbols are exported from this executable
+// because it absorbs the cudevice proprietary archive (WHOLE_ARCHIVE) and links
+// with --export-dynamic.
 using populate_fn = void (*)(void *);
 bool populate_device_call(cudaq_function_entry_t &entry, const char *symbol,
                           std::uint32_t function_id) {

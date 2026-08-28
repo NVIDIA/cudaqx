@@ -15,8 +15,8 @@
 #    build/libs/qec/unittests/realtime/app_examples/qir-*.ll
 #------------------------------------------------------------------------------#
 
-# Resolve cudaq-realtime dispatch for app examples that opt into
-# CUDAQ_QEC_REALTIME_MODE=inproc_rpc.
+# Resolve cudaq-realtime dispatch (DEVICE-mode graph launch) for app examples
+# that link it.
 set(_app_cudaq_realtime_prefixes "")
 if(CUDAQ_REALTIME_ROOT)
   list(APPEND _app_cudaq_realtime_prefixes "${CUDAQ_REALTIME_ROOT}")
@@ -82,29 +82,6 @@ add_test(
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-
-if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
-   AND TARGET cudaq-qec-realtime-cudevice-proprietary)
-  add_test(
-    NAME app_examples.surface_code-1-local-test-distance-3-inproc-rpc
-    COMMAND
-      bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
-        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-        3 60 30 NULL 12
-        ${CMAKE_BINARY_DIR}/lib
-        nv-qldpc-decoder
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  )
-  set_tests_properties(
-    app_examples.surface_code-1-local-test-distance-3-inproc-rpc
-    PROPERTIES ENVIRONMENT
-      "CUDAQ_QEC_REALTIME_MODE=inproc_rpc"
-    # The wrapper exits 77 on GPUs below compute capability 9.0 (the
-    # device-graph scheduler needs device-side graph launch); report that
-    # as SKIPPED rather than FAILED.
-    SKIP_RETURN_CODE 77)
-endif()
 
 # Test with sliding_window decoder
 add_test(
@@ -791,9 +768,8 @@ if(TARGET decoding_server
 endif()
 
 # Surface-code-4 YAML tests: exercise both d=3 and d=5 for each decoder entry.
-# All entries run through the realtime inproc RPC mode; relay-BP is registered
-# only when the private cudevice/archive and external decoder plugin are
-# configured.
+# Regular entries run through the direct-call decode path; the cqr variants
+# exercise the external decoding server over UDP.
 find_package(Python COMPONENTS Interpreter QUIET)
 set(_SC4_TRY_TRT_TEST FALSE)
 if(Python_Interpreter_FOUND)
@@ -805,6 +781,19 @@ if(Python_Interpreter_FOUND)
   if(_sc4_onnx_python_result EQUAL 0)
     set(_SC4_TRY_TRT_TEST TRUE)
   endif()
+endif()
+set(_SC4_HAVE_NV_QLDPC FALSE)
+if(TARGET cudaq-qec-nv-qldpc-decoder
+   OR QEC_EXTERNAL_DECODERS
+   OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+  set(_SC4_HAVE_NV_QLDPC TRUE)
+endif()
+# Same lesson as the trt gate below: name the gate that actually failed rather
+# than letting the nv-qldpc cases evaporate silently.
+if(NOT _SC4_HAVE_NV_QLDPC)
+  message(WARNING "surface_code-4-yaml: nv-qldpc-decoder tests NOT registered "
+    "(no cudaq-qec-nv-qldpc-decoder target and QEC_EXTERNAL_DECODERS unset); "
+    "point QEC_EXTERNAL_DECODERS at the plugin to enable them.")
 endif()
 # A silent skip here once masked a dead test check for a whole release cycle:
 # the trt surface-code tests register only when BOTH the trt plugin target and
@@ -825,9 +814,9 @@ endif()
 
 function(add_surface_code_4_yaml_test test_suffix distance num_rounds
          decoder_type num_shots)
-  set(_sc4_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc")
+  set(_sc4_env "")
   if(Python_Interpreter_FOUND)
-    list(APPEND _sc4_env "PYTHON=${Python_EXECUTABLE}")
+    set(_sc4_env "PYTHON=${Python_EXECUTABLE}")
   endif()
 
   add_test(
@@ -886,16 +875,6 @@ if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
     --generate-identity-onnx)
 endif()
 
-# nv-qldpc relay-BP requires both the external nv-qldpc decoder plugin and the
-# proprietary cudevice archive. Match the other realtime graph/inproc tests:
-# register only when those dependencies are configured; do not runtime-skip.
-if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
-   AND TARGET cudaq-qec-realtime-cudevice-proprietary
-   AND (QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS}))
-  add_surface_code_4_yaml_decoder_cases(relay-bp nv-qldpc-decoder
-    --use-relay-bp)
-endif()
-
 # Relaxed round rule (T=6 not a multiple of d=5) and multi-logical patches, each
 # through the full generate + reload + decode driver -- so no hand-written
 # generate/reload duplication, and both get the driver's residual-LER check.
@@ -951,48 +930,6 @@ if(TARGET surface_code-4-yaml-cqr)
 
 endif()
 
-# The multi-type cases must PROVE the patches traveled through one realtime
-# session: without realtime support maybe_init_realtime_session() is a no-op
-# and enqueue/get/reset silently take the legacy direct-call path, so the
-# tests would pass on YAML routing alone. Assert HOST-mode initialization
-# whenever this build has realtime support. Gate on the compile definition
-# actually applied to cudaq-qec-realtime-decoding (set when
-# CUDAQ_REALTIME_INCLUDE_DIR is discovered), NOT the optional
-# CUDAQ_REALTIME_ROOT search hint -- the headers can be found through
-# CUDAQ_INSTALL_DIR while the hint stays empty.
-get_target_property(_sc4_rt_defs cudaq-qec-realtime-decoding
-  COMPILE_DEFINITIONS)
-if(_sc4_rt_defs MATCHES "CUDAQ_REALTIME_ROOT")
-  set(_sc4_hostmode_env "REQUIRE_HOST_MODE=1;CUDAQ_LOG_LEVEL=info")
-  set_property(TEST app_examples.surface_code-4-yaml-list-parse-d3 APPEND
-    PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")
-  if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
-    set_property(TEST app_examples.surface_code-4-yaml-trio-trt-d3 APPEND
-      PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")
-    set_property(TEST app_examples.surface_code-4-yaml-trio-trt-d5 APPEND
-      PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")
-  endif()
-endif()
-
-# Three-way heterogeneous trio incl. relay-BP. Requires a HOST-dispatch
-# (non-graph) nv-qldpc plugin via QEC_EXTERNAL_DECODERS, built against the
-# CURRENT cudaq-qec headers (a stale plugin fails to load): the inproc session
-# must be dispatch-homogeneous, and pymatching/trt are host-mode. A
-# graph-flavor plugin (built with CUDAQ_REALTIME_ROOT) would be rejected as a
-# mixed set. 1000 shots make working-vs-broken unambiguous for the BP entry
-# under the predeclared 2% correctness bound. REQUIRE_HOST_MODE +
-# CUDAQ_LOG_LEVEL=info make the driver assert the realtime session actually
-# initialized (no vacuous pass through the legacy direct-call stub).
-if((QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
-   AND TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
-  add_surface_code_4_yaml_test(trio-relay-d3 3 3
-    "pymatching,trt_decoder,nv-qldpc-decoder" 1000
-    --generate-identity-onnx
-    --num_logical 3 --use-relay-bp)
-  set_property(TEST app_examples.surface_code-4-yaml-trio-relay-d3 APPEND
-    PROPERTY ENVIRONMENT "REQUIRE_HOST_MODE=1;CUDAQ_LOG_LEVEL=info")
-endif()
-
 # --------------------------------------------------------------------------- #
 # Negative / boundary tests for geometry, replay, and multi-logical reload.
 # PASS_REGULAR_EXPRESSION alone ignores exit status, so _sc4_reject checks both.
@@ -1000,8 +937,7 @@ endif()
 set(_sc4_exe ${CMAKE_CURRENT_BINARY_DIR}/surface_code-4-yaml)
 set(_sc4_neg_dir ${CMAKE_CURRENT_BINARY_DIR}/negative)
 file(MAKE_DIRECTORY ${_sc4_neg_dir})
-set(_sc4_neg_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc"
-                 "CUDAQ_DEFAULT_SIMULATOR=stim")
+set(_sc4_neg_env "CUDAQ_DEFAULT_SIMULATOR=stim")
 
 # A rejection case must satisfy BOTH conditions: a nonzero exit AND the expected
 # diagnostic. CTest's PASS_REGULAR_EXPRESSION ignores the exit code, so a wrapper
@@ -1227,9 +1163,7 @@ fi
   set_tests_properties(app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
     PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
 endfunction()
-if(TARGET cudaq-qec-nv-qldpc-decoder
-   OR QEC_EXTERNAL_DECODERS
-   OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+if(_SC4_HAVE_NV_QLDPC)
   _sc4_dual_parse_test(3 3)
   _sc4_dual_parse_test(5 5)
 endif()
