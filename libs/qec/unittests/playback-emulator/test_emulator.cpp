@@ -78,7 +78,7 @@ TEST(Analyzer, AnEmptyResultProducesTheHeaderAndNothingElse) {
   for (const char *col : {"event_index", "decoder_id", "op", "deadline_ns",
                           "call_ns", "return_ns", "lateness_ns", "latency_ns",
                           "status", "rounds_streamed", "read_completed",
-                          "syndrome_hex", "correction_hex",
+                          "syndrome_bits", "correction_bits",
                           "correction_mismatch", "request_ids", "dispatched"})
     EXPECT_NE(std::find(header.begin(), header.end(), col), header.end())
         << "missing column " << col;
@@ -118,9 +118,9 @@ TEST(Analyzer, LatenessAndLatencyAreDerivedNotStored) {
 // ─── AnalyzerEdgeCases ────────────────────────────────────────────────────
 //
 // Adversarial tests for write_csv(), focused on the bounds-checking
-// `safe_bit_span` helper in lib/emulator.cpp and on exact 
+// `safe_bit_span` helper in lib/emulator.cpp and on exact
 // output for every enum value, boolean combination, and
-// hex-encoding boundary. 
+// bit-string encoding.
 
 namespace {
 
@@ -154,8 +154,8 @@ constexpr std::size_t kNumColumns = 16;
 constexpr std::size_t kColOp = 2;
 constexpr std::size_t kColStatus = 8;
 constexpr std::size_t kColReadCompleted = 10;
-constexpr std::size_t kColSyndromeHex = 11;
-constexpr std::size_t kColCorrectionHex = 12;
+constexpr std::size_t kColSyndromeBits = 11;
+constexpr std::size_t kColCorrectionBits = 12;
 constexpr std::size_t kColMismatch = 13;
 constexpr std::size_t kColRequestIds = 14;
 
@@ -184,12 +184,13 @@ TEST(AnalyzerEdgeCases, EveryOutOfRangeBitSpanClampsInsteadOfReadingPastTheArena
       {{0x01, 0x00}, 1000, 8, "", "offset far past a short arena"},
       {{}, 5, 16, "", "any offset into an empty arena"},
       {{1, 0, 1, 1}, 4, 8, "", "offset exactly at the end"},
-      {{1, 0, 1, 1}, 3, 8, "8", "offset at the last index, count clamped to 1"},
+      {{1, 0, 1, 1}, 3, 8, "1", "offset at the last index, count clamped to 1"},
       {{1, 1}, 999999, 0, "", "zero count, offset out of range"},
       {{1, 0, 1, 1}, 1, 0, "", "zero count, offset in range"},
   };
-  // Both hex columns index their own arena through the same helper, so each
-  // case is run through both rather than trusting one to stand for the other.
+  // Both bit-string columns index their own arena through the same helper,
+  // so each case is run through both rather than trusting one to stand for
+  // the other.
   for (const auto &c : cases) {
     SCOPED_TRACE(c.why);
     run_result syn;
@@ -198,7 +199,7 @@ TEST(AnalyzerEdgeCases, EveryOutOfRangeBitSpanClampsInsteadOfReadingPastTheArena
     srec.syndrome_count = c.count;
     syn.syndrome_log = c.log;
     syn.records.push_back(srec);
-    EXPECT_EQ(only_row(syn)[kColSyndromeHex], c.expected) << "syndrome_hex";
+    EXPECT_EQ(only_row(syn)[kColSyndromeBits], c.expected) << "syndrome_bits";
 
     run_result cor;
     record crec;
@@ -206,13 +207,13 @@ TEST(AnalyzerEdgeCases, EveryOutOfRangeBitSpanClampsInsteadOfReadingPastTheArena
     crec.correction_count = c.count;
     cor.correction_log = c.log;
     cor.records.push_back(crec);
-    EXPECT_EQ(only_row(cor)[kColCorrectionHex], c.expected) << "correction_hex";
+    EXPECT_EQ(only_row(cor)[kColCorrectionBits], c.expected) << "correction_bits";
   }
 }
 
 TEST(AnalyzerEdgeCases, RequestIdSliceRunningPastTheLogClampsInsteadOfReadingOOB) {
-  // The request_ids column indexes its own log the same way the hex columns
-  // index theirs, so it needs the same guard: a count reaching past the end
+  // The request_ids column indexes its own log the same way the bit-string
+  // columns index theirs, so it needs the same guard: a count reaching past the end
   // renders what is actually there, and an offset past the end renders
   // nothing.
   run_result r;
@@ -229,19 +230,19 @@ TEST(AnalyzerEdgeCases, RequestIdSliceRunningPastTheLogClampsInsteadOfReadingOOB
   EXPECT_EQ(split_csv_line(lines[2])[kColRequestIds], "");
 }
 
-TEST(AnalyzerEdgeCases, SyndromeAndCorrectionHexAreIndependentInTheSameRow) {
+TEST(AnalyzerEdgeCases, SyndromeAndCorrectionBitsAreIndependentInTheSameRow) {
   run_result r;
   record rec;
   rec.syndrome_offset = 0;
   rec.syndrome_count = 4;
   rec.correction_offset = 2; // deliberately non-zero, mid-arena
   rec.correction_count = 4;
-  r.syndrome_log = {1, 1, 0, 0};         // 1100b = 0xc
-  r.correction_log = {0, 0, 1, 1, 0, 1}; // bits [2..5] = 1,1,0,1 = 0xd
+  r.syndrome_log = {1, 1, 0, 0};
+  r.correction_log = {0, 0, 1, 1, 0, 1}; // bits [2..5] = 1,1,0,1
   r.records.push_back(rec);
   auto cols = only_row(r);
-  EXPECT_EQ(cols[kColSyndromeHex], "c");
-  EXPECT_EQ(cols[kColCorrectionHex], "d");
+  EXPECT_EQ(cols[kColSyndromeBits], "1100");
+  EXPECT_EQ(cols[kColCorrectionBits], "1101");
 }
 
 // -- enum coverage ----------------------------------------------------------
@@ -312,13 +313,11 @@ TEST(AnalyzerEdgeCases, ReadCompletedAndCorrectionMismatchEncodeExactlyAsZeroOrO
   }
 }
 
-// -- hex encoding, byte/nibble boundaries ------------------------------------
+// -- bit-string encoding ------------------------------------------------------
 
-TEST(AnalyzerEdgeCases, HexEncodingIsExactAtEveryBoundaryAndKeepsBitOrder) {
-  // Expected values hand-derived from write_csv()'s documented packing:
-  // MSB-first within each nibble, zero-padding the final partial one. The
-  // asymmetric patterns are the ones that catch a reversed nibble, which a
-  // run of all-ones cannot.
+TEST(AnalyzerEdgeCases, BitStringEncodingIsExactAndKeepsBitOrder) {
+  // One '0'/'1' character per bit, in log order -- no packing, so no
+  // boundary to get wrong, but order still has to survive.
   const std::vector<std::uint8_t> alternating = {1, 0, 1, 0, 1, 0, 1, 0};
   const std::vector<std::uint8_t> sparse_nine = {1, 0, 0, 0, 0, 0, 0, 0, 1};
   struct {
@@ -326,15 +325,11 @@ TEST(AnalyzerEdgeCases, HexEncodingIsExactAtEveryBoundaryAndKeepsBitOrder) {
     const char *expected;
   } cases[] = {
       {{}, ""},
-      {{1}, "8"},                                // 1000b: one bit, padded
-      {std::vector<std::uint8_t>(7, 1), "fe"},   // 1111 111(0)
-      {std::vector<std::uint8_t>(8, 1), "ff"},   // 1111 1111
-      {std::vector<std::uint8_t>(9, 1), "ff8"},  // 1111 1111 1(000)
-      {std::vector<std::uint8_t>(63, 1), "fffffffffffffffe"}, // 63 = 15*4+3
-      {std::vector<std::uint8_t>(64, 1), "ffffffffffffffff"},
-      {std::vector<std::uint8_t>(65, 1), "ffffffffffffffff8"},
-      {alternating, "aa"},  // 1010b twice: order, not just population count
-      {sparse_nine, "808"}, // 1000b, 0000b, 1(000)b
+      {{1}, "1"},
+      {std::vector<std::uint8_t>(7, 1), "1111111"},
+      {std::vector<std::uint8_t>(8, 1), "11111111"},
+      {alternating, "10101010"},
+      {sparse_nine, "100000001"},
   };
   for (const auto &c : cases) {
     SCOPED_TRACE("count=" + std::to_string(c.bits.size()));
@@ -343,7 +338,7 @@ TEST(AnalyzerEdgeCases, HexEncodingIsExactAtEveryBoundaryAndKeepsBitOrder) {
     rec.syndrome_count = static_cast<std::uint32_t>(c.bits.size());
     r.syndrome_log = c.bits;
     r.records.push_back(rec);
-    EXPECT_EQ(only_row(r)[kColSyndromeHex], c.expected);
+    EXPECT_EQ(only_row(r)[kColSyndromeBits], c.expected);
   }
 }
 
@@ -361,8 +356,8 @@ TEST(AnalyzerEdgeCases, ADefaultResultWithWarningsProducesOneWellFormedRow) {
   auto cols = only_row(r);
   ASSERT_EQ(cols.size(), kNumColumns);
   EXPECT_EQ(cols[kColOp], "reset"); // operation{} == reset
-  EXPECT_EQ(cols[kColSyndromeHex], "");
-  EXPECT_EQ(cols[kColCorrectionHex], "");
+  EXPECT_EQ(cols[kColSyndromeBits], "");
+  EXPECT_EQ(cols[kColCorrectionBits], "");
   EXPECT_EQ(cols[kColRequestIds], "");
 }
 

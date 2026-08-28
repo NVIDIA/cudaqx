@@ -44,18 +44,11 @@ def cell(header, row, name):
     return row[header.index(name)]
 
 
-def hex_of(bits):
-    """The packing write_csv() documents: MSB-first within each nibble,
-    zero-padding a partial final one. Re-derived here so the Python view of
-    an arena can be checked against the column C++ wrote from it."""
-    out = ""
-    for start in range(0, len(bits), 4):
-        nibble = 0
-        for i in range(4):
-            bit = bits[start + i] if start + i < len(bits) else 0
-            nibble = (nibble << 1) | (bit & 1)
-        out += "%x" % nibble
-    return out
+def bits_of(bits):
+    """The rendering write_csv() documents: one '0'/'1' character per bit, in
+    log order. Re-derived here so the Python view of an arena can be checked
+    against the column C++ wrote from it."""
+    return "".join("1" if b else "0" for b in bits)
 
 
 def a_run():
@@ -250,17 +243,17 @@ def test_request_ids_rejects_an_event_index_that_does_not_exist():
         result.request_ids(len(result.records))
 
 
-def test_syndrome_log_slice_matches_the_hex_column_written_from_it():
+def test_syndrome_log_slice_matches_the_bits_column_written_from_it():
     result = a_run()
     header, data = rows(result)
     for rec, row in zip(result.records, data):
         bits = list(result.syndrome_log[rec.syndrome_offset:rec.syndrome_offset
                                         + rec.syndrome_count])
-        assert cell(header, row, "syndrome_hex") == hex_of(bits)
+        assert cell(header, row, "syndrome_bits") == bits_of(bits)
         corrections = list(
             result.correction_log[rec.correction_offset:rec.correction_offset +
                                   rec.correction_count])
-        assert cell(header, row, "correction_hex") == hex_of(corrections)
+        assert cell(header, row, "correction_bits") == bits_of(corrections)
     # The streamed rounds really did reach the log, so the check above is not
     # vacuously comparing two empty strings.
     assert list(result.syndrome_log) == [1, 0, 1, 1, 0, 1]

@@ -130,8 +130,7 @@ struct schedule {
   std::vector<std::uint8_t> syndrome_arena;  // one byte per bit (0x00/0x01)
   std::vector<std::uint8_t> expected_arena;  // one byte per bit
   std::vector<std::uint64_t> decoders;       // known decoder_ids
-  // Interned once at parse: events carry indices into this, so nothing on
-  // the dispatch path ever compares or hashes a string.
+  // Interned once at parse: events carry indices into this
   std::vector<std::string> signal_names;
   std::uint64_t tick_ns = 1000; // wall-clock duration of one tick
 };

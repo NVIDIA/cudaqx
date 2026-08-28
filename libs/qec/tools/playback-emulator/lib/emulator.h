@@ -85,7 +85,7 @@ run_result run(std::shared_ptr<run_plan> plan);
 
 /// Downstream analysis writes CSV. One row per record: identity, timings, derived lateness/latency, status,
 /// rounds streamed, and the syndrome/correction bits resolved from the logs
-/// (hex-encoded, MSB-first-nibble, one column each).
+/// (one column each, rendered as a '0'/'1' string in log order).
 void write_csv(const run_result &result, std::ostream &out);
 std::string write_csv(const run_result &result);
 

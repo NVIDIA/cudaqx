@@ -57,7 +57,7 @@ void sleep_until(std::uint64_t target_ns) {
 /// typical clock_nanosleep overshoot. Fixed, not measured/configurable --
 /// a startup calibration risks sampling one bad preemption and spinning on
 /// every later deadline for the rest of the run.
-constexpr std::uint64_t kSpinSlackNs = 50'000;
+constexpr std::uint64_t kSpinSlackNs = 200'000;
 
 /// Saturating add. A deadline far enough out to overflow the clock is
 /// clamped to "never" 
@@ -778,25 +778,13 @@ run_result run(std::shared_ptr<run_plan> p) {
 
 namespace {
 
-// syndrome_log/correction_log are one byte (0x00/0x01) per BIT 
-// Pack four bits into one hex digit, MSB-first, zero-padding the
-// final partial nibble.
-std::string hex_encode_bits(const std::uint8_t *bits, std::size_t count) {
-  static const char kHexChars[] = "0123456789abcdef";
+// syndrome_log/correction_log are one byte (0x00/0x01) per BIT --
+// render each one as a '0'/'1' character, in log order.
+std::string bits_to_string(const std::uint8_t *bits, std::size_t count) {
   std::string out;
-  if (count == 0)
-    return out;
-  const std::size_t ndigits = (count + 3) / 4;
-  out.reserve(ndigits);
-  for (std::size_t d = 0; d < ndigits; ++d) {
-    std::uint8_t nibble = 0;
-    for (std::size_t b = 0; b < 4; ++b) {
-      const std::size_t bit_index = d * 4 + b;
-      const std::uint8_t bit = bit_index < count ? bits[bit_index] : 0;
-      nibble = static_cast<std::uint8_t>((nibble << 1) | (bit & 1));
-    }
-    out.push_back(kHexChars[nibble]);
-  }
+  out.reserve(count);
+  for (std::size_t i = 0; i < count; ++i)
+    out.push_back(bits[i] ? '1' : '0');
   return out;
 }
 
@@ -833,7 +821,7 @@ std::string join_request_ids(const std::vector<std::uint32_t> &log,
 void write_csv(const run_result &result, std::ostream &out) {
   out << "event_index,decoder_id,op,deadline_ns,call_ns,return_ns,"
          "lateness_ns,latency_ns,status,rounds_streamed,read_completed,"
-         "syndrome_hex,correction_hex,correction_mismatch,request_ids,"
+         "syndrome_bits,correction_bits,correction_mismatch,request_ids,"
          "dispatched\n";
   for (const auto &r : result.records) {
     const auto [syndrome_bits, syndrome_n] =
@@ -846,8 +834,8 @@ void write_csv(const run_result &result, std::ostream &out) {
         << ','
         << static_cast<std::int64_t>(r.return_ns) - static_cast<std::int64_t>(r.call_ns)
         << ',' << r.status << ',' << r.rounds_streamed << ',' << (r.read_completed ? 1 : 0)
-        << ',' << hex_encode_bits(syndrome_bits, syndrome_n) << ','
-        << hex_encode_bits(correction_bits, correction_n) << ','
+        << ',' << bits_to_string(syndrome_bits, syndrome_n) << ','
+        << bits_to_string(correction_bits, correction_n) << ','
         << (r.correction_mismatch ? 1 : 0) << ','
         << join_request_ids(result.request_id_log, r.request_id_offset,
                             r.request_id_count)
