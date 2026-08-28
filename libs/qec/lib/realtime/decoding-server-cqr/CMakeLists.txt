@@ -206,9 +206,12 @@ endif()
 # registers the HOST_CALL handlers, which serve each request inline on the
 # CUDAQ dispatcher thread (DecodingSession::handle_*).
 # ---------------------------------------------------------------------------
-if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
+if(CUDAQ_QEC_DEVICE_CALL_SERVICE_HEADERS_AVAILABLE)
   add_library(cudaq-qec-realtime-decoding-server-cqr SHARED
     decoding_server_cqr.cpp
+    # Supplies the DeviceCallService/DeviceCallServiceSession key functions in
+    # place of libcudaq-device-call-runtime; see the file comment.
+    device_call_service_anchor.cpp
   )
 
   target_compile_options(cudaq-qec-realtime-decoding-server-cqr
@@ -230,13 +233,18 @@ if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
     $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,libcudaq-qec-decoding-server.a>
   )
 
+  # No CUDA-Q libraries here: the service side is driven entirely by
+  # libcudaq-realtime (a separate product from CUDA-Q), which
+  # cudaq-qec-realtime-decoding already links.  cudaq::cudaq-common was unused
+  # (--as-needed already dropped it from DT_NEEDED), and the two device-call
+  # base-class destructors that used to come from
+  # libcudaq-device-call-runtime -- the caller-side ring implementation -- now
+  # come from device_call_service_anchor.cpp.
   target_link_libraries(cudaq-qec-realtime-decoding-server-cqr
     PUBLIC
       cudaq-qec-realtime-decoding
     PRIVATE
       cudaq-qec-decoding-server
-      cudaq::cudaq-common
-      ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}
   )
 
   set(_server_cqr_build_rpath "${CMAKE_BINARY_DIR}/lib")
