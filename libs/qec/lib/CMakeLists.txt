@@ -22,6 +22,8 @@ find_package(CUDAToolkit REQUIRED)
 # (FindcuStabilizer auto-discovers it from the active Python environment).
 # If it is missing, surface a clear, actionable error rather than CMake's
 # default "Could NOT find cuStabilizer" message.
+# Decoders-only builds skip it: only libcudaq-qec.so (DEM sampling) needs it.
+if(NOT CUDAQ_QEC_DECODERS_ONLY)
 find_package(cuStabilizer QUIET)
 if(NOT cuStabilizer_FOUND)
   set(_cuda_major "${CUDAToolkit_VERSION_MAJOR}")
@@ -41,6 +43,7 @@ if(NOT cuStabilizer_FOUND)
     "    -DCUSTABILIZER_ROOT=/path/to/custabilizer\n"
     "(both are also honored as environment variables).")
 endif()
+endif() # NOT CUDAQ_QEC_DECODERS_ONLY
 
 set(DEM_SOURCES
   dem_chunks_memory.cpp
@@ -90,8 +93,10 @@ set_target_properties(${DECODERS_LIBRARY_NAME} PROPERTIES
   VISIBILITY_INLINES_HIDDEN ON
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# FIXME?: This must be a shared library. Trying to build a static one will fail.
-add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
+if(NOT CUDAQ_QEC_DECODERS_ONLY)
+  # FIXME?: This must be a shared library. Trying to build a static one will fail.
+  add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
+endif()
 
 if(NOT TARGET libstim)
   FetchContent_Declare(
@@ -107,9 +112,11 @@ if(NOT TARGET libstim)
   message(FATAL_ERROR
     "Stim FetchContent did not provide the libstim target.")
 endif()
-set_target_properties(${LIBRARY_NAME} PROPERTIES
-  VISIBILITY_INLINES_HIDDEN ON
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+if(TARGET ${LIBRARY_NAME})
+  set_target_properties(${LIBRARY_NAME} PROPERTIES
+    VISIBILITY_INLINES_HIDDEN ON
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+endif()
 
 target_link_libraries(${DEM_LIBRARY_NAME} PRIVATE libstim)
 target_link_options(${DECODERS_LIBRARY_NAME} PRIVATE
@@ -135,13 +142,17 @@ else()
       "Whether the TRT decoder plugin is being built")
 endif()
 
-add_subdirectory(codes)
-add_subdirectory(device) 
+if(NOT CUDAQ_QEC_DECODERS_ONLY)
+  add_subdirectory(codes)
+  add_subdirectory(device)
+endif()
 
 if (CUDAQX_QEC_USE_FLOAT)
    target_compile_definitions(${DEM_LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
    target_compile_definitions(${DECODERS_LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
-   target_compile_definitions(${LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
+   if(TARGET ${LIBRARY_NAME})
+     target_compile_definitions(${LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
+   endif()
 endif()
 
 target_include_directories(${DEM_LIBRARY_NAME}
@@ -163,18 +174,7 @@ target_include_directories(${DECODERS_LIBRARY_NAME}
     $<INSTALL_INTERFACE:include>
 )
 
-target_include_directories(${LIBRARY_NAME}
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
-  PUBLIC 
-    $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
-    $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
-    $<INSTALL_INTERFACE:include>
-)
-
 target_link_options(${DECODERS_LIBRARY_NAME} PRIVATE
-  $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>
-)
-target_link_options(${LIBRARY_NAME} PUBLIC
   $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>
 )
 
@@ -189,27 +189,43 @@ target_link_libraries(${DECODERS_LIBRARY_NAME}
     CUDA::cudart
 )
 
-target_link_libraries(${LIBRARY_NAME}
-  PUBLIC 
-    ${DECODERS_LIBRARY_NAME}
-    cudaq::cudaq-operator
-  PRIVATE
-    cudaq::cudaq-common
-)
+if(TARGET ${LIBRARY_NAME})
+  target_include_directories(${LIBRARY_NAME}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    PUBLIC
+      $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
+      $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
+      $<INSTALL_INTERFACE:include>
+  )
 
-target_link_libraries(${LIBRARY_NAME} PRIVATE
-  cuStabilizer::cuStabilizer
-  CUDA::cudart
-)
-set_source_files_properties(
-  dem_sampling/dem_sampling_utils.cu
-  PROPERTIES LANGUAGE CUDA
-)
+  target_link_options(${LIBRARY_NAME} PUBLIC
+    $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>
+  )
+
+  target_link_libraries(${LIBRARY_NAME}
+    PUBLIC
+      ${DECODERS_LIBRARY_NAME}
+      cudaq::cudaq-operator
+    PRIVATE
+      cudaq::cudaq-common
+  )
+
+  target_link_libraries(${LIBRARY_NAME} PRIVATE
+    cuStabilizer::cuStabilizer
+    CUDA::cudart
+  )
+  set_source_files_properties(
+    dem_sampling/dem_sampling_utils.cu
+    PROPERTIES LANGUAGE CUDA
+  )
+endif()
 
 # RPATH configuration 
 # ==============================================================================
 
-if (NOT SKBUILD)
+if (NOT TARGET ${LIBRARY_NAME})
+  # Decoders-only build: no libcudaq-qec.so to configure RPATHs for.
+elseif (NOT SKBUILD)
   # Append the cuStabilizer library directory (typically inside a
   # cuquantum-python pip wheel) so the loader can find libcustabilizer.so.0
   # at run-time without requiring LD_LIBRARY_PATH.
@@ -248,7 +264,11 @@ endif()
 # cudaq-qec-dem.a is intentionally omitted: it is a private build artifact
 # folded into cudaq-qec-decoders.so.
 
-install(TARGETS ${DECODERS_LIBRARY_NAME} ${LIBRARY_NAME}
+set(_qec_install_targets ${DECODERS_LIBRARY_NAME})
+if(TARGET ${LIBRARY_NAME})
+  list(APPEND _qec_install_targets ${LIBRARY_NAME})
+endif()
+install(TARGETS ${_qec_install_targets}
   COMPONENT qec-lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
@@ -259,4 +279,6 @@ install(DIRECTORY ${CUDAQX_QEC_INCLUDE_DIR}/cudaq
   FILES_MATCHING PATTERN "*.h"
 )
 
-add_subdirectory(realtime)
+if(NOT CUDAQ_QEC_DECODERS_ONLY)
+  add_subdirectory(realtime)
+endif()
