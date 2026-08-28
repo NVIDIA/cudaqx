@@ -39,6 +39,7 @@ jobs:
           set-safe-directory: true
 
       - name: Configure and build (decoders only)
+        shell: bash
         run: |
           set -o pipefail
           cmake -S libs/qec -B build_decoders_only \
@@ -225,6 +226,7 @@ jobs:
 
       - name: Check it links no CUDA-Q library, and starts
         if: matrix.platform == 'amd64' && matrix.cuda_version == '13.0'
+        shell: bash
         run: |
           set -o pipefail
           server=build_decoders_only_server/bin/decoding_server
