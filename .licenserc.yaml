@@ -33,6 +33,18 @@ header:
     - '**/*.onnx'
     - '**/LICENSE'
     - '**/NOTICE'
+    - '**/CITATION.cff'
+    - '**/Doxyfile.in'
+    # Plain-text data formats consumed by Stim/decoder tooling, not source.
+    - '**/*.stim'
+    - '**/*.dem'
+    # Auto-generated data
+    - 'libs/qec/unittests/decoders/trt_decoder/trt_test_data.h'
+    # No actual code, just an explanatory comment (CMake device-link workaround).
+    - 'libs/qec/unittests/utils/cuda_link_stub.cu'
+    # Zero-byte package-init markers, no content to attach a header to.
+    - 'libs/qec/python/cudaq_qec/plugins/decoders/__init__.py'
+    - 'libs/qec/python/cudaq_qec/plugins/decoders/tensor_network_utils/__init__.py'
 
   comment: on-failure
 
