@@ -104,8 +104,10 @@ This builds the decoder interface (`libcudaq-qec-decoders.so`), the built-in
 decoders, and the decoder plugins. Neither a CUDA-Q install nor LLVM/MLIR is
 required; a CUDA toolkit still is, since the decoder API links `cudart`. The
 following are skipped because they are the only parts that need CUDA-Q:
-`libcudaq-qec.so` (codes, experiments, DEM sampling), cuStabilizer, the tools,
-the realtime library, and the unit tests.
+`libcudaq-qec.so` (codes, experiments, DEM sampling), cuStabilizer, and the
+unit tests. The realtime libraries and the decoding server are built too if a
+cudaq-realtime install is found -- see [The decoding server](#the-decoding-server)
+below.
 
 The option must be set on a build configured with `libs/qec` as the top-level
 directory (`-S libs/qec`); configuring the whole repository with it set is an
@@ -127,6 +129,67 @@ Note that this module is intentionally not packaged or installed: it is only
 importable as the bare `_qec_decoders_standalone` module from
 `<build>/python`, not as `cudaq_qec`. Use the normal build above if you want
 the installable `cudaq_qec` package.
+
+### The decoding server
+
+The decoding server is driven by **cudaq-realtime**, which is a separate
+product from CUDA-Q: `libcudaq-realtime.so` links nothing but libc, and the
+server uses none of the CUDA-Q runtime, the simulators, or the CUDA-Q
+compiler. So a decoders-only build can produce it too. Point the build at a
+cudaq-realtime install:
+
+```bash
+cmake -S libs/qec -B build_decoders_only \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCUDAQ_QEC_DECODERS_ONLY=ON \
+  -DCUDAQ_REALTIME_ROOT=/path/to/cudaq-realtime
+cmake --build build_decoders_only -j$(nproc)
+```
+
+This is detected, not requested: when cudaq-realtime is found, the decoding
+server and the realtime decoding libraries are added to the build; when it is
+not, CMake prints a warning and builds the decoders alone. `CUDAQ_REALTIME_ROOT`
+is only a hint -- `CUDAQ_INSTALL_DIR` and `CUDAQ_INSTALL_PREFIX` are searched
+too, so a full CUDA-Q install works as the source of cudaq-realtime without
+any of the rest of it being used.
+
+The server needs `libcudaq-realtime.so` and the cudaq-realtime headers, and
+nothing else from that prefix. It does add one build-time dependency the
+decoders alone do not have: LLVM. The realtime decoder config is parsed with
+`llvm::yaml` and its JSON schema emitted with `llvm::json`, so `LLVMSupport`
+is required -- but still no MLIR and no Clang.
+
+You can confirm the resulting binary is free of CUDA-Q:
+
+```bash
+readelf -d build_decoders_only/bin/decoding_server | grep NEEDED
+```
+
+The only `libcudaq*` entries should be `libcudaq-realtime.so` and the QEC
+libraries built here. To run it:
+
+```bash
+cd build_decoders_only/bin
+./decoding_server --config=decoding_server_config.yaml --transport=udp --timeout=60
+```
+
+It prints `QEC_DECODING_SERVER_READY` with its bound port once the decoders are
+constructed and the transport is up.
+
+Two pieces are deliberately left out of a decoders-only build, because both
+need the CUDA-Q compiler and runtime:
+
+- The **in-process host_dispatch** path, where CUDA-Q discovers the QEC service
+  in its own process rather than talking to an external server. Its shim lives
+  in `decoding_server_cqr_device_call_service.cpp` and is compiled only with a
+  full CUDA-Q install; the external server reaches the same function table
+  through a plain-C accessor.
+- The **QPU-side** wrappers in `lib/realtime/quantinuum`, `lib/realtime/simulation`
+  and `lib/realtime/simulation-cqr`, which compile with `nvq++`.
+
+Consequently the two-process test (`test_decoding_server`) is a full-build
+test: it compiles the caller side, a quantum kernel, with `nvq++`. A
+decoders-only build verifies the server by building and starting it.
 
 ## Building CUDA-QX Documentation from Source
 
