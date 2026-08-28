@@ -464,19 +464,21 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapOptional("dispatch", config.dispatch,
                    cudaq::qec::decoding::config::DecoderDispatch::host);
     io.mapOptional("cuda_device_id", config.cuda_device_id);
-    // The DEM arrives in one of two forms (see decoder_config). Everything
+    // The DEM arrives in one of three forms (see decoder_config). Everything
     // below the mapping calls enforces that exactly one of them is described,
-    // because the chunk form derives the flat fields and a config that spelled
-    // out both could disagree with itself.
+    // because the other two forms derive the flat fields and a config that
+    // spelled out more than one could disagree with itself.
     // A flat configuration names all five on the way out as well as the way
     // in. Emitting only the ones that differ from their defaults would drop a
     // legitimately empty O_sparse (a DEM with no observables) and leave behind
-    // a document that no longer parses. A chunk-form configuration takes the
-    // optional path so its derived fields stay absent, which is what makes the
-    // emitted document re-parse as chunk form.
+    // a document that no longer parses. A chunk-form or DEM-sourced
+    // configuration takes the optional path so its derived fields stay absent,
+    // which is what makes the emitted document re-parse in the form it was
+    // written in.
     const bool emitting_flat_form =
         io.outputting() &&
-        !(config.dem_chunks.has_value() && config.H_sparse.empty());
+        !((config.dem_chunks.has_value() || !config.stim_dem_path.empty()) &&
+          config.H_sparse.empty());
     if (emitting_flat_form) {
       io.mapRequired("block_size", config.block_size);
       io.mapRequired("syndrome_size", config.syndrome_size);
@@ -491,6 +493,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
       io.mapOptional("D_sparse", config.D_sparse, std::vector<std::int64_t>{});
     }
     io.mapOptional("dem_chunks", config.dem_chunks);
+    io.mapOptional("stim_dem_path", config.stim_dem_path, std::string{});
 
     // LLVM's YAML parser records a diagnostic and keeps going, so a malformed
     // document arrives here half-populated. Validate state only if error-free.
@@ -502,6 +505,12 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     // expand_dem_chunks() leaves behind after it runs.
     const bool chunk_form =
         config.dem_chunks.has_value() && config.H_sparse.empty();
+
+    // DEM form when a Stim model file is named. The decoder is built from that
+    // text and derives its own dimensions and observable mapping, so the
+    // checks below that compare against syndrome_size do not apply to it; the
+    // D row count is checked against the constructed decoder instead.
+    const bool from_dem = !config.stim_dem_path.empty();
 
     // Both forms at once is legal but lopsided: H_sparse wins and the chunk
     // spec never runs. expand_dem_chunks() produces exactly this state, so it
@@ -517,6 +526,29 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
           "from dem_chunks.",
           config.id);
 
+    // dem_chunks and stim_dem_path each describe the whole DEM on their own,
+    // and unlike the flat form there is no precedence between them to fall
+    // back on, so a document naming both has to be rejected outright.
+    if (chunk_form && from_dem)
+      throw std::runtime_error(
+          "dem_chunks and stim_dem_path must not both be set for decoder " +
+          std::to_string(config.id) +
+          "; each describes the whole DEM on its own.");
+
+    // Whichever form is in play derives these from the model it names;
+    // accepting them here would let a config disagree with itself.
+    const auto reject_derived = [&config](const char *key, bool present,
+                                          const char *source) {
+      if (present)
+        throw std::runtime_error(
+            std::string(key) + " must not be set for decoder " +
+            std::to_string(config.id) + " because it is derived from " +
+            source +
+            ". Remove it, or describe the whole experiment with "
+            "H_sparse instead of " +
+            source + ".");
+    };
+
     if (chunk_form) {
       if (config.dem_chunks->num_rounds.has_value() &&
           *config.dem_chunks->num_rounds < 2)
@@ -524,24 +556,29 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
             "dem_chunks.num_rounds must be at least 2 for decoder " +
             std::to_string(config.id) + "; got " +
             std::to_string(*config.dem_chunks->num_rounds) + ".");
-      // These are all derived from the phases; accepting them here would let a
-      // config disagree with its own dem_chunks.
-      const auto reject_derived = [&](const char *key, bool present) {
-        if (present)
-          throw std::runtime_error(
-              std::string(key) + " must not be set for decoder " +
-              std::to_string(config.id) +
-              " because it is derived from dem_chunks. Remove it, or describe "
-              "the whole experiment with H_sparse instead of dem_chunks.");
-      };
-      reject_derived("block_size", config.block_size != 0);
-      reject_derived("syndrome_size", config.syndrome_size != 0);
-      reject_derived("O_sparse", !config.O_sparse.empty());
-      reject_derived("D_sparse", !config.D_sparse.empty());
+      reject_derived("block_size", config.block_size != 0, "dem_chunks");
+      reject_derived("syndrome_size", config.syndrome_size != 0, "dem_chunks");
+      reject_derived("O_sparse", !config.O_sparse.empty(), "dem_chunks");
+      reject_derived("D_sparse", !config.D_sparse.empty(), "dem_chunks");
+    } else if (from_dem) {
+      reject_derived("block_size", config.block_size != 0, "stim_dem_path");
+      reject_derived("syndrome_size", config.syndrome_size != 0,
+                     "stim_dem_path");
+      reject_derived("H_sparse", !config.H_sparse.empty(), "stim_dem_path");
+      reject_derived("O_sparse", !config.O_sparse.empty(), "stim_dem_path");
+      // D_sparse is the one model field the DEM text does not carry: it maps
+      // detectors onto the syndrome bits this decoder is sent. Its row count is
+      // checked against the constructed decoder's detector count, which is only
+      // known once the model has been read.
+      if (!io.outputting() && config.D_sparse.empty())
+        throw std::runtime_error(
+            "D_sparse is required for decoder " + std::to_string(config.id) +
+            " alongside stim_dem_path, which describes the DEM but not the "
+            "detectors this decoder is sent.");
     } else {
       // A flat document spells out its whole DEM, so every one of these fields
-      // has to be there. They are mapOptional only because the chunk form
-      // derives them; without this check a document that omits one parses into
+      // has to be there. They are mapOptional only because the other two forms
+      // derive them; without this check a document that omits one parses into
       // a zero-sized DEM and fails much later, at decoder construction.
       if (!io.outputting()) {
         std::string missing;
@@ -559,7 +596,8 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
               " is missing required field(s): " + missing +
               ". A flat DEM names block_size, syndrome_size, H_sparse, "
               "O_sparse and D_sparse together; use dem_chunks "
-              "to describe the same DEM one round at a time instead.");
+              "to describe the same DEM one round at a time, or stim_dem_path "
+              "to name the model text itself, instead.");
       } // end - if(!io.outputting())
 
       if (config.H_sparse.empty() && config.syndrome_size > 0)
@@ -605,7 +643,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     if (!config.D_sparse.empty()) {
       auto num_D_rows =
           std::count(config.D_sparse.begin(), config.D_sparse.end(), -1);
-      if (num_D_rows != config.syndrome_size) {
+      if (!from_dem && num_D_rows != config.syndrome_size) {
         throw std::runtime_error("Number of rows in D_sparse vector is not "
                                  "equal to syndrome_size: " +
                                  std::to_string(num_D_rows) +
@@ -915,6 +953,7 @@ std::string decoder_config_json_schema() {
       {"block_size", llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
       {"syndrome_size",
        llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
+      {"stim_dem_path", llvm::json::Object{{"type", "string"}}},
       {"H_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"O_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"D_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
@@ -1028,9 +1067,9 @@ std::string decoder_config_json_schema() {
            {"type", "object"},
            {"properties", std::move(config_properties)},
            {"required", llvm::json::Array{"id", "type"}},
-           // The DEM is described either flat or as repeated phases. The
-           // parser additionally rejects a chunk-form document that also sets
-           // the derived fields, which is not expressible here.
+           // The DEM is described flat, as repeated phases, or as a Stim model
+           // file. The parser additionally rejects a document that also sets
+           // the fields the latter two derive, which is not expressible here.
            {"anyOf",
             llvm::json::Array{
                 llvm::json::Object{
@@ -1038,7 +1077,10 @@ std::string decoder_config_json_schema() {
                                                    "syndrome_size", "O_sparse",
                                                    "D_sparse"}}},
                 llvm::json::Object{
-                    {"required", llvm::json::Array{"dem_chunks"}}}}},
+                    {"required", llvm::json::Array{"dem_chunks"}}},
+                llvm::json::Object{
+                    {"required",
+                     llvm::json::Array{"stim_dem_path", "D_sparse"}}}}},
            {"additionalProperties", false},
            {"allOf", std::move(dispatch)}}},
       {"decoder_params", std::move(decoder_params)},

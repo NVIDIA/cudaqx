@@ -17,6 +17,57 @@ on:
         required: false
 
 jobs:
+  # Build the decoder stack with CUDAQ_QEC_DECODERS_ONLY=ON: no CUDA-Q
+  # install, no LLVM/MLIR, no cuStabilizer. Guards the decoders-only
+  # configuration against rot and demonstrates a decoder call through the
+  # decoders-only python module.
+  decoders-only-build:
+    name: Decoders-only build (no CUDA-Q)
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ['amd64', 'arm64']
+    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
+    container:
+      image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu13.0-gcc12-main
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Configure and build (decoders only)
+        run: |
+          cmake -S libs/qec -B build_decoders_only \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCUDAQ_QEC_DECODERS_ONLY=ON \
+            -DCUDAQX_QEC_BINDINGS_PYTHON=ON
+          cmake --build build_decoders_only -j$(nproc)
+
+      - name: Smoke test (pymatching decode, no cudaq import)
+        run: |
+          PYTHONPATH=build_decoders_only/python python3 - <<'EOF'
+          import sys
+          assert "cudaq" not in sys.modules
+          import numpy as np
+          import _qec_decoders_standalone
+          qec = _qec_decoders_standalone.qecrt
+          # Distance-4 repetition code (pymatching needs a matching graph:
+          # every H column with at most 2 ones).
+          H = np.array([[1, 1, 0, 0],
+                        [0, 1, 1, 0],
+                        [0, 0, 1, 1]], dtype=np.uint8)
+          decoder = qec.get_decoder("pymatching", H)
+          result = decoder.decode([1, 1, 0])
+          assert result.converged
+          correction = (np.asarray(result.result) >= 0.5).astype(np.uint8)
+          np.testing.assert_array_equal((H @ correction) % 2, [1, 1, 0])
+          assert "cudaq" not in sys.modules
+          print("pymatching decode OK without CUDA-Q:", correction.tolist())
+          EOF
+
   build-and-test:
     name: Build and test
     strategy:
@@ -73,7 +124,7 @@ jobs:
       - name: Install build requirements
         run: |
           apt update
-          apt install -y --no-install-recommends gfortran libblas-dev wget jq
+          apt install -y --no-install-recommends wget jq
 
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'

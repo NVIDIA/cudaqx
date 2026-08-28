@@ -280,7 +280,7 @@ jobs:
           bash scripts/ci/build_metapackages.sh ${{ inputs.version || '0.15.99' }}
           find libs -name dist | xargs ls -la
           mkdir -p /metapackages
-          mv libs/{qec,solvers}/python/metapackages/dist/* /metapackages/
+          mv libs/qec/python/metapackages/dist/* /metapackages/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -387,14 +387,8 @@ jobs:
         shell: bash
         run: |
           apt update
-          apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
+          apt install -y --no-install-recommends unzip openmpi-bin libopenmpi3
           apt install -y --no-install-recommends ca-certificates
-          # If this is x86_64, then install libquadmath0. This is normally
-          # installed by Ubuntu Python, but the action/setup-python package does
-          # not install it.
-          if [ "$(uname -m)" == "x86_64" ]; then
-            apt install -y --no-install-recommends libquadmath0
-          fi
   
       - name: Download CUDA-Q wheels
         if: ${{ inputs.cudaq_wheels == 'Custom' }}
@@ -501,14 +495,8 @@ jobs:
         shell: bash
         run: |
           apt update
-          apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
+          apt install -y --no-install-recommends unzip openmpi-bin libopenmpi3
           apt install -y --no-install-recommends ca-certificates
-          # If this is x86_64, then install libquadmath0. This is normally
-          # installed by Ubuntu Python, but the action/setup-python package does
-          # not install it.
-          if [ "$(uname -m)" == "x86_64" ]; then
-            apt install -y --no-install-recommends libquadmath0
-          fi
           #echo 'core.%p' | tee /proc/sys/kernel/core_pattern
           #echo "Running cat /proc/sys/kernel/core_pattern"
           #cat /proc/sys/kernel/core_pattern

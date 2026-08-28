@@ -31,14 +31,6 @@ Namespaces
     :desc-only:
 .. doxygennamespace:: cudaq::qec::repetition
     :desc-only:
-.. doxygennamespace:: cudaq::solvers
-    :desc-only:
-.. doxygennamespace:: cudaq::solvers::stateprep
-    :desc-only:
-.. doxygennamespace:: cudaq::solvers::adapt
-    :desc-only:
-.. doxygennamespace:: cudaq::optim
-    :desc-only:
 
 Core
 =============

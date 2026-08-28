@@ -111,8 +111,6 @@ exclude_patterns = [
     'api/qec/python_realtime_decoding_api.rst',
     'api/qec/cpp_realtime_decoding_api.rst',
     'api/qec/realtime_pipeline_api.rst',
-    'api/solvers/gqe_api.rst',
-    '_solvers_deprecation.rst',
 ]
 
 # The reST default role (used for this markup: `text`) to use for all documents.
@@ -231,6 +229,8 @@ intersphinx_mapping = {
     'cudaq': ('https://nvidia.github.io/cuda-quantum/latest', None)
 }
 
+_ALGORITHMS_DOCS = "https://nvidia.github.io/cudaq-algorithms/"
+
 redirects = {
     "versions": "../latest/releases.html",
     "components/qec/introduction": "index.html",
@@ -239,6 +239,18 @@ redirects = {
     "examples_rst/qec/stim_dem_decoder": "decoders.html",
     "examples_rst/qec/dem_sampling": "decoders.html",
     "examples_rst/qec/nv_qldpc_gamma_ensemble_user_guide": "../../performance/nv_qldpc_gamma_ensemble_user_guide.html",
+    # CUDA-Q Solvers was removed from CUDA-QX after the 0.6.0 release. Point the
+    # previously published Solvers pages at CUDA-Q Algorithms, which supersedes
+    # it, so existing links and search results do not 404.
+    "components/solvers/introduction": _ALGORITHMS_DOCS,
+    "examples_rst/solvers/examples": _ALGORITHMS_DOCS,
+    "examples_rst/solvers/adapt": _ALGORITHMS_DOCS,
+    "examples_rst/solvers/vqe": _ALGORITHMS_DOCS,
+    "examples_rst/solvers/qaoa": _ALGORITHMS_DOCS,
+    "examples_rst/solvers/gqe": _ALGORITHMS_DOCS,
+    "examples_rst/solvers/molecular_hamiltonians": _ALGORITHMS_DOCS,
+    "api/solvers/cpp_api": _ALGORITHMS_DOCS,
+    "api/solvers/python_api": _ALGORITHMS_DOCS,
 }
 
 nitpick_ignore = [

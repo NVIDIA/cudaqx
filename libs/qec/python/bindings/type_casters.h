@@ -10,7 +10,6 @@
 #include <cstring>
 #include <stdexcept>
 
-#include "common/ObserveResult.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/kwargs_utils.h"
 #include "cuda-qx/core/tensor.h"
@@ -21,92 +20,12 @@
 
 namespace nb = nanobind;
 
+// Casters for CUDA-Q runtime result types (spin_op, sample_result,
+// observe_result) live in cudaq_type_casters.h; they need CUDA-Q headers,
+// which decoder-only translation units must not depend on.
+
 namespace nanobind {
 namespace detail {
-
-template <>
-struct type_caster<cudaq::spin_op> {
-  NB_TYPE_CASTER(cudaq::spin_op, const_name("SpinOperator"))
-
-  bool from_python(handle src, uint8_t, cleanup_list *) noexcept {
-    if (!src)
-      return false;
-    try {
-      auto data = nb::cast<std::vector<double>>(src.attr("serialize")());
-      value = cudaq::spin_op(data);
-      return true;
-    } catch (...) {
-      return false;
-    }
-  }
-
-  static handle from_cpp(cudaq::spin_op v, rv_policy, cleanup_list *) noexcept {
-    try {
-      nb::object tv_py = nb::module_::import_("cudaq").attr("SpinOperator")(
-          v.get_data_representation());
-      return tv_py.release();
-    } catch (...) {
-      return handle();
-    }
-  }
-};
-
-template <>
-struct type_caster<cudaq::sample_result> {
-  NB_TYPE_CASTER(cudaq::sample_result, const_name("SampleResult"))
-
-  bool from_python(handle src, uint8_t, cleanup_list *) noexcept {
-    if (!src)
-      return false;
-    try {
-      auto data = nb::cast<std::vector<std::size_t>>(src.attr("serialize")());
-      value = cudaq::sample_result();
-      value.deserialize(data);
-      return true;
-    } catch (...) {
-      return false;
-    }
-  }
-
-  static handle from_cpp(cudaq::sample_result v, rv_policy,
-                         cleanup_list *) noexcept {
-    try {
-      nb::object tv_py = nb::module_::import_("cudaq").attr("SampleResult")();
-      tv_py.attr("deserialize")(v.serialize());
-      return tv_py.release();
-    } catch (...) {
-      return handle();
-    }
-  }
-};
-
-template <>
-struct type_caster<cudaq::observe_result> {
-  NB_TYPE_CASTER(cudaq::observe_result, const_name("ObserveResult"))
-
-  bool from_python(handle src, uint8_t, cleanup_list *) noexcept {
-    if (!src)
-      return false;
-    try {
-      auto e = nb::cast<double>(src.attr("expectation")());
-      value = cudaq::observe_result(e, cudaq::spin_op());
-      return true;
-    } catch (...) {
-      return false;
-    }
-  }
-
-  static handle from_cpp(cudaq::observe_result v, rv_policy,
-                         cleanup_list *) noexcept {
-    try {
-      nb::object tv_py = nb::module_::import_("cudaq").attr("ObserveResult")(
-          v.expectation(), v.get_spin(), v.raw_data());
-      return tv_py.release();
-    } catch (...) {
-      return handle();
-    }
-  }
-};
 
 template <>
 struct type_caster<cudaqx::heterogeneous_map> {

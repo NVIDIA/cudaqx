@@ -71,7 +71,7 @@ struct decoder_config {
   /// GPU-accelerated decoder, hence at this level rather than inside the
   /// per-decoder custom args. Unset = unpinned.
   std::optional<int> cuda_device_id;
-  /// The five fields below describe the DEM two alternative ways, and exactly
+  /// The fields below describe the DEM three alternative ways, and exactly
   /// one of them applies:
   ///
   ///   - Flat form: H_sparse plus block_size, syndrome_size, O_sparse and
@@ -79,11 +79,21 @@ struct decoder_config {
   ///   - Chunk form: dem_chunks (which carries phases, connections, seam, and
   ///     num_rounds internally). The other five flat fields are derived by
   ///     expanding the phases, and must be omitted.
+  ///   - DEM form: stim_dem_path, the Stim model text itself. The decoder
+  ///     derives its own dimensions and observable mapping from it, so all of
+  ///     the flat fields except D_sparse must be omitted.
   ///
-  /// See expand_dem_chunks() for the derivation, which runs at decoder
-  /// construction so the rest of the pipeline only ever sees the flat form.
+  /// See expand_dem_chunks() for the chunk-form derivation, which runs at
+  /// decoder construction so the rest of the pipeline only ever sees the flat
+  /// form. DEM form stays as it is: the model text is what the decoder is
+  /// built from.
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
+  /// Path to a Stim detector error model. When set, the decoder is
+  /// constructed from the DEM text rather than from `H_sparse`, which is what
+  /// a DEM-native decoder such as Chromobius requires. Interpreted like the
+  /// other model paths in a configuration, relative to the working directory.
+  std::string stim_dem_path;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
