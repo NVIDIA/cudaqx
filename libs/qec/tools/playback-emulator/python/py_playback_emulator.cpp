@@ -24,6 +24,7 @@
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
@@ -33,6 +34,16 @@ namespace nb = nanobind;
 namespace cudaq::qec::playback {
 
 namespace {
+
+/// One event's [first, last) bounds into a log the same size as
+/// request_id_log, clamped so a record pointing past the log slices empty.
+std::pair<std::size_t, std::size_t> request_slice(const record &rec,
+                                                   std::size_t log_size) {
+  const auto first = std::min<std::size_t>(rec.request_id_offset, log_size);
+  const auto last =
+      std::min<std::size_t>(first + rec.request_id_count, log_size);
+  return {first, last};
+}
 
 /// Parses, plans, and runs `schedule_text` in one call -- the session
 /// backend is picked by which one of `decoders` / `udp_endpoints` /
@@ -105,7 +116,10 @@ void bindPlaybackEmulator(nb::module_ &mod) {
              "every other field is left default.")
       .def_ro("deadline_ns", &record::deadline_ns)
       .def_ro("call_ns", &record::call_ns)
-      .def_ro("return_ns", &record::return_ns)
+      .def_ro("return_ns", &record::return_ns,
+             "When this event's last reply/ack landed: the one request's "
+             "reply for reset/get_corrections, or the max over a "
+             "stream/enqueue_data's rounds.")
       .def_prop_ro("status",
                    [](const record &r) {
                      // The two status spaces are disjoint by value
@@ -132,27 +146,46 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def_ro("request_id_count", &record::request_id_count,
              "How many RPCs this event sent: one per round for a stream, one "
              "for every other op, and zero if it sent nothing. Together with "
-             "request_id_offset this slices run_result.request_id_log; "
-             "run_result.request_ids() does the slicing for you.");
+             "request_id_offset this slices run_result.request_id_log and "
+             "the parallel request_dispatch_ns_log/request_return_ns_log/"
+             "request_status_log; run_result.request_ids()/request_timings() "
+             "do the slicing for you.");
 
   nb::class_<run_result>(m, "run_result")
       .def_ro("records", &run_result::records)
       .def_ro("syndrome_log", &run_result::syndrome_log)
       .def_ro("correction_log", &run_result::correction_log)
       .def_ro("request_id_log", &run_result::request_id_log)
+      .def_ro("request_dispatch_ns_log", &run_result::request_dispatch_ns_log)
+      .def_ro("request_return_ns_log", &run_result::request_return_ns_log)
+      .def_ro("request_status_log", &run_result::request_status_log)
       .def("request_ids",
           [](const run_result &r, std::size_t event_index) {
-            const auto &rec = r.records.at(event_index);
-            const auto first = std::min<std::size_t>(rec.request_id_offset,
-                                                     r.request_id_log.size());
-            const auto last = std::min<std::size_t>(
-                first + rec.request_id_count, r.request_id_log.size());
+            const auto [first, last] =
+                request_slice(r.records.at(event_index), r.request_id_log.size());
             return std::vector<std::uint32_t>(r.request_id_log.begin() + first,
                                               r.request_id_log.begin() + last);
           },
           nb::arg("event_index"),
           "That event's slice of request_id_log: every request_id it put on "
           "the wire, in send order, for correlating against a server log.")
+      .def("request_timings",
+          [](const run_result &r, std::size_t event_index) {
+            const auto [first, last] =
+                request_slice(r.records.at(event_index), r.request_id_log.size());
+            std::vector<std::tuple<std::uint32_t, std::uint64_t, std::uint64_t>>
+                out;
+            out.reserve(last - first);
+            for (std::size_t i = first; i < last; ++i)
+              out.emplace_back(r.request_id_log[i], r.request_dispatch_ns_log[i],
+                               r.request_return_ns_log[i]);
+            return out;
+          },
+          nb::arg("event_index"),
+          "That event's requests as (request_id, dispatch_ns, return_ns) "
+          "tuples, in send order -- dispatch_ns is when the timing thread "
+          "put it on the wire, return_ns is when its reply/ack landed (0 if "
+          "never collected).")
       .def_ro("warnings", &run_result::warnings)
       .def_ro("t0_ns", &run_result::t0_ns)
       .def_ro("tick_ns", &run_result::tick_ns)

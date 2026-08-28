@@ -99,18 +99,19 @@ private:
         std::lock_guard<std::mutex> lock(mu_);
         arrivals_.push_back(hdr.function_id);
       }
-      if (hdr.function_id != kGetCorrectionsFunctionId)
-        continue; // enqueue has no reply on the wire
-
       // Answering inline is what makes this a faithful stand-in: the real
       // server runs one dispatcher thread per ring, so a slow decode delays
-      // everything behind it on that ring and nothing else.
-      std::this_thread::sleep_for(decode_time_);
-      std::vector<std::uint8_t> out(sizeof(RPCResponse) + 1, 0);
+      // everything behind it on that ring and nothing else. Only
+      // get_corrections is deliberately slow; enqueue acks immediately, same
+      // as the real server's ingestion-only ack.
+      const bool is_read = hdr.function_id == kGetCorrectionsFunctionId;
+      if (is_read)
+        std::this_thread::sleep_for(decode_time_);
+      std::vector<std::uint8_t> out(sizeof(RPCResponse) + (is_read ? 1 : 0), 0);
       RPCResponse resp{};
       resp.magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
       resp.status = 0;
-      resp.result_len = 1;
+      resp.result_len = is_read ? 1 : 0;
       resp.request_id = hdr.request_id;
       std::memcpy(out.data(), &resp, sizeof(resp));
       ::sendto(fd_, out.data(), out.size(), 0,
@@ -183,7 +184,7 @@ TEST(SessionOrdering, AWaitingCallerDoesNotHoldBackTheNextSend) {
   const auto t0 = std::chrono::steady_clock::now();
   const std::uint32_t t = s->submit({read.data(), read.size()});
   const auto after_submit = ms_since(t0);
-  s->send_async({enqueue.data(), enqueue.size()});
+  s->submit({enqueue.data(), enqueue.size()});
   const auto after_enqueue = ms_since(t0);
 
   EXPECT_LT(after_submit, kDecodeTime.count() / 2)
@@ -298,7 +299,7 @@ TEST(NullBackendAdvanced, FramesOfEverySizeAreDiscardedWithoutCrashingOrReplying
       buf[i] = static_cast<std::uint8_t>(i * 37 + 1);
     const frame f{size ? buf.data() : nullptr, size};
 
-    EXPECT_NO_THROW(s->send_async(f));
+    EXPECT_NO_THROW(s->submit(f));
 
     // Sentinel-filled, so a reply that is never written cannot be mistaken
     // for one that was written with zeros.
@@ -344,7 +345,7 @@ TEST(NullBackendAdvanced, AwaitNeverWritesPastTheSuppliedReplySpan) {
 
 TEST(NullBackendAdvanced, MaxFrameBytesIsUnboundedAndStaysThatWayUnderLoad) {
   // 0 = unbounded, per session.h's comment. Interleaving hundreds of
-  // send_async and submit/await calls with varying frame contents must not
+  // submit calls, some never awaited, with varying frame contents must not
   // disturb it: nothing mutable is shared between calls except the internal
   // checksum accumulator.
   auto s = make_null_session();
@@ -354,7 +355,7 @@ TEST(NullBackendAdvanced, MaxFrameBytesIsUnboundedAndStaysThatWayUnderLoad) {
                                   static_cast<std::uint8_t>(i));
     frame f{buf.data(), buf.size()};
     if (i % 2 == 0) {
-      s->send_async(f);
+      s->submit(f);
     } else {
       std::vector<std::uint8_t> reply(4);
       std::size_t reply_len = 0;

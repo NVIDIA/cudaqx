@@ -22,6 +22,7 @@
 #include <ctime>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
@@ -58,6 +59,13 @@ void sleep_until(std::uint64_t target_ns) {
 /// a startup calibration risks sampling one bad preemption and spinning on
 /// every later deadline for the rest of the run.
 constexpr std::uint64_t kSpinSlackNs = 200'000;
+
+/// The floor between rounds of an unpaced (every==0) stream waiting on
+/// `until=`. Without this, nothing bounds how far ahead of a slow collector
+/// the send loop can get -- a bare yield is only a scheduling hint, not real
+/// backpressure, and an unthrottled sender can pile up a backlog the reader
+/// then takes far longer to drain than the run itself took to build up.
+constexpr std::uint64_t kUnpacedStreamFloorNs = 50'000;
 
 /// Saturating add. A deadline far enough out to overflow the clock is
 /// clamped to "never" 
@@ -186,7 +194,8 @@ bool mismatches_expected(const schedule &sched, const event &e, const std::uint8
         !std::equal(bits, bits + n, sched.expected_arena.begin() + e.expected_offset);
 }
 
-/// Reject a schedule whose `until=` can never come up before it is asked for
+/// Reject a schedule whose `until=`/`after=` can never come up before it is
+/// asked for.
 void check_signal_order(const schedule &sched) {
   std::vector<bool> raised(sched.signal_names.size(), false);
   for (std::size_t i = 0; i < sched.events.size(); ++i) {
@@ -196,6 +205,11 @@ void check_signal_order(const schedule &sched) {
       throw std::invalid_argument(
           "event " + std::to_string(i) + " streams until signal '" +
           sched.signal_names[e.until_signal_id] +
+          "', which no earlier 'signal=' event raises");
+    if (e.after_signal_id != kNoSignal && !raised[e.after_signal_id])
+      throw std::invalid_argument(
+          "event " + std::to_string(i) + " dispatches after signal '" +
+          sched.signal_names[e.after_signal_id] +
           "', which no earlier 'signal=' event raises");
     if (e.signal_id != kNoSignal)
       raised[e.signal_id] = true;
@@ -336,35 +350,80 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
 
 namespace {
 
-/// Collects one decoder's blocking responses, keeping the wait off the
-/// timing thread that issued them. One thread per session: a decoder answers
-/// its own requests in arrival order, so awaiting in submission order never
-/// waits on the wrong one.
+/// How long a reader parks in wait_next_completion between checks of its own
+/// close()/deadline state -- the heartbeat that lets close() notice progress
+/// without a dedicated wake channel.
+constexpr auto kCompletionPollMs = std::chrono::milliseconds(20);
+
+/// One collected reply: its status and when it landed (ns since t0).
+struct collected {
+  RpcStatus status = RpcStatus::OK;
+  std::uint64_t return_ns = 0;
+};
+
+/// Collects every RPC's reply, one thread per session.
+/// Completion is arrival order: `wait_next_completion`
+/// reports whichever request finished first.
 class reader_thread {
 public:
   struct pending {
     std::uint32_t request_id = 0;
     std::uint32_t event_index = 0;
+    std::uint32_t log_index = 0; // into request_return_ns_log/request_status_log
   };
 
-  /// `collect` fills in the record and raises the signal, if the event
-  /// carries one; it runs on this thread, one reply at a time. It may only
-  /// ever `await` on the session it is handed
-  reader_thread(session &s, std::function<void(session &, const pending &)> collect)
-      : session_(s), collect_(std::move(collect)), thread_([this] { loop(); }) {}
+  /// One event's requests, as they land. `term` is the stream/enqueue_data
+  /// termination reason (nullopt for reset/get_corrections, which read
+  /// `last_status` directly instead).
+  struct progress {
+    std::uint32_t issued = 0, collected = 0;
+    bool issuing_finished = false;
+    std::optional<std::int32_t> term;
+    std::uint64_t last_return_ns = 0;
+    RpcStatus last_status = RpcStatus::OK;
+    bool any_error = false;
+  };
+
+  using collect_fn = std::function<collected(session &, const pending &)>;
+  using complete_fn = std::function<void(std::uint32_t event_index, const progress &)>;
+
+  /// `collect` awaits and records one reply; `complete` runs once an event's
+  /// requests are all collected, and owns writing that event's record.
+  reader_thread(session &s, collect_fn collect, complete_fn complete,
+               std::chrono::nanoseconds drain_timeout)
+      : session_(s), collect_(std::move(collect)), complete_(std::move(complete)),
+        drain_timeout_(drain_timeout), thread_([this] { loop(); }) {}
 
   ~reader_thread() { close(); }
 
-  void submit(pending p) {
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      queue_.push_back(p);
-    }
-    cv_.notify_one();
+  /// Registers a reply expected under `p.request_id`. Must be called before
+  /// the frame carrying that id is submitted, or a fast reply can land
+  /// before anyone is watching for it.
+  void expect(pending p) {
+    std::lock_guard<std::mutex> lock(mu_);
+    outstanding_[p.request_id] = p;
+    ++progress_[p.event_index].issued;
   }
 
-  /// Drain what is outstanding and stop. Called before run() returns, so
-  /// every record a reader owns is complete by the time anyone reads it.
+  /// No more requests are coming for this event.
+  void finish_issuing(std::uint32_t event_index,
+                      std::optional<std::int32_t> term = std::nullopt) {
+    std::optional<progress> done;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      auto &prog = progress_[event_index];
+      prog.issuing_finished = true;
+      prog.term = term;
+      if (prog.collected == prog.issued)
+        done = extract_locked(event_index, prog);
+    }
+    if (done)
+      complete_(event_index, *done);
+  }
+
+  /// Drain what is outstanding, up to drain_timeout, and stop. Called before
+  /// run() returns, so every record a reader owns is settled by the time
+  /// anyone reads it.
   void close() {
     {
       std::lock_guard<std::mutex> lock(mu_);
@@ -372,53 +431,106 @@ public:
         return;
       closed_ = true;
     }
-    cv_.notify_all();
     if (thread_.joinable())
       thread_.join();
   }
 
 private:
+  // Caller holds mu_; erases the event's progress and hands the caller its
+  // final value.
+  progress extract_locked(std::uint32_t event_index, progress &prog) {
+    progress out = prog;
+    progress_.erase(event_index);
+    return out;
+  }
+
   void loop() {
+    std::optional<std::chrono::steady_clock::time_point> drain_deadline;
     for (;;) {
-      pending p;
-      {
-        std::unique_lock<std::mutex> lock(mu_);
-        cv_.wait(lock, [&] { return closed_ || !queue_.empty(); });
-        if (queue_.empty())
-          return;
-        p = queue_.front();
-        queue_.pop_front();
+      std::uint32_t rid;
+      if (session_.wait_next_completion(rid, kCompletionPollMs)) {
+        pending p;
+        bool found;
+        {
+          std::lock_guard<std::mutex> lock(mu_);
+          auto it = outstanding_.find(rid);
+          found = it != outstanding_.end();
+          if (found) {
+            p = it->second;
+            outstanding_.erase(it);
+          }
+        }
+        if (!found)
+          continue; // not one of ours, or already swept by close()
+        const collected result = collect_(session_, p);
+        std::optional<progress> done;
+        {
+          std::lock_guard<std::mutex> lock(mu_);
+          auto &prog = progress_[p.event_index];
+          ++prog.collected;
+          prog.last_return_ns = std::max(prog.last_return_ns, result.return_ns);
+          prog.last_status = result.status;
+          prog.any_error |= result.status != RpcStatus::OK &&
+                            result.status != RpcStatus::NOT_READY;
+          if (prog.issuing_finished && prog.collected == prog.issued)
+            done = extract_locked(p.event_index, prog);
+        }
+        if (done)
+          complete_(p.event_index, *done);
+        continue;
       }
-      collect_(session_, p);
+
+      std::unique_lock<std::mutex> lock(mu_);
+      if (!closed_)
+        continue;
+      if (outstanding_.empty() && progress_.empty())
+        return;
+      if (!drain_deadline)
+        drain_deadline = std::chrono::steady_clock::now() + drain_timeout_;
+      if (std::chrono::steady_clock::now() < *drain_deadline)
+        continue;
+      std::vector<std::pair<std::uint32_t, progress>> leftover(progress_.begin(),
+                                                                progress_.end());
+      progress_.clear();
+      outstanding_.clear();
+      lock.unlock();
+      for (auto &[event_index, prog] : leftover)
+        complete_(event_index, prog);
+      return;
     }
   }
 
   session &session_;
-  std::function<void(session &, const pending &)> collect_;
+  collect_fn collect_;
+  complete_fn complete_;
+  std::chrono::nanoseconds drain_timeout_;
   std::mutex mu_;
-  std::condition_variable cv_;
-  std::deque<pending> queue_;
+  std::unordered_map<std::uint32_t, pending> outstanding_; // by request_id
+  std::unordered_map<std::uint32_t, progress> progress_;   // by event_index
   bool closed_ = false;
   std::thread thread_; // last, so loop() only ever sees initialized members
 };
 
 /// Everything the timing thread and the reader threads share, in one place
-/// Built on run()'s stack. 
+/// Built on run()'s stack.
 struct run_state {
   // One global request_id space
   std::atomic<std::uint32_t> next_request_id{1};
   std::atomic<bool> aborted{false};
-  /// Guards the shared syndrome/correction logs, which the timing thread and
-  /// any reader thread both append to. 
+  /// Guards the shared syndrome/correction logs and the per-request timing
+  /// logs, which the timing thread and any reader thread both append to.
   std::mutex logs_mu;
 
   /// One flag per signal name in the schedule, raised by a reader thread
-  /// when a `signal=` read's answer lands and read at a stream's round
-  /// boundaries. Plain atomics suffice -- nothing ever needs to sleep until
-  /// a raise, because a waiting stream always has rounds to send meanwhile.
+  /// once a `signal=` event's reply/acks are all collected, and read at a
+  /// stream's round boundaries (`until=`) or before an `after=` dispatch.
+  /// Plain atomics suffice for `until=` -- nothing there ever needs to sleep
+  /// until a raise, because a waiting stream always has rounds to send
+  /// meanwhile; `after=` does sleep, in a short bounded poll (see
+  /// dispatch_event), rather than adding a wake channel for a rare case.
   std::vector<std::atomic<bool>> signals;
 
-  /// One reader per decoder that has at least one `signal=` read.
+  /// One reader per decoder present in the schedule.
   std::unordered_map<std::uint64_t, std::unique_ptr<reader_thread>> readers;
 
   reader_thread &reader(std::uint64_t decoder_id) {
@@ -475,31 +587,44 @@ void abort_on_hard_error(const run_ctx &c, RpcStatus status, std::uint32_t i) {
                 std::to_string(static_cast<int>(status)) + "; aborting the run");
 }
 
-/// Take the next request_id and note it against `rec`. Every RPC the run puts
-/// on the wire goes through here, so `request_id_log` ends up holding all of
-/// them in issue order and each record's slice of it is what that event sent.
-std::uint32_t issue_request_id(const run_ctx &c, record &rec) {
+/// One request's slot in the per-request logs.
+struct issued_request {
+  std::uint32_t rid;
+  std::uint32_t log_index;
+};
+
+/// Take the next request_id, open its per-request log slots, and (for a
+/// stream round) record the bits it is about to send. Every RPC the run puts
+/// on the wire goes through here, so `request_id_log` (and the parallel
+/// dispatch/return/status logs) end up holding all of them in issue order,
+/// and each record's slice of it is what that event sent.
+issued_request begin_request(const run_ctx &c, record &rec,
+                             const std::uint8_t *bits = nullptr,
+                             std::size_t n_bits = 0, bool first_round = false) {
   const std::uint32_t rid =
       c.st.next_request_id.fetch_add(1, std::memory_order_relaxed);
+  std::lock_guard<std::mutex> lock(c.st.logs_mu);
+  const auto idx = static_cast<std::uint32_t>(c.result.request_id_log.size());
   if (rec.request_id_count == 0)
-    rec.request_id_offset =
-        static_cast<std::uint32_t>(c.result.request_id_log.size());
+    rec.request_id_offset = idx;
   c.result.request_id_log.push_back(rid);
+  c.result.request_dispatch_ns_log.push_back(0);
+  c.result.request_return_ns_log.push_back(0);
+  c.result.request_status_log.push_back(kNoStatus);
   ++rec.request_id_count;
-  return rid;
+  if (bits) {
+    if (first_round)
+      rec.syndrome_offset =
+          static_cast<std::uint32_t>(c.result.syndrome_log.size());
+    c.result.syndrome_log.insert(c.result.syndrome_log.end(), bits, bits + n_bits);
+    rec.syndrome_count += static_cast<std::uint32_t>(n_bits);
+  }
+  return {rid, idx};
 }
 
-/// Record one outgoing round's bits against `rec` and append them to the
-/// run's shared syndrome log. `first` marks the round that owns
-/// `rec.syndrome_offset`; every round adds to `rec.syndrome_count`.
-void log_syndromes(const run_ctx &c, record &rec, const std::uint8_t *bits,
-                   std::size_t n, bool first) {
-  std::lock_guard<std::mutex> lock(c.st.logs_mu);
-  if (first)
-    rec.syndrome_offset =
-        static_cast<std::uint32_t>(c.result.syndrome_log.size());
-  c.result.syndrome_log.insert(c.result.syndrome_log.end(), bits, bits + n);
-  rec.syndrome_count += static_cast<std::uint32_t>(n);
+/// Timing-thread-only element write, right after the frame is on the wire 
+void stamp_dispatch(const run_ctx &c, std::uint32_t log_index) {
+  c.result.request_dispatch_ns_log[log_index] = now_ns() - c.t0;
 }
 
 /// One `stream` or `enqueue_data` event: draw a round, send it, decide
@@ -572,22 +697,23 @@ void run_stream(const run_ctx &c, std::uint32_t i,
 
     // Where this round's bits live and how its frame is produced are the
     // only things the two modes disagree on.
-    const std::uint32_t rid = issue_request_id(c, rec);
-    const std::uint8_t *bits;
-    std::size_t n_bits;
+    const std::uint8_t *bits = prebuilt ? plan.sched.syndrome_arena.data() +
+                                              ep[rounds].bits_offset
+                                        : drawn.data();
+    const std::size_t n_bits = prebuilt ? ep[rounds].bits_count : drawn.size();
+    const auto [rid, log_index] = begin_request(c, rec, bits, n_bits, rounds == 0);
+    reader_thread::pending p{rid, i, log_index};
     if (prebuilt) {
       const round_plan &rp = ep[rounds];
-      bits = plan.sched.syndrome_arena.data() + rp.bits_offset;
-      n_bits = rp.bits_count;
       set_request_id(plan.frame_arena.data() + rp.frame_offset, rid);
-      s.send_async(frame_of(plan, rp));
+      st.reader(e.decoder_id).expect(p);
+      s.submit(frame_of(plan, rp));
     } else {
-      bits = drawn.data();
-      n_bits = drawn.size();
       set_request_id(built.data(), rid);
-      s.send_async({built.data(), built.size()});
+      st.reader(e.decoder_id).expect(p);
+      s.submit({built.data(), built.size()});
     }
-    log_syndromes(c, rec, bits, n_bits, /*first=*/rounds == 0);
+    stamp_dispatch(c, log_index);
     ++rounds;
 
     if (rounds < e.stream_min_rounds)
@@ -596,75 +722,98 @@ void run_stream(const run_ctx &c, std::uint32_t i,
     if (e.until_signal_id == kNoSignal || st.signal_raised(e.until_signal_id))
       break;
 
-    // Unpaced (every==0): this is the loop's only yield point, so block
-    // briefly rather than spinning -- otherwise this thread can starve the
-    // reader that owes us the raise of a core outright. Paced (every>0):
-    // wait_until() above already slept.
+    // Unpaced (every==0): this is the loop's only yield point, and the only
+    // thing capping how far ahead of the reader it can get. Paced (every>0)
+    // doesn't need this -- wait_until() above already spaced the rounds out.
     if (e.stream_every_ticks == 0)
-      std::this_thread::sleep_for(std::chrono::nanoseconds(kSpinSlackNs));
+      std::this_thread::sleep_for(std::chrono::nanoseconds(kUnpacedStreamFloorNs));
   }
 
-  rec.status = static_cast<std::int32_t>(term);
   rec.rounds_streamed = rounds;
+  st.reader(e.decoder_id).finish_issuing(i, static_cast<std::int32_t>(term));
 }
 
-/// Collect one submitted request's bare acknowledgement
-void collect_ack(const run_ctx &c, std::uint32_t i, session &s,
-                 std::uint32_t request_id) {
-  record &rec = c.rec(i);
+/// Stamps one request's timing-log slot with its outcome. Reads the clock
+/// before taking the lock, so lock contention never inflates the measurement.
+collected stamp_request_result(const run_ctx &c, std::uint32_t log_index,
+                               RpcStatus status) {
+  const collected result{status, now_ns() - c.t0};
+  std::lock_guard<std::mutex> lock(c.st.logs_mu);
+  c.result.request_return_ns_log[log_index] = result.return_ns;
+  c.result.request_status_log[log_index] = static_cast<std::int32_t>(status);
+  return result;
+}
+
+/// Collect one submitted request's bare acknowledgement (reset, or one
+/// stream/enqueue_data round). `abort_on_bad_status` gates whether a
+/// non-OK/NOT_READY status aborts the run. 
+collected collect_ack(const run_ctx &c, const reader_thread::pending &p,
+                      session &s, bool abort_on_bad_status) {
   std::size_t reply_len = 0;
-  const auto status = s.await(request_id, {}, reply_len);
-  rec.status = static_cast<std::int32_t>(status);
-  abort_on_hard_error(c, status, i);
+  const auto status = s.await(p.request_id, {}, reply_len);
+  if (abort_on_bad_status)
+    abort_on_hard_error(c, status, p.event_index);
+  return stamp_request_result(c, p.log_index, status);
 }
 
-/// Collect one submitted read's answer into `rec` and the run's correction
-/// log. 
-void collect_corrections(const run_ctx &c, std::uint32_t i, session &s,
-                         std::uint32_t request_id) {
+/// Collect one submitted read's answer into its record and the run's
+/// correction log. get_corrections is always exactly one request per record,
+/// so (unlike collect_ack) it is safe to write the record here directly.
+collected collect_corrections(const run_ctx &c, const reader_thread::pending &p,
+                              session &s) {
+  const std::uint32_t i = p.event_index;
   const event &e = c.ev(i);
   record &rec = c.rec(i);
   const std::uint32_t return_size = return_size_for(e);
   std::vector<std::uint8_t> reply(wire::bit_packed_bytes(return_size));
   std::size_t reply_len = 0;
-  const auto raw_status = s.await(request_id, reply, reply_len);
+  const auto raw_status = s.await(p.request_id, reply, reply_len);
   const RpcStatus status =
       reject_truncated_reply(raw_status, reply_len, return_size);
-  rec.status = static_cast<std::int32_t>(status);
   if (status != RpcStatus::OK) {
     abort_on_hard_error(c, status, i);
-    return;
+    return stamp_request_result(c, p.log_index, status);
   }
   rec.read_completed = true;
   rec.correction_count = return_size;
-  std::lock_guard<std::mutex> lock(c.st.logs_mu);
-  rec.correction_offset =
-      static_cast<std::uint32_t>(c.result.correction_log.size());
-  append_unpacked_bits(c.result.correction_log, reply.data(), return_size);
+  {
+    std::lock_guard<std::mutex> lock(c.st.logs_mu);
+    rec.correction_offset =
+        static_cast<std::uint32_t>(c.result.correction_log.size());
+    append_unpacked_bits(c.result.correction_log, reply.data(), return_size);
+  }
   rec.correction_mismatch =
       mismatches_expected(c.plan.sched, e,
                           c.result.correction_log.data() + rec.correction_offset,
                           return_size);
+  return stamp_request_result(c, p.log_index, status);
 }
 
-/// Collect one submitted request's answer. 
-void collect_reply(const run_ctx &c, std::uint32_t i, session &s,
-                   std::uint32_t request_id) {
-  if (c.ev(i).op == operation::get_corrections)
-    collect_corrections(c, i, s, request_id);
-  else
-    collect_ack(c, i, s, request_id);
+/// Collect one submitted request's answer, by op.
+collected collect_reply(const run_ctx &c, const reader_thread::pending &p,
+                        session &s) {
+  switch (c.ev(p.event_index).op) {
+  case operation::get_corrections:
+    return collect_corrections(c, p, s);
+  case operation::reset:
+    return collect_ack(c, p, s, /*abort_on_bad_status=*/true);
+  case operation::stream:
+  case operation::enqueue_data:
+    return collect_ack(c, p, s, c.plan.params.collect_enqueue_acks);
+  }
+  return collect_ack(c, p, s, true); // unreachable
 }
 
 } // namespace
 
 /// One event, dispatched on run()'s single timing thread. `prev_return_ns`
-/// is when the previous event finished being dispatched here.
+/// is when the previous event finished being dispatched here. Every op
+/// submits and returns without waiting -- a reader thread collects the
+/// reply/acks and owns writing `rec.return_ns`/`rec.status`.
 void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
                     std::uint64_t &prev_return_ns) {
   auto &plan = c.plan;
   auto &st = c.st;
-  auto &sched = plan.sched;
   const auto &e = c.ev(i);
   const auto &ep = plan.event_plans[i];
   auto &rec = c.rec(i);
@@ -677,23 +826,26 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
   rec.deadline_ns = deadline_ns;
 
   wait_until(add_sat(t0, deadline_ns));
+  if (e.after_signal_id != kNoSignal) {
+    while (!st.signal_raised(e.after_signal_id)) {
+      if (st.aborted.load(std::memory_order_relaxed))
+        return; // aborted while waiting on `after=`; never dispatched
+      std::this_thread::sleep_for(std::chrono::nanoseconds(kSpinSlackNs));
+    }
+  }
   rec.call_ns = now_ns() - t0;
   rec.dispatched = true;
-
-  // True for `reset`/`get_corrections`: their record is finished by a
-  // reader thread instead of here, so this thread must not stamp it as
-  // done below.
-  bool async_reply = false;
 
   switch (e.op) {
   case operation::reset:
   case operation::get_corrections: {
     const auto &rp = ep[0];
-    set_request_id(plan.frame_arena.data() + rp.frame_offset,
-                   issue_request_id(c, rec));
-    const std::uint32_t req = s.submit(frame_of(plan, rp));
-    st.reader(decoder_id).submit({req, i});
-    async_reply = true;
+    const auto [rid, log_index] = begin_request(c, rec);
+    set_request_id(plan.frame_arena.data() + rp.frame_offset, rid);
+    st.reader(decoder_id).expect({rid, i, log_index});
+    s.submit(frame_of(plan, rp));
+    stamp_dispatch(c, log_index);
+    st.reader(decoder_id).finish_issuing(i);
     break;
   }
   case operation::stream:
@@ -703,10 +855,7 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
     break;
   }
 
-  const std::uint64_t done_ns = now_ns() - t0;
-  if (!async_reply)
-    rec.return_ns = done_ns;
-  prev_return_ns = done_ns; // the timeline is free either way
+  prev_return_ns = now_ns() - t0; // the timeline is free either way
 }
 
 run_result run(std::shared_ptr<run_plan> p) {
@@ -736,25 +885,35 @@ run_result run(std::shared_ptr<run_plan> p) {
   st.signals = std::vector<std::atomic<bool>>(sched.signal_names.size());
 
   const run_ctx c{plan, result, st, t0};
+  const std::chrono::nanoseconds ack_drain_timeout(plan.params.ack_drain_timeout_ns);
 
-  // One reader per decoder that has a `reset` or `get_corrections` event that
-  // could block the timing thread.
+  // One reader per decoder present in the schedule.
   for (const auto &e : sched.events) {
-    const bool unblocking =
-        e.op == operation::reset || e.op == operation::get_corrections;
-    if (!unblocking || st.readers.count(e.decoder_id))
+    if (st.readers.count(e.decoder_id))
       continue;
     st.readers.emplace(
         e.decoder_id,
         std::make_unique<reader_thread>(
             *plan.router.at(e.decoder_id),
-            [c](session &s, const reader_thread::pending &pd) {
-              collect_reply(c, pd.event_index, s, pd.request_id);
-              c.rec(pd.event_index).return_ns = now_ns() - c.t0;
-              const auto signal_id = c.ev(pd.event_index).signal_id;
+            [c](session &s, const reader_thread::pending &p) {
+              return collect_reply(c, p, s);
+            },
+            [c](std::uint32_t event_index, const reader_thread::progress &prog) {
+              if (prog.collected < prog.issued)
+                warn(c, event_label(c, event_index) + ": " +
+                            std::to_string(prog.issued - prog.collected) +
+                            " request(s) never got a reply; giving up on them");
+              record &rec = c.rec(event_index);
+              rec.return_ns = prog.collected ? prog.last_return_ns : now_ns() - c.t0;
+              rec.status = prog.term ? (prog.any_error
+                                            ? static_cast<std::int32_t>(stream_terminate::ERROR)
+                                            : *prog.term)
+                                     : static_cast<std::int32_t>(prog.last_status);
+              const auto signal_id = c.ev(event_index).signal_id;
               if (signal_id != kNoSignal)
                 c.st.raise_signal(signal_id);
-            }));
+            },
+            ack_drain_timeout));
   }
 
   // The whole dispatch model: one thread, schedule order. 
@@ -798,12 +957,13 @@ safe_bit_span(const std::vector<std::uint8_t> &arena, std::uint32_t offset,
   return {arena.data() + offset, std::min<std::size_t>(count, arena.size() - offset)};
 }
 
-/// One record's request_ids as a single space-separated cell: variable-length
-/// like the hex columns, and free of commas so it needs no CSV quoting.
-/// Bounds-checked the same way, so a record pointing past the log renders
-/// empty rather than reading off the end.
-std::string join_request_ids(const std::vector<std::uint32_t> &log,
-                             std::uint32_t offset, std::uint32_t count) {
+/// One record's slice of a per-request log as a single space-separated cell:
+/// variable-length like the bit columns, and free of commas so it needs no
+/// CSV quoting. Bounds-checked the same way, so a record pointing past the
+/// log renders empty rather than reading off the end.
+template <typename T>
+std::string join_log(const std::vector<T> &log, std::uint32_t offset,
+                     std::uint32_t count) {
   if (log.empty() || offset >= log.size())
     return {};
   const std::size_t n = std::min<std::size_t>(count, log.size() - offset);
@@ -820,9 +980,9 @@ std::string join_request_ids(const std::vector<std::uint32_t> &log,
 
 void write_csv(const run_result &result, std::ostream &out) {
   out << "event_index,decoder_id,op,deadline_ns,call_ns,return_ns,"
-         "lateness_ns,latency_ns,status,rounds_streamed,read_completed,"
+         "status,rounds_streamed,read_completed,"
          "syndrome_bits,correction_bits,correction_mismatch,request_ids,"
-         "dispatched\n";
+         "dispatched,request_dispatch_ns,request_return_ns\n";
   for (const auto &r : result.records) {
     const auto [syndrome_bits, syndrome_n] =
         safe_bit_span(result.syndrome_log, r.syndrome_offset, r.syndrome_count);
@@ -830,17 +990,19 @@ void write_csv(const run_result &result, std::ostream &out) {
         result.correction_log, r.correction_offset, r.correction_count);
     out << r.event_index << ',' << r.decoder_id << ',' << to_string(r.op) << ','
         << r.deadline_ns << ',' << r.call_ns << ',' << r.return_ns << ','
-        << static_cast<std::int64_t>(r.call_ns) - static_cast<std::int64_t>(r.deadline_ns)
-        << ','
-        << static_cast<std::int64_t>(r.return_ns) - static_cast<std::int64_t>(r.call_ns)
-        << ',' << r.status << ',' << r.rounds_streamed << ',' << (r.read_completed ? 1 : 0)
+        << r.status << ',' << r.rounds_streamed << ',' << (r.read_completed ? 1 : 0)
         << ',' << bits_to_string(syndrome_bits, syndrome_n) << ','
         << bits_to_string(correction_bits, correction_n) << ','
         << (r.correction_mismatch ? 1 : 0) << ','
-        << join_request_ids(result.request_id_log, r.request_id_offset,
-                            r.request_id_count)
+        << join_log(result.request_id_log, r.request_id_offset, r.request_id_count)
         << ','
-        << (r.dispatched ? 1 : 0) << '\n';
+        << (r.dispatched ? 1 : 0) << ','
+        << join_log(result.request_dispatch_ns_log, r.request_id_offset,
+                    r.request_id_count)
+        << ','
+        << join_log(result.request_return_ns_log, r.request_id_offset,
+                    r.request_id_count)
+        << '\n';
   }
 }
 

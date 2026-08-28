@@ -36,6 +36,12 @@ schedule parse(std::string_view text,
 
 struct run_params {
   std::uint64_t lead_in_ns = 20'000'000; // 20 ms before t0
+  // How long close() waits, after dispatch ends, for acks still in flight
+  // before giving up on them and recording INTERNAL_ERROR.
+  std::uint64_t ack_drain_timeout_ns = 1'000'000'000;
+  // A bad stream/enqueue_data ack aborts the run, same as every other op,
+  // unless the peer is known not to ack enqueue faithfully.
+  bool collect_enqueue_acks = true;
 };
 
 /// One pre-serialized round: where its frame sits in the run_plan's frame
@@ -76,11 +82,11 @@ plan(const schedule &sched, const std::unordered_map<std::uint64_t, session *> &
      const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
      const run_params &params = {});
 
-/// Run the plan on one timing thread: wait_until(t0+deadline), dispatch,
-/// record, in schedule order. `reset`/`get_corrections` submit and return
-/// without waiting; a reader thread per session collects the answer and
-/// raises `signal=` if carried. A hard error aborts without truncating
-/// `result.records`; `record::dispatched` marks what actually ran.
+/// Run the plan on one timing thread: wait_until(t0+deadline), submit,
+/// record, in schedule order -- every RPC submits and returns without
+/// waiting; a reader thread per session collects replies as they arrive and
+/// raises `signal=` once an event's are all in. A hard error aborts without
+/// truncating `result.records`; `record::dispatched` marks what actually ran.
 run_result run(std::shared_ptr<run_plan> plan);
 
 /// Downstream analysis writes CSV. One row per record: identity, timings, derived lateness/latency, status,

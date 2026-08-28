@@ -17,6 +17,7 @@
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -56,28 +57,30 @@ struct frame {
   std::size_t size = 0;
 };
 
-/// Anything that can carry an RPC frame to a decoder and bring a reply back,
-/// ignorant of which RPC it holds -- only "fire-and-forget" vs. "blocking
-/// with a reply". SINGLE PUBLISHER: `send_async`/`submit` from one thread
-/// only, so program order is wire order; `await` alone is safe from other
-/// threads, one per distinct request_id. LIFETIME: no thread may be inside
-/// any method when the session is destroyed.
+/// Anything that can carry an RPC frame to a decoder and bring a reply back.
+/// Every RPC gets a reply -- there is no fire-and-forget case. SINGLE
+/// PUBLISHER: `submit` from one thread only, so program order is wire order;
+/// `await` alone is safe from other threads, one per distinct request_id.
+/// SINGLE COLLECTOR: at most one thread may call `wait_next_completion` at a
+/// time -- the reader owns it exclusively (one reader per session). LIFETIME:
+/// no thread may be inside any method when the session is destroyed.
 class session {
 public:
   virtual ~session() = default;
 
-  /// Fire-and-forget. Returns once the frame is published. Used for RPCs
-  /// with no reply on the wire. Call from the publishing thread only.
-  virtual void send_async(const frame &f) = 0;
-
-  /// Publish a frame whose reply is collected later, and return the
-  /// request_id it will come back under. Returns as soon as the frame is
-  /// published: never waits on the decoder. Call from the publishing thread
-  /// only.
+  /// Publish a frame and return the request_id its reply will come back
+  /// under. Returns as soon as the frame is published: never waits on the
+  /// decoder. Call from the publishing thread only.
   virtual std::uint32_t submit(const frame &f) = 0;
 
+  /// Block until some submitted request's reply is ready to `await()`, and
+  /// report its id. False on timeout, with `request_id` untouched. Does not
+  /// consume the reply -- a later `await()` for that id still works.
+  virtual bool wait_next_completion(std::uint32_t &request_id,
+                                    std::chrono::milliseconds timeout) = 0;
+
   /// Collect `request_id`'s reply, blocking the caller. Returns the
-  /// RpcStatus; on OK with a result body, copies the (still bit-packed) reply
+  /// RpcStatus. On OK with a result body, copies the (still bit-packed) reply
   /// into `reply`. Safe to call from a thread other than the publisher, and
   /// from two threads at once so long as they name different request_ids.
   virtual RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
@@ -112,7 +115,7 @@ make_inproc_sessions(
 /// Connected UDP client session(s) to a decoding server speaking the wire
 /// format in decoder_rpc_wire_format.h. `endpoints` maps decoder_id ->
 /// "host:port"; one session per decoder_id
-/// `timeout_ms` bounds how long await() waits on a silent socket.
+/// `timeout_ms` bounds how long any one request waits for its own reply.
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
 make_udp_sessions(const std::unordered_map<std::uint64_t, std::string> &endpoints,
                    std::uint32_t timeout_ms = 200);

@@ -15,8 +15,11 @@
 #include "session.h"
 
 #include <algorithm>
+#include <condition_variable>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -27,21 +30,36 @@ public:
   virtual RpcStatus send_sync(const frame &f, std::span<std::uint8_t> reply,
                               std::size_t &reply_len) = 0;
 
-  void send_async(const frame &f) override {
-    std::size_t ignored = 0;
-    send_sync(f, {}, ignored);
-  }
-
+  // Echoes the frame's own request_id, same as every real backend, so a
+  // reader can key completions by id consistently.
   std::uint32_t submit(const frame &f) override {
+    if (f.size < sizeof(cudaq::realtime::RPCHeader))
+      throw std::invalid_argument("blocking_session: frame is smaller than RPCHeader");
+    const std::uint32_t id =
+        reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)->request_id;
     auto held = std::make_shared<held_reply>();
     held->bytes.resize(kHeldReplyBytes);
     std::size_t len = 0;
     held->status = send_sync(f, held->bytes, len);
     held->bytes.resize(len);
-    std::lock_guard<std::mutex> lock(mu_);
-    const std::uint32_t id = next_request_id_++;
-    held_[id] = std::move(held);
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      held_[id] = std::move(held);
+      completed_.push_back(id);
+    }
+    completed_cv_.notify_one();
     return id;
+  }
+
+  bool wait_next_completion(std::uint32_t &request_id,
+                            std::chrono::milliseconds timeout) override {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (!completed_cv_.wait_for(lock, timeout,
+                               [&] { return !completed_.empty(); }))
+      return false;
+    request_id = completed_.front();
+    completed_.pop_front();
+    return true;
   }
 
   RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
@@ -73,7 +91,8 @@ private:
   };
 
   std::mutex mu_;
-  std::uint32_t next_request_id_ = 1;
+  std::condition_variable completed_cv_;
+  std::deque<std::uint32_t> completed_;
   std::unordered_map<std::uint32_t, std::shared_ptr<held_reply>> held_;
 };
 

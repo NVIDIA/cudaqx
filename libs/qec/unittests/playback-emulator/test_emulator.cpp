@@ -49,6 +49,9 @@ run_result make_sample_result() {
   rec.request_id_offset = 0;
   rec.request_id_count = 1;
   r.request_id_log = {7};
+  r.request_dispatch_ns_log.push_back(1100);
+  r.request_return_ns_log.push_back(1500);
+  r.request_status_log.push_back(0);
   r.records.push_back(rec);
   return r;
 }
@@ -76,18 +79,16 @@ TEST(Analyzer, AnEmptyResultProducesTheHeaderAndNothingElse) {
   EXPECT_EQ(std::count(csv.begin(), csv.end(), '\n'), 1);
   const auto header = columns_of(lines_of(csv)[0]);
   for (const char *col : {"event_index", "decoder_id", "op", "deadline_ns",
-                          "call_ns", "return_ns", "lateness_ns", "latency_ns",
+                          "call_ns", "return_ns",
                           "status", "rounds_streamed", "read_completed",
                           "syndrome_bits", "correction_bits",
-                          "correction_mismatch", "request_ids", "dispatched"})
+                          "correction_mismatch", "request_ids", "dispatched",
+                          "request_dispatch_ns", "request_return_ns"})
     EXPECT_NE(std::find(header.begin(), header.end(), col), header.end())
         << "missing column " << col;
 }
 
-TEST(Analyzer, LatenessAndLatencyAreDerivedNotStored) {
-  // `record` has no lateness_ns/latency_ns member -- write_csv computes both
-  // from the three timestamps. For this sample: call - deadline = 200, and
-  // return - call = 300.
+TEST(Analyzer, RecordFieldsSurviveIntoTheCsvRow) {
   auto result = make_sample_result();
   const auto csv = write_csv(result);
   const auto lines = lines_of(csv);
@@ -101,9 +102,6 @@ TEST(Analyzer, LatenessAndLatencyAreDerivedNotStored) {
     EXPECT_NE(it, header.end()) << name;
     return row[static_cast<std::size_t>(std::distance(header.begin(), it))];
   };
-  EXPECT_EQ(column("lateness_ns"), "200");
-  EXPECT_EQ(column("latency_ns"), "300");
-  // The record's own fields must survive alongside the derived ones.
   EXPECT_EQ(column("decoder_id"), "3");
   EXPECT_EQ(column("op"), "get_corrections");
   EXPECT_EQ(column("request_ids"), "7");
@@ -152,12 +150,12 @@ constexpr std::size_t kNumColumns = 16;
 
 // Columns these tests assert on, by position in write_csv()'s header.
 constexpr std::size_t kColOp = 2;
-constexpr std::size_t kColStatus = 8;
-constexpr std::size_t kColReadCompleted = 10;
-constexpr std::size_t kColSyndromeBits = 11;
-constexpr std::size_t kColCorrectionBits = 12;
-constexpr std::size_t kColMismatch = 13;
-constexpr std::size_t kColRequestIds = 14;
+constexpr std::size_t kColStatus = 6;
+constexpr std::size_t kColReadCompleted = 8;
+constexpr std::size_t kColSyndromeBits = 9;
+constexpr std::size_t kColCorrectionBits = 10;
+constexpr std::size_t kColMismatch = 11;
+constexpr std::size_t kColRequestIds = 12;
 
 /// The data columns of the one row `r` produces.
 std::vector<std::string> only_row(const run_result &r) {
@@ -394,7 +392,6 @@ TEST(AnalyzerEdgeCases, ManyRecordsProduceExactlyOneRowEachAndFinishQuickly) {
 
 namespace {
 struct FakeSession : blocking_session {
-  void send_async(const frame &) override {}
   RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                        std::size_t &reply_len) override {
     reply_len = 0;
@@ -499,7 +496,6 @@ struct SlowFirstResetSession : blocking_session {
   explicit SlowFirstResetSession(std::chrono::milliseconds delay)
       : delay_(delay) {}
 
-  void send_async(const frame &) override {}
   RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                       std::size_t &reply_len) override {
     if (!fired_once_) {
@@ -734,15 +730,15 @@ public:
   explicit DelayedCountingSession(std::chrono::milliseconds delay = {})
       : delay_(delay) {}
 
-  void send_async(const frame &) override {
-    enqueues_.fetch_add(1, std::memory_order_relaxed);
-  }
-
   RpcStatus send_sync(const frame &f, std::span<std::uint8_t> reply,
                       std::size_t &reply_len) override {
     cudaq::qec::decoding_server::slot::GetCorrectionsView view;
-    if (!parse_get_corrections(f.bytes, f.size, view))
-      return RpcStatus::OK; // reset
+    if (!parse_get_corrections(f.bytes, f.size, view)) {
+      cudaq::qec::decoding_server::slot::ResetView rv;
+      if (!cudaq::qec::decoding_server::slot::parse_reset(f.bytes, f.size, rv))
+        enqueues_.fetch_add(1, std::memory_order_relaxed);
+      return RpcStatus::OK;
+    }
     std::fill(reply.begin(), reply.end(), 0x00u);
     reply_len = reply.size();
     return RpcStatus::OK;
@@ -924,7 +920,7 @@ TEST(Signals, AResetNeverBlocksTheTimelineRegardlessOfSignal) {
 }
 
 TEST(Signals, AStreamCanWaitOnAResetsSignal) {
-  DelayedCountingSession s0{std::chrono::milliseconds(40)};
+  DelayedCountingSession s0{std::chrono::milliseconds(2)};
   auto src = deep_source();
   auto result = run_multi_text("0 reset signal=ready\n"
                                "- stream source=0 every=0 min_rounds=1 "
@@ -951,9 +947,6 @@ const std::vector<std::uint64_t> kOneDecoder = {0};
 struct CountingSession : blocking_session {
   std::atomic<int> sends{0};
 
-  void send_async(const frame &) override {
-    sends.fetch_add(1, std::memory_order_relaxed);
-  }
   RpcStatus send_sync(const frame &, std::span<std::uint8_t> reply,
                       std::size_t &reply_len) override {
     sends.fetch_add(1, std::memory_order_relaxed);
@@ -1028,8 +1021,7 @@ TEST(RequestIds, AnUndispatchedEventRecordsNoIdsAndTheLogStopsAtTheAbort) {
   // that race into a formality (see AbortOnHardError for the same pattern).
   struct FailOnSecond : blocking_session {
     int calls = 0;
-    void send_async(const frame &) override {}
-    RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
+      RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                         std::size_t &reply_len) override {
       reply_len = 0;
       return ++calls == 2 ? RpcStatus::BAD_REQUEST : RpcStatus::OK;
@@ -1106,7 +1098,6 @@ struct FailOnCallSession : blocking_session {
   RpcStatus fail_status = RpcStatus::BAD_REQUEST;
   int calls = 0;
 
-  void send_async(const frame &) override {}
   RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                       std::size_t &reply_len) override {
     ++calls;
@@ -1163,8 +1154,7 @@ TEST(AbortOnHardError, NotReadyNeverAbortsTheRun) {
   // Never answers anything but NOT_READY -- if NOT_READY were (wrongly)
   // treated as a hard error, this would abort after the first event.
   struct AlwaysNotReadySession : blocking_session {
-    void send_async(const frame &) override {}
-    RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
+      RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                         std::size_t &reply_len) override {
       reply_len = 0;
       return RpcStatus::NOT_READY;
@@ -1199,7 +1189,6 @@ using cudaq::qec::decoding_server::slot::parse_reset;
 /// arrived really was a reset.
 class ResetOkSession : public blocking_session {
 public:
-  void send_async(const frame &) override {}
 
   RpcStatus send_sync(const frame &f, std::span<std::uint8_t>,
                       std::size_t &reply_len) override {
@@ -1221,8 +1210,7 @@ private:
 // abort." --
 TEST(MultiDecoderAdversarial, HardErrorOnOneDecoderStopsEveryOtherDecodersEvents) {
   struct ImmediateBadRequestSession : blocking_session {
-    void send_async(const frame &) override {}
-    RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
+      RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                         std::size_t &reply_len) override {
       reply_len = 0;
       return RpcStatus::BAD_REQUEST;
@@ -1271,7 +1259,6 @@ namespace {
 struct TruncatingSession : blocking_session {
   std::size_t bytes_written = 0;
 
-  void send_async(const frame &) override {}
   RpcStatus send_sync(const frame &f, std::span<std::uint8_t> reply,
                       std::size_t &reply_len) override {
     using cudaq::qec::decoding_server::slot::parse_get_corrections;

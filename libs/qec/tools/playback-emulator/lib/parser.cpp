@@ -237,8 +237,9 @@ std::uint64_t read_session(operands &ops,
 }
 
 /// The signal named by `key`, interned, or kNoSignal when the line omits it.
-/// `signal=` and `until=` are the same lookup at the two ends of one signal:
-/// `signal=` raises it when the RPC answers, `until=` is a stream waiting for it.
+/// `signal=` raises a signal once an event's reply/acks are all collected;
+/// `after=` blocks that event's own dispatch until a signal is raised;
+/// `until=` is a stream waiting on one to stop early.
 std::uint32_t read_signal(operands &ops, const char *key,
                          std::vector<std::string> &names) {
   const std::string name = ops.name(key);
@@ -382,10 +383,12 @@ schedule parse(std::string_view text,
 
       read_trigger(tokens[0], tick_ns, e, last_tick, have_last_tick, saw_delta);
       e.decoder_id = read_session(ops, known);
+      // Every op accepts `signal=`/`after=` -- see read_signal().
+      e.signal_id = read_signal(ops, "signal", sched.signal_names);
+      e.after_signal_id = read_signal(ops, "after", sched.signal_names);
 
       if (op_name == "reset") {
         e.op = operation::reset;
-        e.signal_id = read_signal(ops, "signal", sched.signal_names);
       } else if (op_name == "enqueue") {
         // The one-round spelling of `stream`, and it reads `source=` exactly
         // the same way.
@@ -399,7 +402,6 @@ schedule parse(std::string_view text,
         read_source(ops, op_name, sched, e);
       } else if (op_name == "get_corrections") {
         e.op = operation::get_corrections;
-        e.signal_id = read_signal(ops, "signal", sched.signal_names);
         e.return_size = ops.u32("return_size", 0);
         read_bits(ops, sched.expected_arena, e.expected_offset,
                   e.expected_count, "get_corrections expected");

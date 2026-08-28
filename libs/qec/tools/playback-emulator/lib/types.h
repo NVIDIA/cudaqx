@@ -106,9 +106,12 @@ struct event {
   std::uint32_t return_size = 0; // correction-bit width, overriding
                                  // expected_count when larger
 
-  /// The signal this event raises, an index into `schedule::signal_names`,
-  /// set by the `signal=NAME` operand in the playback text. 
+  /// The signal this event raises once its reply/acks are all collected, an
+  /// index into `schedule::signal_names`, set by `signal=NAME`.
   std::uint32_t signal_id = kNoSignal;
+  /// The signal this event's dispatch waits on in addition to its own
+  /// deadline, set by `after=NAME`. kNoSignal means dispatch on deadline alone.
+  std::uint32_t after_signal_id = kNoSignal;
 
   // -- stream only; meaningless (left default) for every other op --
   /// Which signal ends this stream (`until=NAME`), or kNoSignal for a
@@ -148,7 +151,9 @@ struct record {
   // -- timing (ns, relative to t0) --
   std::uint64_t deadline_ns = 0; // where it was supposed to fire
   std::uint64_t call_ns = 0;     // when the dispatch actually began
-  std::uint64_t return_ns = 0;   // when it completed
+  // When this event's last reply/ack landed: the one request's reply for
+  // reset/get_corrections, or the max over a stream/enqueue_data's rounds.
+  std::uint64_t return_ns = 0;
 
   // -- outcome --
   std::int32_t status = kNoStatus; // RpcStatus, or stream_terminate (above)
@@ -163,7 +168,9 @@ struct record {
   // -- cross-referencing --
   // Every request_id this event put on the wire, in send order, as a slice of
   // run_result::request_id_log. One per RPC, so one per round for a stream and
-  // exactly one for everything else. 
+  // exactly one for everything else. The same (offset, count) also slices
+  // request_dispatch_ns_log/request_return_ns_log/request_status_log, one
+  // entry per request in the same order.
   std::uint32_t request_id_offset = 0, request_id_count = 0;
 };
 
@@ -174,7 +181,14 @@ struct run_result {
   std::vector<record> records;
   std::vector<std::uint8_t> syndrome_log;    // arena the records index into
   std::vector<std::uint8_t> correction_log;  // arena the corrections are stored in
-  std::vector<std::uint32_t> request_id_log; // Every request_id the run issued, in the order it issued them. 
+  std::vector<std::uint32_t> request_id_log; // Every request_id the run issued, in the order it issued them.
+  // Per-request timing/outcome, parallel to request_id_log entry-for-entry.
+  // dispatch_ns is stamped by the timing thread when the request was put on
+  // the wire; return_ns and status are stamped by the reader thread when
+  // that request's own reply landed (0/kNoStatus if never collected).
+  std::vector<std::uint64_t> request_dispatch_ns_log;
+  std::vector<std::uint64_t> request_return_ns_log;
+  std::vector<std::int32_t> request_status_log;
   std::vector<std::string> warnings;
   std::uint64_t t0_ns = 0;      // CLOCK_MONOTONIC value run() aligned to
   std::uint64_t tick_ns = 0;

@@ -46,13 +46,32 @@ namespace {
 
 class null_session : public session {
 public:
-  void send_async(const frame &f) override { checksum(f); }
-
-  // Discarding in submission order is still submission order, so the
-  // ordering contract holds trivially and the request_id carries nothing.
+  // Echoes the frame's own request_id rather than inventing one, so a
+  // reader can key completions by id the same way every other backend does.
   std::uint32_t submit(const frame &f) override {
     checksum(f);
-    return 0;
+    const std::uint32_t rid =
+        f.size >= sizeof(cudaq::realtime::RPCHeader)
+            ? reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
+                  ->request_id
+            : 0;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      completed_.push_back(rid);
+    }
+    completed_cv_.notify_one();
+    return rid;
+  }
+
+  bool wait_next_completion(std::uint32_t &request_id,
+                            std::chrono::milliseconds timeout) override {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (!completed_cv_.wait_for(lock, timeout,
+                               [&] { return !completed_.empty(); }))
+      return false;
+    request_id = completed_.front();
+    completed_.pop_front();
+    return true;
   }
 
   RpcStatus await(std::uint32_t, std::span<std::uint8_t> reply,
@@ -73,6 +92,9 @@ private:
   }
 
   std::atomic<std::uint64_t> checksum_{0};
+  std::mutex mu_;
+  std::condition_variable completed_cv_;
+  std::deque<std::uint32_t> completed_;
 };
 
 } // namespace
@@ -109,11 +131,8 @@ namespace {
 using cudaq::qec::decoding_server::DecodingSession;
 using cudaq::qec::decoding_server::SessionRegistry;
 
-/// Result of dispatching one raw request frame.
+/// Result of dispatching one raw request frame -- every RPC gets a reply.
 struct DispatchResult {
-  /// False only for RPCs with no wire reply (enqueue); such calls are
-  /// fire-and-forget, and `status`/`reply_len` are meaningless.
-  bool has_reply = false;
   cudaq::qec::decoding::rpc::RpcStatus status =
       cudaq::qec::decoding::rpc::RpcStatus::BAD_REQUEST;
   std::size_t reply_len = 0;
@@ -133,35 +152,40 @@ DispatchResult dispatch_rpc(DecodingSession &dec, const std::uint8_t *bytes,
   using cudaq::realtime::RPCHeader;
 
   if (size < sizeof(RPCHeader))
-    return {true, RpcStatus::BAD_REQUEST, 0};
+    return {RpcStatus::BAD_REQUEST, 0};
   const auto *header = reinterpret_cast<const RPCHeader *>(bytes);
 
   if (header->function_id == kEnqueueSyndromesFunctionId) {
+    // Mirrors DecodingSession::handle_enqueue: reject anything but the
+    // identity syndrome mapping, and ack OK even on an internal decode
+    // failure -- that surfaces at the next get_corrections instead.
     slot::EnqueueView view;
     if (!slot::parse_enqueue(bytes, size, view))
-      return {false, RpcStatus::BAD_REQUEST, 0};
+      return {RpcStatus::BAD_REQUEST, 0};
+    if (view.syndrome_mapping_id != 0)
+      return {RpcStatus::BAD_REQUEST, 0};
     dec.enqueue_core(view);
-    return {false, RpcStatus::OK, 0};
+    return {RpcStatus::OK, 0};
   }
 
   if (header->function_id == kGetCorrectionsFunctionId) {
     slot::GetCorrectionsView view;
     if (!slot::parse_get_corrections(bytes, size, view))
-      return {true, RpcStatus::BAD_REQUEST, 0};
+      return {RpcStatus::BAD_REQUEST, 0};
     std::size_t reply_len = 0;
     auto status = dec.get_corrections_core(view.return_size, view.reset,
                                            reply, reply_capacity, reply_len);
-    return {true, status, reply_len};
+    return {status, reply_len};
   }
 
   if (header->function_id == kResetDecoderFunctionId) {
     slot::ResetView view;
     if (!slot::parse_reset(bytes, size, view))
-      return {true, RpcStatus::BAD_REQUEST, 0};
-    return {true, dec.reset_core(), 0};
+      return {RpcStatus::BAD_REQUEST, 0};
+    return {dec.reset_core(), 0};
   }
 
-  return {true, RpcStatus::BAD_REQUEST, 0};
+  return {RpcStatus::BAD_REQUEST, 0};
 }
 
 /// How big a reply this frame can produce, so a submitted request can carry
@@ -203,10 +227,17 @@ public:
       dispatcher_.join();
   }
 
-  void send_async(const frame &f) override { push(f, /*wants_reply=*/false); }
+  std::uint32_t submit(const frame &f) override { return push(f); }
 
-  std::uint32_t submit(const frame &f) override {
-    return push(f, /*wants_reply=*/true);
+  bool wait_next_completion(std::uint32_t &request_id,
+                            std::chrono::milliseconds timeout) override {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (!completed_cv_.wait_for(lock, timeout,
+                               [&] { return !completed_.empty(); }))
+      return false;
+    request_id = completed_.front();
+    completed_.pop_front();
+    return true;
   }
 
   RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
@@ -233,6 +264,7 @@ private:
   /// (for a reply) back. The frame is copied because the caller's buffer may
   /// well be a local that dies the moment submit() returns.
   struct job {
+    std::uint32_t rid = 0;
     std::vector<std::uint8_t> bytes;
     std::vector<std::uint8_t> reply;
     std::size_t reply_len = 0;
@@ -243,27 +275,24 @@ private:
   };
 
   /// Publish one frame.
-  std::uint32_t push(const frame &f, bool wants_reply) {
+  std::uint32_t push(const frame &f) {
     // Too short to carry a request_id -- see udp_session::submit for why
     // this is rejected outright rather than keyed under a placeholder id.
     if (f.size < sizeof(cudaq::realtime::RPCHeader))
       throw std::invalid_argument(
           "inproc_session: frame is smaller than RPCHeader");
     auto j = std::make_shared<job>();
+    j->rid = reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
+                 ->request_id;
     j->bytes.assign(f.bytes, f.bytes + f.size);
-    if (wants_reply)
-      j->reply.resize(reply_capacity_for(f.bytes, f.size));
-    const std::uint32_t rid =
-        reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
-            ->request_id;
+    j->reply.resize(reply_capacity_for(f.bytes, f.size));
     {
       std::lock_guard<std::mutex> lock(mu_);
       queue_.push_back(j);
-      if (wants_reply)
-        pending_.emplace(rid, j);
+      pending_.emplace(j->rid, j);
     }
     work_.notify_one();
-    return rid;
+    return j->rid;
   }
 
   void drain() {
@@ -281,11 +310,16 @@ private:
                                        j->reply.data(), j->reply.size());
       {
         std::lock_guard<std::mutex> lock(j->mu);
-        j->status = result.has_reply ? result.status : RpcStatus::OK;
+        j->status = result.status;
         j->reply_len = result.reply_len;
         j->done = true;
       }
       j->done_cv.notify_all();
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        completed_.push_back(j->rid);
+      }
+      completed_cv_.notify_one();
     }
   }
 
@@ -296,6 +330,8 @@ private:
   std::condition_variable work_;
   std::deque<std::shared_ptr<job>> queue_;
   std::unordered_map<std::uint32_t, std::shared_ptr<job>> pending_;
+  std::condition_variable completed_cv_;
+  std::deque<std::uint32_t> completed_;
   bool stop_ = false;
   std::thread dispatcher_; // last, so drain() only sees initialized members
 };
@@ -393,7 +429,6 @@ public:
   udp_session(int fd, std::uint32_t timeout_ms)
       : fd_(fd), timeout_(std::chrono::milliseconds(timeout_ms)) {
     max_frame_bytes = static_cast<std::uint32_t>(kMaxDatagram);
-    last_rx_ = std::chrono::steady_clock::now();
     receiver_ = std::thread([this] { receive_loop(); });
   }
 
@@ -407,10 +442,6 @@ public:
       ::close(fd_);
   }
 
-  void send_async(const frame &f) override {
-    ::send(fd_, f.bytes, f.size, 0);
-  }
-
   std::uint32_t submit(const frame &f) override {
     if (f.size < sizeof(RPCHeader))
       throw std::invalid_argument(
@@ -418,13 +449,30 @@ public:
     const std::uint32_t request_id =
         reinterpret_cast<const RPCHeader *>(f.bytes)->request_id;
     auto w = std::make_shared<waiter>();
+    w->deadline = std::chrono::steady_clock::now() + timeout_;
     {
       std::lock_guard<std::mutex> lock(mu_);
       pending_[request_id] = w;
     }
-    if (::send(fd_, f.bytes, f.size, 0) < 0)
-      finish(*w, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+    if (::send(fd_, f.bytes, f.size, 0) < 0) {
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        pending_.erase(request_id);
+      }
+      finish(request_id, *w, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+    }
     return request_id;
+  }
+
+  bool wait_next_completion(std::uint32_t &request_id,
+                            std::chrono::milliseconds timeout) override {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (!completed_cv_.wait_for(lock, timeout,
+                               [&] { return !completed_.empty(); }))
+      return false;
+    request_id = completed_.front();
+    completed_.pop_front();
+    return true;
   }
 
   RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
@@ -438,36 +486,29 @@ public:
         return RpcStatus::INTERNAL_ERROR; // never submitted, or already taken
       w = it->second;
     }
-
+    // No self-timeout here: receive_loop's own periodic wake (bounded by
+    // SO_RCVTIMEO) sweeps a silent socket's stale requests on its own, so
+    // this always completes even if nobody else is watching this id.
     std::unique_lock<std::mutex> lock(w->mu);
-    // The bound is on silence, not on this reply: as long as the socket is
-    // still producing datagrams the server is alive and this request is
-    // simply behind others.
-    while (!w->done) {
-      const auto quiet_since = last_rx_.load(std::memory_order_acquire);
-      if (w->done_cv.wait_until(lock, quiet_since + timeout_) ==
-              std::cv_status::timeout &&
-          !w->done &&
-          last_rx_.load(std::memory_order_acquire) == quiet_since) {
-        // No dedicated "local timeout" status exists in RpcStatus; a
-        // client-side synthesized timeout/hard-error is reported as
-        // INTERNAL_ERROR rather than hanging.
-        lock.unlock();
-        drop(request_id);
-        return RpcStatus::INTERNAL_ERROR;
-      }
-    }
+    w->done_cv.wait(lock, [&] { return w->done; });
     reply_len = std::min(w->reply.size(), reply.size());
     std::copy_n(w->reply.begin(), reply_len, reply.begin());
     const auto status = w->status;
     lock.unlock();
-    drop(request_id);
+    // Only await() removes a completed entry -- a reply/sweep marks it done
+    // in place, so wait_next_completion() can report it and this call can
+    // still find and read it afterward.
+    std::lock_guard<std::mutex> lock2(mu_);
+    pending_.erase(request_id);
     return status;
   }
 
 private:
   /// One outstanding request: filled in by the receiver, collected by await.
+  /// `deadline` is fixed at submission and never written again, so sweep_stale
+  /// can read it without locking.
   struct waiter {
+    std::chrono::steady_clock::time_point deadline;
     std::mutex mu;
     std::condition_variable done_cv;
     std::vector<std::uint8_t> reply;
@@ -475,8 +516,13 @@ private:
     bool done = false;
   };
 
-  static void finish(waiter &w, RpcStatus status, const std::uint8_t *body,
-                     std::size_t len) {
+  /// Finishes a request and makes it visible to wait_next_completion. A
+  /// genuine reply leaves `request_id` in `pending_` for await() to erase
+  /// once it has consumed the reply; a send failure or a sweep -- which
+  /// give up on a request rather than reporting a real reply -- erase it
+  /// first instead, since nothing else will.
+  void finish(std::uint32_t request_id, waiter &w, RpcStatus status,
+             const std::uint8_t *body, std::size_t len) {
     {
       std::lock_guard<std::mutex> lock(w.mu);
       w.status = status;
@@ -484,18 +530,54 @@ private:
       w.done = true;
     }
     w.done_cv.notify_all();
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      completed_.push_back(request_id);
+    }
+    completed_cv_.notify_one();
   }
 
-  /// Forget a request_id, so a reply that shows up after its awaiter is done
-  /// (or gave up) is discarded rather than filling a stale waiter.
-  void drop(std::uint32_t request_id) {
-    std::lock_guard<std::mutex> lock(mu_);
-    pending_.erase(request_id);
+  /// No dedicated "local timeout" status exists in RpcStatus; a client-side
+  /// synthesized timeout/hard-error is reported as INTERNAL_ERROR. Each
+  /// request's own deadline (submission + timeout_) governs it, not overall
+  /// socket silence -- unrelated traffic (another request's reply, or ICMP
+  /// errors for a dead peer) must never mask one dead request forever.
+  void sweep_stale() {
+    std::vector<std::pair<std::uint32_t, std::shared_ptr<waiter>>> snapshot;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      snapshot.assign(pending_.begin(), pending_.end());
+    }
+    const auto now = std::chrono::steady_clock::now();
+    for (auto &[id, w] : snapshot) {
+      if (now < w->deadline)
+        continue; // still within its own grace period
+      bool already_done = false;
+      {
+        std::lock_guard<std::mutex> lock(w->mu);
+        already_done = w->done;
+      }
+      // A reply that landed but is not yet await()'d stays in `pending_` for
+      // that eventual await() to find; sweeping it here would clobber its
+      // real status with INTERNAL_ERROR.
+      if (already_done)
+        continue;
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        pending_.erase(id);
+      }
+      finish(id, *w, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+    }
   }
 
   void receive_loop() {
     std::vector<std::uint8_t> scratch(kMaxDatagram);
     while (!stop_.load(std::memory_order_acquire)) {
+      // Runs every iteration -- including a tight run of async ICMP errors
+      // for a dead peer (e.g. one per rejected send), not just a genuine
+      // SO_RCVTIMEO silence -- since each request's own deadline is what
+      // actually gates whether sweep_stale() does anything.
+      sweep_stale();
       const ssize_t n = ::recv(fd_, scratch.data(), scratch.size(), 0);
       if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
@@ -513,8 +595,6 @@ private:
       std::memcpy(&resp, scratch.data(), sizeof(RPCResponse));
       if (resp.magic != RPC_MAGIC_RESPONSE)
         continue; // garbage/truncated datagram
-      last_rx_.store(std::chrono::steady_clock::now(),
-                     std::memory_order_release);
 
       std::shared_ptr<waiter> w;
       {
@@ -525,7 +605,7 @@ private:
         w = it->second;
       }
       const std::size_t avail = static_cast<std::size_t>(n) - sizeof(RPCResponse);
-      finish(*w, static_cast<RpcStatus>(resp.status),
+      finish(resp.request_id, *w, static_cast<RpcStatus>(resp.status),
              scratch.data() + sizeof(RPCResponse),
              std::min<std::size_t>(resp.result_len, avail));
     }
@@ -533,10 +613,11 @@ private:
 
   int fd_ = -1;
   std::chrono::milliseconds timeout_;
-  // Guards `pending_` 
+  std::condition_variable completed_cv_;
+  std::deque<std::uint32_t> completed_;
+  // Guards `pending_` and `completed_`
   std::mutex mu_;
   std::unordered_map<std::uint32_t, std::shared_ptr<waiter>> pending_;
-  std::atomic<std::chrono::steady_clock::time_point> last_rx_;
   std::atomic<bool> stop_{false};
   std::thread receiver_; // last, so receive_loop() sees initialized members
 };
