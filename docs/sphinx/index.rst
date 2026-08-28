@@ -9,10 +9,18 @@ cases in quantum error correction.
 
 .. note::
 
-   **Looking for CUDA-Q Solvers?** The CUDA-Q Solvers library has been removed
-   from CUDA-QX; version 0.6.0 was its final planned release. Development
-   continues in **CUDA-Q Algorithms**, which supersedes CUDA-Q Solvers and
-   expands on it. Install it with :code:`pip install cudaq-algorithms`
+   **CUDA-Q QEC is actively developed and fully supported.** The deprecation
+   notice below applies *only* to the CUDA-Q Solvers library; it does not
+   affect CUDA-Q QEC, which continues to receive new features, performance
+   improvements, and releases.
+
+.. attention::
+
+   **CUDA-Q Solvers is deprecated (this does not affect CUDA-Q QEC).**
+   Version 0.6.0 is the final planned
+   release of the CUDA-Q Solvers library. Development continues in **CUDA-Q
+   Algorithms**, which supersedes CUDA-Q Solvers and expands on it. Install it
+   with :code:`pip install cudaq-algorithms`
    (`cudaq-algorithms on PyPI <https://pypi.org/project/cudaq-algorithms/>`__),
    read the `CUDA-Q Algorithms documentation
    <https://nvidia.github.io/cudaq-algorithms/>`__, and find the source code at
@@ -56,7 +64,7 @@ Key Features
 CUDA-QX provides cudaq-qec, a library enabling performant research workflows for
 quantum error correction, built upon the CUDA-Q programming model.
 
-* **cudaq-qec**: Quantum Error Correction Library
+* **cudaq-qec** (actively developed and supported): Quantum Error Correction Library
     * Extensible framework describing quantum error correcting codes as a collection of CUDA-Q kernels.
     * Extensible framework for describing syndrome decoders
     * State-of-the-art, performant decoder implementations on NVIDIA GPUs
