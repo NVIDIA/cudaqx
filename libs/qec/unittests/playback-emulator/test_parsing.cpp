@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 /// Tests the input format and schedule data model: strict
-/// parsing, arena packing, and tick -> deadline_ns resolution. 
+/// parsing, arena packing, and tick -> deadline_ns resolution.
 
 #include "emulator.h"
 
@@ -18,9 +18,9 @@ using namespace cudaq::qec::playback;
 namespace {
 const std::vector<std::uint64_t> kTwoDecoders = {0, 1};
 
-/// parse() reports errors as std::invalid_argument 
+/// parse() reports errors as std::invalid_argument
 /// with the offending line number embedded in the
-/// message ("playback schedule, line N: ...") 
+/// message ("playback schedule, line N: ...")
 void expect_error_at_line(const std::string &text,
                           const std::vector<std::uint64_t> &known_decoder_ids,
                           std::uint64_t tick_ns, std::size_t line) {
@@ -193,7 +193,8 @@ TEST(Parser, AbsoluteTicksMustBeNonDecreasingAndDeltasAreExempt) {
 
 TEST(Parser, OnceATriggerGoesRelativeEveryLaterTriggerMustAlsoBeRelative) {
   expect_error_at_line("5 reset\n+100 reset\n4 reset\n", kTwoDecoders, 1000, 3);
-  expect_error_at_line("100 reset\n+1 reset\n200 reset\n", kTwoDecoders, 1000, 3);
+  expect_error_at_line("100 reset\n+1 reset\n200 reset\n", kTwoDecoders, 1000,
+                       3);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,9 +240,9 @@ TEST(ParserAdversarial, EveryWhitespaceFormTokenizesTheSameWay) {
   // neither kind nor count of separators matters. '\r' is the interesting
   // case: getline() splits only on '\n', leaving one on a CRLF line's end,
   // harmless only because the "C" locale treats it as whitespace too.
-  for (const char *text : {"1 reset\n", "1\treset\n", "1    reset\n",
-                           "1 reset   \n", "  1 reset\n", "1\t \treset\t\n",
-                           "1\r reset\n", "1 reset\r\n"}) {
+  for (const char *text :
+       {"1 reset\n", "1\treset\n", "1    reset\n", "1 reset   \n",
+        "  1 reset\n", "1\t \treset\t\n", "1\r reset\n", "1 reset\r\n"}) {
     SCOPED_TRACE(text);
     auto sched = parse(text, kTwoDecoders, 1000);
     ASSERT_EQ(sched.events.size(), 1u);
@@ -273,8 +274,8 @@ TEST(ParserAdversarial, AHashStartsACommentWhereverItAppears) {
 }
 
 TEST(ParserAdversarial, TextWithNothingToRunProducesZeroEventsNotAnError) {
-  for (const char *text : {"", "\n", "   \t   \n", "#\n",
-                           "# header\n\n   # indented\n#\n"}) {
+  for (const char *text :
+       {"", "\n", "   \t   \n", "#\n", "# header\n\n   # indented\n#\n"}) {
     SCOPED_TRACE(text);
     EXPECT_EQ(parse(text, kTwoDecoders, 1000).events.size(), 0u);
   }
@@ -329,9 +330,10 @@ TEST(ParserAdversarial, EachOperandAcceptsTheFullRangeOfItsOwnWidth) {
 
   for (std::uint32_t max_rounds : {1u, 4294967295u}) {
     SCOPED_TRACE(max_rounds);
-    auto s = parse("0 stream source=0 max_rounds=" +
-                       std::to_string(max_rounds) + " until=c0\n",
-                   kTwoDecoders, 1000);
+    auto s =
+        parse("0 stream source=0 max_rounds=" + std::to_string(max_rounds) +
+                  " until=c0\n",
+              kTwoDecoders, 1000);
     EXPECT_EQ(s.events[0].stream_max_rounds, max_rounds);
   }
 
@@ -345,9 +347,10 @@ TEST(ParserAdversarial, ArithmeticThatWouldOverflowIsRejectedNotWrapped) {
   // Unguarded, either product wraps to a deadline in the past: the event
   // fires immediately and the stream runs flat out -- the opposite of the
   // pacing that was asked for, and silent about it.
-  expect_all_rejected({{"0 stream source=0 every=18446744073709551615 until=c0\n",
-                        "every= * tick_ns overflows"}},
-                      kTwoDecoders, 1000);
+  expect_all_rejected(
+      {{"0 stream source=0 every=18446744073709551615 until=c0\n",
+        "every= * tick_ns overflows"}},
+      kTwoDecoders, 1000);
   expect_all_rejected({{"2 reset\n", "tick * tick_ns overflows"}}, kTwoDecoders,
                       18446744073709551615ull);
 }
@@ -399,8 +402,8 @@ TEST(ParserAdversarial, EveryEventsArenaSliceMatchesItsOwnBitPattern) {
   std::string text;
   for (std::size_t i = 0; i < patterns.size(); ++i)
     text += std::to_string(i) + " enqueue source=0b" + patterns[i] + "\n";
-  text += std::to_string(patterns.size()) + " get_corrections " + long_bits +
-          "\n";
+  text +=
+      std::to_string(patterns.size()) + " get_corrections " + long_bits + "\n";
 
   auto sched = parse(text, kTwoDecoders, 1000);
   ASSERT_EQ(sched.events.size(), patterns.size() + 1);
@@ -409,14 +412,14 @@ TEST(ParserAdversarial, EveryEventsArenaSliceMatchesItsOwnBitPattern) {
     ASSERT_EQ(e.syndrome_count, patterns[i].size()) << "pattern " << i;
     for (std::size_t b = 0; b < patterns[i].size(); ++b)
       EXPECT_EQ(sched.syndrome_arena[e.syndrome_offset + b],
-               patterns[i][b] == '1' ? 1u : 0u)
+                patterns[i][b] == '1' ? 1u : 0u)
           << "pattern " << i << " bit " << b;
   }
   const auto &read = sched.events.back();
   ASSERT_EQ(read.expected_count, long_bits.size());
   for (std::size_t b = 0; b < long_bits.size(); ++b)
     EXPECT_EQ(sched.expected_arena[read.expected_offset + b],
-             long_bits[b] == '1' ? 1u : 0u)
+              long_bits[b] == '1' ? 1u : 0u)
         << "expected bit " << b;
 }
 
@@ -434,6 +437,7 @@ TEST(ParserAdversarial, LargeScheduleParsesCorrectlyAndStaysInOrder) {
   ASSERT_EQ(sched.events.size(), static_cast<std::size_t>(kLines));
   for (std::size_t i = 0; i < sched.events.size(); ++i) {
     EXPECT_EQ(sched.events[i].deadline_ns, (i / 2) * 1000u) << "event " << i;
-    EXPECT_EQ(sched.events[i].decoder_id, i % 2 == 0 ? 0u : 1u) << "event " << i;
+    EXPECT_EQ(sched.events[i].decoder_id, i % 2 == 0 ? 0u : 1u)
+        << "event " << i;
   }
 }

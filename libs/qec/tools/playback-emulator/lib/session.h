@@ -83,7 +83,8 @@ public:
   /// RpcStatus. On OK with a result body, copies the (still bit-packed) reply
   /// into `reply`. Safe to call from a thread other than the publisher, and
   /// from two threads at once so long as they name different request_ids.
-  virtual RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
+  virtual RpcStatus await(std::uint32_t request_id,
+                          std::span<std::uint8_t> reply,
                           std::size_t &reply_len) = 0;
 
   /// The largest frame this session can carry, or 0 for unbounded. Set once
@@ -117,14 +118,16 @@ make_inproc_sessions(
 /// "host:port"; one session per decoder_id
 /// `timeout_ms` bounds how long any one request waits for its own reply.
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
-make_udp_sessions(const std::unordered_map<std::uint64_t, std::string> &endpoints,
-                   std::uint32_t timeout_ms = 200);
+make_udp_sessions(
+    const std::unordered_map<std::uint64_t, std::string> &endpoints,
+    std::uint32_t timeout_ms = 200);
 
 /// Points `router[id]` at each session's owning pointer, for a
 /// make_*_sessions() result the caller is keeping alive elsewhere. The
 /// shared last step of adopting any backend's sessions into a run.
 void route_sessions(
-    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> &sessions,
+    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+        &sessions,
     std::unordered_map<std::uint64_t, session *> &router);
 
 } // namespace cudaq::qec::playback

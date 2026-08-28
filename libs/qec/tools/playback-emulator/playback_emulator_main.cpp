@@ -229,8 +229,9 @@ int main(int argc, char **argv) {
     cudaq::qec::decoding::config::multi_decoder_config config;
     std::vector<std::uint64_t> decoder_ids;
     if (!config_path.empty()) {
-      config = cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
-          read_file(config_path));
+      config =
+          cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+              read_file(config_path));
       for (const auto &d : config.decoders)
         decoder_ids.push_back(static_cast<std::uint64_t>(d.id));
     } else if (backend_name == "udp") {

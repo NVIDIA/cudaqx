@@ -9,7 +9,7 @@
 #pragma once
 
 /// @file emulator.h
-/// @brief Top-level entry points: parse() -> plan() -> run() 
+/// @brief Top-level entry points: parse() -> plan() -> run()
 /// Callable identically from the CLI tool and the Python binding.
 
 #include "session.h"
@@ -17,11 +17,11 @@
 #include "types.h"
 
 #include <memory>
+#include <ostream>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <ostream>
 #include <unordered_map>
 
 namespace cudaq::qec::playback {
@@ -78,7 +78,8 @@ struct run_plan {
 /// decoder_id -> session, `sources` maps source_id -> syndrome_source. Caller
 /// keeps both alive for the returned run_plan's lifetime.
 std::shared_ptr<run_plan>
-plan(const schedule &sched, const std::unordered_map<std::uint64_t, session *> &router,
+plan(const schedule &sched,
+     const std::unordered_map<std::uint64_t, session *> &router,
      const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
      const run_params &params = {});
 
@@ -89,9 +90,10 @@ plan(const schedule &sched, const std::unordered_map<std::uint64_t, session *> &
 /// truncating `result.records`; `record::dispatched` marks what actually ran.
 run_result run(std::shared_ptr<run_plan> plan);
 
-/// Downstream analysis writes CSV. One row per record: identity, timings, derived lateness/latency, status,
-/// rounds streamed, and the syndrome/correction bits resolved from the logs
-/// (one column each, rendered as a '0'/'1' string in log order).
+/// Downstream analysis writes CSV. One row per record: identity, timings,
+/// derived lateness/latency, status, rounds streamed, and the
+/// syndrome/correction bits resolved from the logs (one column each, rendered
+/// as a '0'/'1' string in log order).
 void write_csv(const run_result &result, std::ostream &out);
 std::string write_csv(const run_result &result);
 

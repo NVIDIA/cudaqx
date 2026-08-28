@@ -10,10 +10,10 @@
 
 #include "stim.h"
 
-#include "cudaq.h"
 #include "cuda-qx/core/tensor.h"
-#include "cudaq/qec/code.h"
+#include "cudaq.h"
 #include "device/memory_circuit.h"
+#include "cudaq/qec/code.h"
 
 #include <algorithm>
 #include <memory>
@@ -166,7 +166,8 @@ struct stim_memory_source::impl {
     return bits;
   }
 
-  // Runs the terminal segment against the simulator's current state then starts a fresh shot.
+  // Runs the terminal segment against the simulator's current state then starts
+  // a fresh shot.
   std::vector<std::uint8_t> read_data() {
     sim->safe_do_circuit(terminal_body);
     auto bits = read_lookback(terminal_width);
@@ -182,7 +183,7 @@ struct stim_memory_source::impl {
 };
 
 stim_memory_source::stim_memory_source(const cudaqx::heterogeneous_map &params,
-                                        std::uint64_t seed)
+                                       std::uint64_t seed)
     : impl_(std::make_unique<impl>(params, seed)) {}
 
 stim_memory_source::~stim_memory_source() = default;
@@ -214,7 +215,7 @@ struct cudaq_memory_source::impl {
   cudaq::noise_model noise;
   std::uint64_t base_seed;
 
-  std::uint64_t generation = 0; // bumped on every shot boundary
+  std::uint64_t generation = 0;  // bumped on every shot boundary
   std::size_t current_round = 0; // next_round() calls made so far this shot
 
   std::size_t num_cols = 0; // numAncx + numAncz: width of a raw round
@@ -231,13 +232,12 @@ struct cudaq_memory_source::impl {
       : qec_code(c), state_prep(prep), max_rounds(maxRounds),
         noise(std::move(n)), base_seed(seed) {
     if (max_rounds == 0)
-      throw std::runtime_error(
-          "cudaq_memory_source: max_rounds must be >= 1.");
+      throw std::runtime_error("cudaq_memory_source: max_rounds must be >= 1.");
     rebuild_cache();
   }
 
   // Reruns the memory_circuit kernel for every 1 <= r <= max_rounds under
-  // the same seed. 
+  // the same seed.
   void rebuild_cache() {
     round_bits.assign(max_rounds, {});
     data_bits.assign(max_rounds, {});
@@ -250,27 +250,26 @@ struct cudaq_memory_source::impl {
           "cudaq_memory_source: code does not support the requested state "
           "prep.");
 
-    auto &prep =
-        qec_code.get_operation<cudaq::qec::code::one_qubit_encoding>(
-            state_prep);
+    auto &prep = qec_code.get_operation<cudaq::qec::code::one_qubit_encoding>(
+        state_prep);
     auto &stabRound =
         qec_code.get_operation<cudaq::qec::code::stabilizer_round>(
             cudaq::qec::operation::stabilizer_round);
 
     const bool is_z_prep = state_prep == cudaq::qec::operation::prep0 ||
-                            state_prep == cudaq::qec::operation::prep1;
+                           state_prep == cudaq::qec::operation::prep1;
 
     auto sched_x = qec_code.get_stabilizer_schedule_x();
     auto sched_z = qec_code.get_stabilizer_schedule_z();
     std::vector<std::size_t> xVec(sched_x.data(),
-                                   sched_x.data() + sched_x.size());
+                                  sched_x.data() + sched_x.size());
     std::vector<std::size_t> zVec(sched_z.data(),
-                                   sched_z.data() + sched_z.size());
+                                  sched_z.data() + sched_z.size());
     auto logical_obs =
         is_z_prep ? qec_code.get_observables_z() : qec_code.get_observables_x();
     const std::size_t num_obs = logical_obs.shape()[0];
     std::vector<std::size_t> obs_flat(logical_obs.data(),
-                                       logical_obs.data() + logical_obs.size());
+                                      logical_obs.data() + logical_obs.size());
 
     num_data = qec_code.get_num_data_qubits();
     const std::size_t numAncx = qec_code.get_num_ancilla_x_qubits();
@@ -278,15 +277,13 @@ struct cudaq_memory_source::impl {
     num_cols = numAncx + numAncz;
 
     for (std::size_t r = 1; r <= max_rounds; ++r) {
-      cudaq::set_random_seed(
-          static_cast<std::size_t>(base_seed + generation));
+      cudaq::set_random_seed(static_cast<std::size_t>(base_seed + generation));
 
       cudaq::sample_options opts{
           .shots = 1, .noise = noise, .explicit_measurements = true};
-      auto result =
-          cudaq::sample(opts, cudaq::qec::memory_circuit, stabRound, prep,
-                        num_data, numAncx, numAncz, r, xVec, zVec, obs_flat,
-                        num_obs, !is_z_prep);
+      auto result = cudaq::sample(opts, cudaq::qec::memory_circuit, stabRound,
+                                  prep, num_data, numAncx, numAncz, r, xVec,
+                                  zVec, obs_flat, num_obs, !is_z_prep);
 
       // mzTable[0, meas_idx]: raw measurement layout is r*num_cols ancilla
       // bits (num_cols per round), then num_data data-qubit bits.
@@ -330,13 +327,12 @@ struct cudaq_memory_source::impl {
   }
 };
 
-cudaq_memory_source::cudaq_memory_source(const code &code,
-                                          operation statePrep,
-                                          std::size_t max_rounds,
-                                          cudaq::noise_model noise,
-                                          std::uint64_t seed)
+cudaq_memory_source::cudaq_memory_source(const code &code, operation statePrep,
+                                         std::size_t max_rounds,
+                                         cudaq::noise_model noise,
+                                         std::uint64_t seed)
     : impl_(std::make_unique<impl>(code, statePrep, max_rounds,
-                                    std::move(noise), seed)) {}
+                                   std::move(noise), seed)) {}
 
 cudaq_memory_source::~cudaq_memory_source() = default;
 

@@ -14,9 +14,9 @@
 
 #include "py_playback_emulator.h"
 
+#include "emulator.h"
 #include "session.h"
 #include "syndrome_source.h"
-#include "emulator.h"
 #include "type_casters.h"
 
 #include <nanobind/stl/optional.h>
@@ -38,7 +38,7 @@ namespace {
 /// One event's [first, last) bounds into a log the same size as
 /// request_id_log, clamped so a record pointing past the log slices empty.
 std::pair<std::size_t, std::size_t> request_slice(const record &rec,
-                                                   std::size_t log_size) {
+                                                  std::size_t log_size) {
   const auto first = std::min<std::size_t>(rec.request_id_offset, log_size);
   const auto last =
       std::min<std::size_t>(first + rec.request_id_count, log_size);
@@ -66,7 +66,8 @@ run_result run_schedule(
         "run: specify exactly one of decoders=, udp_endpoints=, or "
         "null_decoder_ids= to select the session backend");
 
-  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> owned_sessions;
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+      owned_sessions;
   std::unordered_map<std::uint64_t, session *> router;
 
   if (decoders) {
@@ -111,30 +112,31 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def_ro("decoder_id", &record::decoder_id)
       .def_ro("op", &record::op)
       .def_ro("dispatched", &record::dispatched,
-             "True once the dispatch loop actually reached this event; "
-             "false if a hard error aborted the run first, in which case "
-             "every other field is left default.")
+              "True once the dispatch loop actually reached this event; "
+              "false if a hard error aborted the run first, in which case "
+              "every other field is left default.")
       .def_ro("deadline_ns", &record::deadline_ns)
       .def_ro("call_ns", &record::call_ns)
       .def_ro("return_ns", &record::return_ns,
-             "When this event's last reply/ack landed: the one request's "
-             "reply for reset/get_corrections, or the max over a "
-             "stream/enqueue_data's rounds.")
-      .def_prop_ro("status",
-                   [](const record &r) {
-                     // The two status spaces are disjoint by value
-                     // (RpcStatus 0..6, stream_terminate 100..103), so the
-                     // value picks the enum -- not the op, since a dry
-                     // source gives even an enqueue a SOURCE_EXHAUSTED.
-                     if (r.status == kNoStatus)
-                       return "NOT_DISPATCHED";
-                     return r.status >= 100
-                                ? to_string(static_cast<stream_terminate>(r.status))
-                                : to_string(static_cast<RpcStatus>(r.status));
-                   },
-                   "status as a human-readable string: a stream_terminate "
-                   "name for stream, an RpcStatus name for every other op, "
-                   "or NOT_DISPATCHED for an event an abort pre-empted.")
+              "When this event's last reply/ack landed: the one request's "
+              "reply for reset/get_corrections, or the max over a "
+              "stream/enqueue_data's rounds.")
+      .def_prop_ro(
+          "status",
+          [](const record &r) {
+            // The two status spaces are disjoint by value
+            // (RpcStatus 0..6, stream_terminate 100..103), so the
+            // value picks the enum -- not the op, since a dry
+            // source gives even an enqueue a SOURCE_EXHAUSTED.
+            if (r.status == kNoStatus)
+              return "NOT_DISPATCHED";
+            return r.status >= 100
+                       ? to_string(static_cast<stream_terminate>(r.status))
+                       : to_string(static_cast<RpcStatus>(r.status));
+          },
+          "status as a human-readable string: a stream_terminate "
+          "name for stream, an RpcStatus name for every other op, "
+          "or NOT_DISPATCHED for an event an abort pre-empted.")
       .def_ro("rounds_streamed", &record::rounds_streamed)
       .def_ro("read_completed", &record::read_completed)
       .def_ro("syndrome_offset", &record::syndrome_offset)
@@ -144,12 +146,12 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def_ro("correction_mismatch", &record::correction_mismatch)
       .def_ro("request_id_offset", &record::request_id_offset)
       .def_ro("request_id_count", &record::request_id_count,
-             "How many RPCs this event sent: one per round for a stream, one "
-             "for every other op, and zero if it sent nothing. Together with "
-             "request_id_offset this slices run_result.request_id_log and "
-             "the parallel request_dispatch_ns_log/request_return_ns_log/"
-             "request_status_log; run_result.request_ids()/request_timings() "
-             "do the slicing for you.");
+              "How many RPCs this event sent: one per round for a stream, one "
+              "for every other op, and zero if it sent nothing. Together with "
+              "request_id_offset this slices run_result.request_id_log and "
+              "the parallel request_dispatch_ns_log/request_return_ns_log/"
+              "request_status_log; run_result.request_ids()/request_timings() "
+              "do the slicing for you.");
 
   nb::class_<run_result>(m, "run_result")
       .def_ro("records", &run_result::records)
@@ -159,25 +161,28 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def_ro("request_dispatch_ns_log", &run_result::request_dispatch_ns_log)
       .def_ro("request_return_ns_log", &run_result::request_return_ns_log)
       .def_ro("request_status_log", &run_result::request_status_log)
-      .def("request_ids",
+      .def(
+          "request_ids",
           [](const run_result &r, std::size_t event_index) {
-            const auto [first, last] =
-                request_slice(r.records.at(event_index), r.request_id_log.size());
+            const auto [first, last] = request_slice(r.records.at(event_index),
+                                                     r.request_id_log.size());
             return std::vector<std::uint32_t>(r.request_id_log.begin() + first,
                                               r.request_id_log.begin() + last);
           },
           nb::arg("event_index"),
           "That event's slice of request_id_log: every request_id it put on "
           "the wire, in send order, for correlating against a server log.")
-      .def("request_timings",
+      .def(
+          "request_timings",
           [](const run_result &r, std::size_t event_index) {
-            const auto [first, last] =
-                request_slice(r.records.at(event_index), r.request_id_log.size());
+            const auto [first, last] = request_slice(r.records.at(event_index),
+                                                     r.request_id_log.size());
             std::vector<std::tuple<std::uint32_t, std::uint64_t, std::uint64_t>>
                 out;
             out.reserve(last - first);
             for (std::size_t i = first; i < last; ++i)
-              out.emplace_back(r.request_id_log[i], r.request_dispatch_ns_log[i],
+              out.emplace_back(r.request_id_log[i],
+                               r.request_dispatch_ns_log[i],
                                r.request_return_ns_log[i]);
             return out;
           },
@@ -189,19 +194,23 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def_ro("warnings", &run_result::warnings)
       .def_ro("t0_ns", &run_result::t0_ns)
       .def_ro("tick_ns", &run_result::tick_ns)
-      .def("write_csv", [](const run_result &r) { return write_csv(r); },
+      .def(
+          "write_csv", [](const run_result &r) { return write_csv(r); },
           "Serialize this run's records to a CSV string.");
 
   nb::class_<syndrome_source>(m, "syndrome_source");
 
   nb::class_<static_source, syndrome_source>(m, "static_source")
-      .def(nb::init<std::vector<std::vector<std::uint8_t>>>(), nb::arg("rounds"))
+      .def(nb::init<std::vector<std::vector<std::uint8_t>>>(),
+           nb::arg("rounds"))
       .def("reset", &static_source::reset);
 
   nb::class_<stim_memory_source, syndrome_source>(m, "stim_memory_source")
-      .def("__init__",
+      .def(
+          "__init__",
           [](stim_memory_source *self, std::uint64_t seed, nb::kwargs params) {
-            new (self) stim_memory_source(cudaqx::hetMapFromKwargs(params), seed);
+            new (self)
+                stim_memory_source(cudaqx::hetMapFromKwargs(params), seed);
           },
           "seed, then keyword arguments selecting and configuring one of "
           "Stim's built-in memory-circuit families: 'code', 'task', "
@@ -209,19 +218,18 @@ void bindPlaybackEmulator(nb::module_ &mod) {
           "Stim's four noise-probability knobs.")
       .def("reset", &stim_memory_source::reset);
 
-  m.def(
-      "run", &run_schedule, nb::call_guard<nb::gil_scoped_release>(),
-      nb::arg("schedule"), nb::arg("tick_ns"),
-      nb::arg("sources"), nb::arg("decoders") = nb::none(),
-      nb::arg("udp_endpoints") = nb::none(), nb::arg("udp_timeout_ms") = 200,
-      nb::arg("null_decoder_ids") = nb::none(),
-      nb::arg("lead_in_ns") = 20'000'000,
-      "Parse, plan, and run a line-oriented playback schedule. `sources` "
-      "maps a schedule's source_id -> syndrome_source. Exactly one of "
-      "`decoders` (in-process decoders from a multi_decoder_config), "
-      "`udp_endpoints` ({decoder_id: \"host:port\"}), or "
-      "`null_decoder_ids` (the discard-everything jitter floor, routed "
-      "under the given decoder_ids) selects the session backend.");
+  m.def("run", &run_schedule, nb::call_guard<nb::gil_scoped_release>(),
+        nb::arg("schedule"), nb::arg("tick_ns"), nb::arg("sources"),
+        nb::arg("decoders") = nb::none(), nb::arg("udp_endpoints") = nb::none(),
+        nb::arg("udp_timeout_ms") = 200,
+        nb::arg("null_decoder_ids") = nb::none(),
+        nb::arg("lead_in_ns") = 20'000'000,
+        "Parse, plan, and run a line-oriented playback schedule. `sources` "
+        "maps a schedule's source_id -> syndrome_source. Exactly one of "
+        "`decoders` (in-process decoders from a multi_decoder_config), "
+        "`udp_endpoints` ({decoder_id: \"host:port\"}), or "
+        "`null_decoder_ids` (the discard-everything jitter floor, routed "
+        "under the given decoder_ids) selects the session backend.");
 }
 
 } // namespace cudaq::qec::playback

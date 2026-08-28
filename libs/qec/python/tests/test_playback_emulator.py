@@ -169,9 +169,10 @@ def test_one_csv_row_per_record_with_matching_scalar_fields():
         assert cell(header, row, "call_ns") == str(rec.call_ns)
         assert cell(header, row, "return_ns") == str(rec.return_ns)
         assert cell(header, row, "rounds_streamed") == str(rec.rounds_streamed)
-        assert cell(header, row, "read_completed") == str(int(rec.read_completed))
-        assert cell(header, row, "correction_mismatch") == str(
-            int(rec.correction_mismatch))
+        assert cell(header, row,
+                    "read_completed") == str(int(rec.read_completed))
+        assert cell(header, row,
+                    "correction_mismatch") == str(int(rec.correction_mismatch))
         assert cell(header, row, "dispatched") == str(int(rec.dispatched))
 
 
@@ -247,8 +248,9 @@ def test_syndrome_log_slice_matches_the_bits_column_written_from_it():
     result = a_run()
     header, data = rows(result)
     for rec, row in zip(result.records, data):
-        bits = list(result.syndrome_log[rec.syndrome_offset:rec.syndrome_offset
-                                        + rec.syndrome_count])
+        bits = list(
+            result.syndrome_log[rec.syndrome_offset:rec.syndrome_offset +
+                                rec.syndrome_count])
         assert cell(header, row, "syndrome_bits") == bits_of(bits)
         corrections = list(
             result.correction_log[rec.correction_offset:rec.correction_offset +
@@ -340,10 +342,12 @@ def test_a_static_source_is_consumed_by_a_run_and_reset_rewinds_it():
 def test_a_stim_memory_source_drives_a_run_and_rejects_bad_params():
     params = dict(code="repetition_code", task="memory", distance=3)
     source = pb.stim_memory_source(1, **params)
-    result = pb.run("0 stream source=0 rounds=4\n", 1000, {0: source},
+    result = pb.run("0 stream source=0 rounds=4\n",
+                    1000, {0: source},
                     null_decoder_ids=[0])
     assert result.records[0].rounds_streamed == 4
-    assert len(result.syndrome_log) == 4 * 2  # 2 ancilla bits/round at distance 3
+    assert len(
+        result.syndrome_log) == 4 * 2  # 2 ancilla bits/round at distance 3
     source.reset()
 
     # The C++ constructor throws std::runtime_error, which nanobind maps to

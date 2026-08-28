@@ -121,7 +121,7 @@ struct event {
   /// accepts them); the parser defaults this to 1 tick (paced) when `every=`
   /// is omitted, and only sets it to 0 on an explicit `every=0`
   std::uint64_t stream_every_ticks = 1;
-  /// The two halves of the stop rule. 
+  /// The two halves of the stop rule.
   std::uint32_t stream_min_rounds = 1;
   std::uint32_t stream_max_rounds = 1;
 };
@@ -129,10 +129,10 @@ struct event {
 /// The parsed input. Bits live in shared arenas; events hold
 /// (offset, count) into them.
 struct schedule {
-  std::vector<event> events;                 // in file order
-  std::vector<std::uint8_t> syndrome_arena;  // one byte per bit (0x00/0x01)
-  std::vector<std::uint8_t> expected_arena;  // one byte per bit
-  std::vector<std::uint64_t> decoders;       // known decoder_ids
+  std::vector<event> events;                // in file order
+  std::vector<std::uint8_t> syndrome_arena; // one byte per bit (0x00/0x01)
+  std::vector<std::uint8_t> expected_arena; // one byte per bit
+  std::vector<std::uint64_t> decoders;      // known decoder_ids
   // Interned once at parse: events carry indices into this
   std::vector<std::string> signal_names;
   std::uint64_t tick_ns = 1000; // wall-clock duration of one tick
@@ -145,7 +145,7 @@ struct record {
   std::uint64_t decoder_id = 0;
   operation op = operation::reset;
   // True once the dispatch loop actually reached this event. False means a
-  // hard error aborted the run first 
+  // hard error aborted the run first
   bool dispatched = false;
 
   // -- timing (ns, relative to t0) --
@@ -156,12 +156,12 @@ struct record {
   std::uint64_t return_ns = 0;
 
   // -- outcome --
-  std::int32_t status = kNoStatus; // RpcStatus, or stream_terminate (above)
+  std::int32_t status = kNoStatus;   // RpcStatus, or stream_terminate (above)
   std::uint32_t rounds_streamed = 0; // stream only
-  bool read_completed = false;   // a correction was actually consumed
+  bool read_completed = false;       // a correction was actually consumed
 
   // -- data (offsets into the run's arenas) --
-  std::uint32_t syndrome_offset = 0, syndrome_count = 0;   // what was SENT
+  std::uint32_t syndrome_offset = 0, syndrome_count = 0;     // what was SENT
   std::uint32_t correction_offset = 0, correction_count = 0; // what came BACK
   bool correction_mismatch = false; // vs. the event's expected bits
 
@@ -179,9 +179,11 @@ struct record {
 /// re-running.
 struct run_result {
   std::vector<record> records;
-  std::vector<std::uint8_t> syndrome_log;    // arena the records index into
-  std::vector<std::uint8_t> correction_log;  // arena the corrections are stored in
-  std::vector<std::uint32_t> request_id_log; // Every request_id the run issued, in the order it issued them.
+  std::vector<std::uint8_t> syndrome_log; // arena the records index into
+  std::vector<std::uint8_t>
+      correction_log; // arena the corrections are stored in
+  std::vector<std::uint32_t> request_id_log; // Every request_id the run issued,
+                                             // in the order it issued them.
   // Per-request timing/outcome, parallel to request_id_log entry-for-entry.
   // dispatch_ns is stamped by the timing thread when the request was put on
   // the wire; return_ns and status are stamped by the reader thread when
@@ -190,7 +192,7 @@ struct run_result {
   std::vector<std::uint64_t> request_return_ns_log;
   std::vector<std::int32_t> request_status_log;
   std::vector<std::string> warnings;
-  std::uint64_t t0_ns = 0;      // CLOCK_MONOTONIC value run() aligned to
+  std::uint64_t t0_ns = 0; // CLOCK_MONOTONIC value run() aligned to
   std::uint64_t tick_ns = 0;
 };
 

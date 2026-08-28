@@ -38,15 +38,16 @@ std::vector<std::string> tokenize(const std::string &line) {
 
 bool is_digits(const std::string &s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) {
-           return std::isdigit(c);
-         });
+    return std::isdigit(c);
+  });
 }
 
 /// Parses `s` as a base-10 `T` (T is uint32_t or uint64_t), rejecting
-/// anything non-digit or too wide for T 
+/// anything non-digit or too wide for T
 template <typename T>
 T parse_uint(const std::string &s, const char *what) {
-  static_assert(std::is_same_v<T, std::uint32_t> || std::is_same_v<T, std::uint64_t>);
+  static_assert(std::is_same_v<T, std::uint32_t> ||
+                std::is_same_v<T, std::uint64_t>);
   if (!is_digits(s))
     throw std::invalid_argument(std::string(what) + " '" + s +
                                 "' is not a valid integer");
@@ -54,7 +55,8 @@ T parse_uint(const std::string &s, const char *what) {
   const auto end = s.data() + s.size();
   const auto res = std::from_chars(s.data(), end, v);
   if (res.ec != std::errc() || res.ptr != end)
-    throw std::invalid_argument(std::string(what) + " '" + s + "' does not fit in " +
+    throw std::invalid_argument(std::string(what) + " '" + s +
+                                "' does not fit in " +
                                 (sizeof(T) == 4 ? "32" : "64") + " bits");
   return v;
 }
@@ -82,7 +84,8 @@ void append_bits(std::vector<std::uint8_t> &arena, const std::string &s,
 
 /// One line's operands, split once into `key=value` pairs and the at most one
 /// token written without a keyword. Every accessor marks what it read, so
-/// whatever is left at the end is an operand the op does not take, and is rejected.
+/// whatever is left at the end is an operand the op does not take, and is
+/// rejected.
 class operands {
 public:
   operands(std::vector<std::string>::const_iterator first,
@@ -92,8 +95,8 @@ public:
       if (eq == std::string::npos) {
         if (!bare_.empty())
           throw std::invalid_argument("takes at most one operand written "
-                                      "without a 'key=', got '" + bare_ +
-                                      "' and '" + *it + "'");
+                                      "without a 'key=', got '" +
+                                      bare_ + "' and '" + *it + "'");
         bare_ = *it;
         continue;
       }
@@ -241,7 +244,7 @@ std::uint64_t read_session(operands &ops,
 /// `after=` blocks that event's own dispatch until a signal is raised;
 /// `until=` is a stream waiting on one to stop early.
 std::uint32_t read_signal(operands &ops, const char *key,
-                         std::vector<std::string> &names) {
+                          std::vector<std::string> &names) {
   const std::string name = ops.name(key);
   return name.empty() ? kNoSignal : intern(names, name);
 }
@@ -282,7 +285,7 @@ void read_source(operands &ops, const std::string &op_name, schedule &sched,
 }
 
 /// The bare 0/1 token, appended to `arena`. Which arena it lands in is the
-/// caller's business 
+/// caller's business
 void read_bits(operands &ops, std::vector<std::uint8_t> &arena,
                std::uint32_t &offset, std::uint32_t &count, const char *what) {
   const std::string &bits = ops.bare();
@@ -344,7 +347,6 @@ void read_round_bounds(operands &ops, event &e) {
   if (e.stream_max_rounds == 0)
     throw std::invalid_argument("'stream' must send at least one round");
 }
-
 
 } // namespace
 
@@ -441,7 +443,8 @@ schedule parse(std::string_view text,
       sched.events.push_back(e);
     } catch (const std::invalid_argument &ex) {
       throw std::invalid_argument("playback schedule, line " +
-                                  std::to_string(line_number) + ": " + ex.what());
+                                  std::to_string(line_number) + ": " +
+                                  ex.what());
     }
   }
 

@@ -12,9 +12,9 @@
 /// server). Concrete classes are anonymous-namespace private; the factories
 /// in session.h are the only public surface.
 
+#include "session.h"
 #include "RpcSlot.h"
 #include "SessionRegistry.h"
-#include "session.h"
 
 #include <algorithm>
 #include <arpa/inet.h>
@@ -67,7 +67,7 @@ public:
                             std::chrono::milliseconds timeout) override {
     std::unique_lock<std::mutex> lock(mu_);
     if (!completed_cv_.wait_for(lock, timeout,
-                               [&] { return !completed_.empty(); }))
+                                [&] { return !completed_.empty(); }))
       return false;
     request_id = completed_.front();
     completed_.pop_front();
@@ -113,7 +113,8 @@ make_null_sessions(const std::vector<std::uint64_t> &decoder_ids) {
 }
 
 void route_sessions(
-    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> &sessions,
+    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+        &sessions,
     std::unordered_map<std::uint64_t, session *> &router) {
   for (const auto &[id, s] : sessions)
     router[id] = s.get();
@@ -140,7 +141,7 @@ struct DispatchResult {
 
 /// Parses \p bytes as one of the three decoder RPCs and calls the matching
 /// core on \p dec, copying (for get_corrections) the still-bit-packed
-/// result into \p reply (capacity \p reply_capacity). 
+/// result into \p reply (capacity \p reply_capacity).
 DispatchResult dispatch_rpc(DecodingSession &dec, const std::uint8_t *bytes,
                             std::size_t size, std::uint8_t *reply,
                             std::size_t reply_capacity) {
@@ -173,8 +174,8 @@ DispatchResult dispatch_rpc(DecodingSession &dec, const std::uint8_t *bytes,
     if (!slot::parse_get_corrections(bytes, size, view))
       return {RpcStatus::BAD_REQUEST, 0};
     std::size_t reply_len = 0;
-    auto status = dec.get_corrections_core(view.return_size, view.reset,
-                                           reply, reply_capacity, reply_len);
+    auto status = dec.get_corrections_core(view.return_size, view.reset, reply,
+                                           reply_capacity, reply_len);
     return {status, reply_len};
   }
 
@@ -205,7 +206,7 @@ std::size_t reply_capacity_for(const std::uint8_t *bytes, std::size_t size) {
 }
 
 /// One decoder's input queue and the single thread that drains it, in
-/// submission order. 
+/// submission order.
 class inproc_session : public session {
 public:
   inproc_session(std::shared_ptr<SessionRegistry> registry,
@@ -213,7 +214,7 @@ public:
       : registry_(std::move(registry)) {
     dec_ = registry_->find(decoder_id);
     assert(dec_ && "make_inproc_sessions() must only construct a session "
-                  "for a decoder_id actually present in the config");
+                   "for a decoder_id actually present in the config");
     dispatcher_ = std::thread([this] { drain(); });
   }
 
@@ -233,7 +234,7 @@ public:
                             std::chrono::milliseconds timeout) override {
     std::unique_lock<std::mutex> lock(mu_);
     if (!completed_cv_.wait_for(lock, timeout,
-                               [&] { return !completed_.empty(); }))
+                                [&] { return !completed_.empty(); }))
       return false;
     request_id = completed_.front();
     completed_.pop_front();
@@ -302,7 +303,7 @@ private:
         std::unique_lock<std::mutex> lock(mu_);
         work_.wait(lock, [&] { return stop_ || !queue_.empty(); });
         if (queue_.empty())
-          return; 
+          return;
         j = std::move(queue_.front());
         queue_.pop_front();
       }
@@ -370,7 +371,7 @@ using cudaq::realtime::RPCResponse;
 // header - 20-byte IPv4 header); size scratch buffers to that.
 constexpr std::size_t kMaxDatagram = 65507;
 
-/// Splits "host:port" on the LAST ':' 
+/// Splits "host:port" on the LAST ':'
 void split_endpoint(const std::string &endpoint, std::string &host,
                     std::string &port) {
   auto pos = endpoint.rfind(':');
@@ -407,8 +408,8 @@ int make_connected_udp_socket(const std::string &endpoint,
   }
   freeaddrinfo(res);
   if (fd < 0)
-    throw std::runtime_error("playback UDP: failed to connect to '" +
-                             endpoint + "'");
+    throw std::runtime_error("playback UDP: failed to connect to '" + endpoint +
+                             "'");
 
   int rcvbuf = 1 << 20; // generous SO_RCVBUF
   ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
@@ -468,7 +469,7 @@ public:
                             std::chrono::milliseconds timeout) override {
     std::unique_lock<std::mutex> lock(mu_);
     if (!completed_cv_.wait_for(lock, timeout,
-                               [&] { return !completed_.empty(); }))
+                                [&] { return !completed_.empty(); }))
       return false;
     request_id = completed_.front();
     completed_.pop_front();
@@ -522,7 +523,7 @@ private:
   /// give up on a request rather than reporting a real reply -- erase it
   /// first instead, since nothing else will.
   void finish(std::uint32_t request_id, waiter &w, RpcStatus status,
-             const std::uint8_t *body, std::size_t len) {
+              const std::uint8_t *body, std::size_t len) {
     {
       std::lock_guard<std::mutex> lock(w.mu);
       w.status = status;
@@ -604,7 +605,8 @@ private:
           continue; // stale reply: nobody is waiting on this id any more
         w = it->second;
       }
-      const std::size_t avail = static_cast<std::size_t>(n) - sizeof(RPCResponse);
+      const std::size_t avail =
+          static_cast<std::size_t>(n) - sizeof(RPCResponse);
       finish(resp.request_id, *w, static_cast<RpcStatus>(resp.status),
              scratch.data() + sizeof(RPCResponse),
              std::min<std::size_t>(resp.result_len, avail));
@@ -625,8 +627,9 @@ private:
 } // namespace
 
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
-make_udp_sessions(const std::unordered_map<std::uint64_t, std::string> &endpoints,
-                  std::uint32_t timeout_ms) {
+make_udp_sessions(
+    const std::unordered_map<std::uint64_t, std::string> &endpoints,
+    std::uint32_t timeout_ms) {
   std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> out;
   out.reserve(endpoints.size());
   for (const auto &[id, endpoint] : endpoints) {

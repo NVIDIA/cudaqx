@@ -13,14 +13,14 @@
 
 #include "syndrome_source.h"
 
-#include "cudaq.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
-#include "cudaq/qec/code.h"
-#include "cudaq/qec/noise_model.h"
+#include "cudaq.h"
 #include "device/memory_circuit.h"
 #include "stim.h"
 #include "stim/simulators/frame_simulator_util.h"
+#include "cudaq/qec/code.h"
+#include "cudaq/qec/noise_model.h"
 
 #include <chrono>
 #include <gtest/gtest.h>
@@ -36,10 +36,10 @@ using rounds_t = std::vector<std::vector<uint8_t>>;
 TEST(StaticSource, ReplaysEveryRoundInOrderThenStaysExhausted) {
   const std::vector<uint8_t> wide(1000, 1);
   const rounds_t cases[] = {
-      {},                            // nothing to replay: exhausted at once
-      {{1, 0, 1}},                   // exactly one round
-      {{0, 1}, {1, 1, 0}, {0}},      // several, of differing widths
-      {{1}, wide, {}},               // one bit, then 1000, then none
+      {},                       // nothing to replay: exhausted at once
+      {{1, 0, 1}},              // exactly one round
+      {{0, 1}, {1, 1, 0}, {0}}, // several, of differing widths
+      {{1}, wide, {}},          // one bit, then 1000, then none
   };
   for (const auto &rounds : cases) {
     SCOPED_TRACE("rounds=" + std::to_string(rounds.size()));
@@ -61,9 +61,10 @@ TEST(StaticSource, AZeroWidthRoundIsNotMistakenForExhaustion) {
   // not stop the replay.
   static_source src({{1}, {}, {1}});
   EXPECT_EQ(src.next_round(), (std::vector<uint8_t>{1}));
-  EXPECT_TRUE(src.next_round().empty());                  // the zero-width round
-  EXPECT_EQ(src.next_round(), (std::vector<uint8_t>{1})); // proves it kept going
-  EXPECT_TRUE(src.next_round().empty());                  // now genuinely done
+  EXPECT_TRUE(src.next_round().empty()); // the zero-width round
+  EXPECT_EQ(src.next_round(),
+            (std::vector<uint8_t>{1}));  // proves it kept going
+  EXPECT_TRUE(src.next_round().empty()); // now genuinely done
 }
 
 TEST(StaticSource, ResetRewindsToRoundZeroFromAnywhereAndIsIdempotent) {
@@ -108,9 +109,12 @@ constexpr std::size_t kSimdWidth = stim::MAX_BITWORD_WIDTH;
 
 /// Every one of Stim's built-in generated-circuit families.
 constexpr std::pair<const char *, const char *> kGeneratedTasks[] = {
-    {"repetition_code", "memory"},      {"surface_code", "rotated_memory_x"},
-    {"surface_code", "rotated_memory_z"}, {"surface_code", "unrotated_memory_x"},
-    {"surface_code", "unrotated_memory_z"}, {"color_code", "memory_xyz"},
+    {"repetition_code", "memory"},
+    {"surface_code", "rotated_memory_x"},
+    {"surface_code", "rotated_memory_z"},
+    {"surface_code", "unrotated_memory_x"},
+    {"surface_code", "unrotated_memory_z"},
+    {"color_code", "memory_xyz"},
 };
 
 struct shape {
@@ -147,22 +151,24 @@ stim::Circuit generate(const std::string &code, const std::string &task,
 /// same (code, task, shape) generate() builds a reference circuit from.
 heterogeneous_map params_for(const std::string &code, const std::string &task,
                              shape s, double noise = 0.0) {
-  return heterogeneous_map{
-      {"code", code},           {"task", task},
-      {"distance", static_cast<std::size_t>(s.distance)},
-      {"rounds", static_cast<std::size_t>(s.rounds)},
-      {"after_clifford_depolarization", noise},
-      {"before_measure_flip_probability", noise}};
+  return heterogeneous_map{{"code", code},
+                           {"task", task},
+                           {"distance", static_cast<std::size_t>(s.distance)},
+                           {"rounds", static_cast<std::size_t>(s.rounds)},
+                           {"after_clifford_depolarization", noise},
+                           {"before_measure_flip_probability", noise}};
 }
 
 } // namespace
 
-TEST(StimMemorySource, RoundWidthMatchesTheGeneratedCircuitsPerRoundMeasurementCount) {
+TEST(StimMemorySource,
+     RoundWidthMatchesTheGeneratedCircuitsPerRoundMeasurementCount) {
   // One extra round adds exactly round_width() measurements to the whole
   // circuit's count, since only the REPEAT block's replay count changed.
   for (const auto &[code, task] : kGeneratedTasks) {
     SCOPED_TRACE(std::string(code) + ":" + task);
-    const shape s = std::string(code) == "color_code" ? shape{5, 3} : shape{3, 5};
+    const shape s =
+        std::string(code) == "color_code" ? shape{5, 3} : shape{3, 5};
     const std::size_t width =
         generate(code, task, {s.distance, s.rounds + 1}).count_measurements() -
         generate(code, task, s).count_measurements();
@@ -246,10 +252,10 @@ TEST(StimMemorySource, DestructionAfterUseDoesNotHangOrCrash) {
 }
 
 TEST(StimMemorySource, RejectsAnUnknownCodeFamily) {
-  EXPECT_THROW(stim_memory_source(params_for("not_a_real_code_family",
-                                             "memory", {3, 5}),
-                                  /*seed=*/1),
-              std::invalid_argument);
+  EXPECT_THROW(
+      stim_memory_source(params_for("not_a_real_code_family", "memory", {3, 5}),
+                         /*seed=*/1),
+      std::invalid_argument);
 }
 
 TEST(StimMemorySource, RejectsGeneratorParamsWithTooFewRoundsForARepeatBlock) {
@@ -257,20 +263,20 @@ TEST(StimMemorySource, RejectsGeneratorParamsWithTooFewRoundsForARepeatBlock) {
   // 2 rounds, so there is no round for the constructor to derive.
   for (std::uint32_t rounds : {1u, 2u}) {
     SCOPED_TRACE(rounds);
-    EXPECT_THROW(stim_memory_source(
-                     params_for("repetition_code", "memory", {3, rounds}),
-                     /*seed=*/1),
-                std::runtime_error);
+    EXPECT_THROW(
+        stim_memory_source(params_for("repetition_code", "memory", {3, rounds}),
+                           /*seed=*/1),
+        std::runtime_error);
   }
 }
 
 TEST(StimMemorySource, MoreThanOneRepeatBlockIsRejected) {
   // Stim emits a second REPEAT block for color_code:memory_xyz from four
   // rounds up; only a single REPEAT block is a valid round to stream.
-  EXPECT_THROW(stim_memory_source(
-                   params_for("color_code", "memory_xyz", {3, 8}),
-                   /*seed=*/1),
-              std::runtime_error);
+  EXPECT_THROW(
+      stim_memory_source(params_for("color_code", "memory_xyz", {3, 8}),
+                         /*seed=*/1),
+      std::runtime_error);
 }
 
 // ─── stim_memory_source vs. a single whole-circuit run ─────────────────────
@@ -294,9 +300,9 @@ std::string to_bit_string(const stim::simd_bits<kSimdWidth> &bits,
 // `compile_sampler().sample()` reaches, rather than a hand-built
 // FrameSimulator that could drift. `reference_sample` picks what comes
 // back: all-zero yields the raw noise frame, a real sample yields absolutes.
-std::string sample_whole_circuit_once(
-    const stim::Circuit &circuit, std::uint64_t seed,
-    const stim::simd_bits<kSimdWidth> &reference_sample) {
+std::string
+sample_whole_circuit_once(const stim::Circuit &circuit, std::uint64_t seed,
+                          const stim::simd_bits<kSimdWidth> &reference_sample) {
   // stim_memory_source seeds its own simulator with mt19937_64(seed), so the
   // reference has to be seeded identically or the two consume different
   // random streams and nothing below means anything.
@@ -324,7 +330,8 @@ std::string sample_via_stim_memory_source(const heterogeneous_map &params,
                                           std::uint64_t seed,
                                           std::size_t total_measurements) {
   stim_memory_source source(params, seed);
-  const std::size_t stabilizer_bits_needed = total_measurements - source.data_width();
+  const std::size_t stabilizer_bits_needed =
+      total_measurements - source.data_width();
   std::string bits;
   while (bits.size() < stabilizer_bits_needed)
     for (auto b : source.next_round())
@@ -336,24 +343,26 @@ std::string sample_via_stim_memory_source(const heterogeneous_map &params,
 
 void check_task(const std::string &code, const std::string &task, shape s) {
   constexpr std::uint64_t kSeed = 424242;
-  SCOPED_TRACE("distance=" + std::to_string(s.distance) + " rounds=" +
-               std::to_string(s.rounds));
+  SCOPED_TRACE("distance=" + std::to_string(s.distance) +
+               " rounds=" + std::to_string(s.rounds));
 
   const stim::Circuit gen = generate(code, task, s, /*noise=*/0.001);
   const std::string reference =
       sample_whole_circuit_once(gen, kSeed, zero_reference(gen));
-  const std::string via_source = sample_via_stim_memory_source(
-      params_for(code, task, s, /*noise=*/0.001), kSeed, gen.count_measurements());
+  const std::string via_source =
+      sample_via_stim_memory_source(params_for(code, task, s, /*noise=*/0.001),
+                                    kSeed, gen.count_measurements());
 
   EXPECT_EQ(via_source, reference) << "mismatch for " << code << ":" << task;
   EXPECT_EQ(via_source.size(), gen.count_measurements())
-      << "round-by-round generation didn't cover every measurement for "
-      << code << ":" << task;
+      << "round-by-round generation didn't cover every measurement for " << code
+      << ":" << task;
 }
 
 } // namespace
 
-TEST(StimMemorySourceVsFullCircuit, EveryGeneratedCodeFamilyMatchesOneWholeCircuitRun) {
+TEST(StimMemorySourceVsFullCircuit,
+     EveryGeneratedCodeFamilyMatchesOneWholeCircuitRun) {
   // All six of Stim's built-in generated-circuit families, across a range of
   // distances and round counts, at the same round count on both sides.
   int cases = 0;
@@ -371,7 +380,8 @@ TEST(StimMemorySourceVsFullCircuit, EveryGeneratedCodeFamilyMatchesOneWholeCircu
   EXPECT_EQ(cases, 5 * std::size(kSweep) + std::size(kColorSweep));
 }
 
-TEST(StimMemorySourceVsFullCircuit, AGeneratedMemoryCircuitsReferenceSampleIsAllZero) {
+TEST(StimMemorySourceVsFullCircuit,
+     AGeneratedMemoryCircuitsReferenceSampleIsAllZero) {
   // Why the check above can compare noise frames as measurement outcomes: a
   // memory circuit's stabilizers have noiseless result 0, so its reference
   // sample is all zero and `frame == outcome` for every bit.
@@ -396,7 +406,7 @@ namespace {
 cudaq::noise_model make_noise() {
   cudaq::noise_model noise;
   noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_bitflip(0.05),
-                               /*num_controls=*/1);
+                              /*num_controls=*/1);
   return noise;
 }
 
@@ -405,26 +415,28 @@ cudaq::noise_model make_noise() {
 // of (numAncx + numAncz) ancilla bits, then numData data-qubit bits -- the
 // same layout `cudaq_memory_source` reads internally.
 std::vector<std::uint8_t> raw_measurements(const cudaq::qec::code &code,
-                                            cudaq::qec::operation prep_op,
-                                            std::size_t numRounds,
-                                            cudaq::noise_model &noise,
-                                            std::uint64_t seed) {
+                                           cudaq::qec::operation prep_op,
+                                           std::size_t numRounds,
+                                           cudaq::noise_model &noise,
+                                           std::uint64_t seed) {
   auto &prep =
       code.get_operation<cudaq::qec::code::one_qubit_encoding>(prep_op);
   auto &stabRound = code.get_operation<cudaq::qec::code::stabilizer_round>(
       cudaq::qec::operation::stabilizer_round);
   const bool is_z_prep = prep_op == cudaq::qec::operation::prep0 ||
-                          prep_op == cudaq::qec::operation::prep1;
+                         prep_op == cudaq::qec::operation::prep1;
 
   auto sched_x = code.get_stabilizer_schedule_x();
   auto sched_z = code.get_stabilizer_schedule_z();
-  std::vector<std::size_t> xVec(sched_x.data(), sched_x.data() + sched_x.size());
-  std::vector<std::size_t> zVec(sched_z.data(), sched_z.data() + sched_z.size());
+  std::vector<std::size_t> xVec(sched_x.data(),
+                                sched_x.data() + sched_x.size());
+  std::vector<std::size_t> zVec(sched_z.data(),
+                                sched_z.data() + sched_z.size());
   auto logical_obs =
       is_z_prep ? code.get_observables_z() : code.get_observables_x();
   const std::size_t num_obs = logical_obs.shape()[0];
   std::vector<std::size_t> obs_flat(logical_obs.data(),
-                                     logical_obs.data() + logical_obs.size());
+                                    logical_obs.data() + logical_obs.size());
 
   const std::size_t numData = code.get_num_data_qubits();
   const std::size_t numAncx = code.get_num_ancilla_x_qubits();
@@ -433,10 +445,9 @@ std::vector<std::uint8_t> raw_measurements(const cudaq::qec::code &code,
   cudaq::set_random_seed(static_cast<std::size_t>(seed));
   cudaq::sample_options opts{
       .shots = 1, .noise = noise, .explicit_measurements = true};
-  auto result =
-      cudaq::sample(opts, cudaq::qec::memory_circuit, stabRound, prep, numData,
-                    numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
-                    !is_z_prep);
+  auto result = cudaq::sample(opts, cudaq::qec::memory_circuit, stabRound, prep,
+                              numData, numAncx, numAncz, numRounds, xVec, zVec,
+                              obs_flat, num_obs, !is_z_prep);
   cudaqx::tensor<std::uint8_t> mzTable(result.sequential_data());
 
   const std::size_t width = mzTable.shape()[1];
@@ -457,10 +468,11 @@ TEST(CudaqMemorySource, MatchesDirectKernelRunPerRound) {
   constexpr std::size_t kMaxRounds = 5;
 
   auto code = cudaq::qec::get_code("repetition",
-                                    cudaqx::heterogeneous_map{{"distance", 3}});
+                                   cudaqx::heterogeneous_map{{"distance", 3}});
   auto noise = make_noise();
 
-  for (auto prep_op : {cudaq::qec::operation::prep0, cudaq::qec::operation::prep1}) {
+  for (auto prep_op :
+       {cudaq::qec::operation::prep0, cudaq::qec::operation::prep1}) {
     SCOPED_TRACE(prep_op == cudaq::qec::operation::prep0 ? "prep0" : "prep1");
     for (std::size_t r = 1; r <= kMaxRounds; ++r) {
       auto reference = raw_measurements(*code, prep_op, r, noise, kSeed);
@@ -498,12 +510,12 @@ TEST(CudaqMemorySource, ReadDataAfterVariableRoundCountMatchesDirectCall) {
   constexpr std::size_t kMaxRounds = 6;
 
   auto code = cudaq::qec::get_code("repetition",
-                                    cudaqx::heterogeneous_map{{"distance", 3}});
+                                   cudaqx::heterogeneous_map{{"distance", 3}});
   auto noise = make_noise();
 
   for (std::size_t k = 1; k <= kMaxRounds; ++k) {
-    cudaq_memory_source source(*code, cudaq::qec::operation::prep0,
-                                kMaxRounds, noise, kSeed);
+    cudaq_memory_source source(*code, cudaq::qec::operation::prep0, kMaxRounds,
+                               noise, kSeed);
     for (std::size_t i = 0; i < k; ++i)
       ASSERT_FALSE(source.next_round().empty());
     auto data = source.read_data();
@@ -519,7 +531,7 @@ TEST(CudaqMemorySource, ReadDataAfterVariableRoundCountMatchesDirectCall) {
 
 TEST(CudaqMemorySource, ARoundBudgetIsEnforcedAndDataNeedsARoundFirst) {
   auto code = cudaq::qec::get_code("repetition",
-                                    cudaqx::heterogeneous_map{{"distance", 3}});
+                                   cudaqx::heterogeneous_map{{"distance", 3}});
   auto noise = make_noise();
   cudaq_memory_source source(*code, cudaq::qec::operation::prep0, 3, noise, 1);
 
@@ -544,10 +556,10 @@ TEST(CudaqMemorySource, ARoundBudgetIsEnforcedAndDataNeedsARoundFirst) {
 TEST(CudaqMemorySource, ResetAdvancesToANewSeedGeneration) {
   constexpr std::uint64_t kSeed = 55;
   auto code = cudaq::qec::get_code("repetition",
-                                    cudaqx::heterogeneous_map{{"distance", 3}});
+                                   cudaqx::heterogeneous_map{{"distance", 3}});
   auto noise = make_noise();
   cudaq_memory_source source(*code, cudaq::qec::operation::prep0, 3, noise,
-                              kSeed);
+                             kSeed);
   source.reset();
 
   std::vector<std::uint8_t> streamed;
@@ -557,7 +569,7 @@ TEST(CudaqMemorySource, ResetAdvancesToANewSeedGeneration) {
   }
 
   auto reference = raw_measurements(*code, cudaq::qec::operation::prep0, 3,
-                                     noise, kSeed + 1);
+                                    noise, kSeed + 1);
   ASSERT_LE(streamed.size(), reference.size());
   for (std::size_t i = 0; i < streamed.size(); ++i)
     EXPECT_EQ(streamed[i], reference[i]);

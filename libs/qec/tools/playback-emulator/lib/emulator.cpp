@@ -8,8 +8,8 @@
 
 /// @file emulator.cpp
 /// @brief plan() and run(): pre-serialize every static frame before t0,
-/// validate every frame size it can before t0, then run one timing thread that does
-/// nothing between its deadlines but wait and dispatch. 
+/// validate every frame size it can before t0, then run one timing thread that
+/// does nothing between its deadlines but wait and dispatch.
 
 #include "emulator.h"
 
@@ -18,8 +18,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
-#include <deque>
 #include <ctime>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -68,7 +68,7 @@ constexpr std::uint64_t kSpinSlackNs = 200'000;
 constexpr std::uint64_t kUnpacedStreamFloorNs = 50'000;
 
 /// Saturating add. A deadline far enough out to overflow the clock is
-/// clamped to "never" 
+/// clamped to "never"
 inline std::uint64_t add_sat(std::uint64_t a, std::uint64_t b) {
   std::uint64_t sum = 0;
   return __builtin_add_overflow(a, b, &sum) ? ~std::uint64_t(0) : sum;
@@ -88,7 +88,8 @@ void wait_until(std::uint64_t deadline_ns) {
 
 // -- Frame construction / parsing helpers. --
 
-void append_bytes(std::vector<std::uint8_t> &buf, const void *p, std::size_t n) {
+void append_bytes(std::vector<std::uint8_t> &buf, const void *p,
+                  std::size_t n) {
   const std::size_t off = buf.size();
   buf.resize(off + n);
   std::memcpy(buf.data() + off, p, n);
@@ -96,8 +97,8 @@ void append_bytes(std::vector<std::uint8_t> &buf, const void *p, std::size_t n) 
 
 /// Pack one-byte-per-bit (0x00/0x01) values from `bits` into LSB-first bytes,
 /// appended to `buf`.
-void append_packed_bits(std::vector<std::uint8_t> &buf, const std::uint8_t *bits,
-                        std::size_t n) {
+void append_packed_bits(std::vector<std::uint8_t> &buf,
+                        const std::uint8_t *bits, std::size_t n) {
   const std::size_t off = buf.size();
   buf.resize(off + wire::bit_packed_bytes(n), 0);
   for (std::size_t i = 0; i < n; ++i)
@@ -107,8 +108,8 @@ void append_packed_bits(std::vector<std::uint8_t> &buf, const std::uint8_t *bits
 
 /// Unpack LSB-first bit-packed bytes into one-byte-per-bit values, appended
 /// to `out`.
-void append_unpacked_bits(std::vector<std::uint8_t> &out, const std::uint8_t *packed,
-                          std::size_t n_bits) {
+void append_unpacked_bits(std::vector<std::uint8_t> &out,
+                          const std::uint8_t *packed, std::size_t n_bits) {
   for (std::size_t i = 0; i < n_bits; ++i)
     out.push_back((packed[i / 8] >> (i % 8)) & 1u);
 }
@@ -116,10 +117,10 @@ void append_unpacked_bits(std::vector<std::uint8_t> &out, const std::uint8_t *pa
 /// Build one wire frame: RPCHeader + a fixed payload struct, plus optional
 /// trailing bit-packed syndrome bytes. The single point
 /// where every operation's frame shape is assembled.
-std::vector<std::uint8_t> build_frame(std::uint32_t function_id, std::uint32_t request_id,
-                                      const void *payload, std::size_t payload_len,
-                                      const std::uint8_t *bits = nullptr,
-                                      std::size_t n_bits = 0) {
+std::vector<std::uint8_t>
+build_frame(std::uint32_t function_id, std::uint32_t request_id,
+            const void *payload, std::size_t payload_len,
+            const std::uint8_t *bits = nullptr, std::size_t n_bits = 0) {
   const std::size_t trailing = bits ? wire::bit_packed_bytes(n_bits) : 0;
   RPCHeader h{};
   h.magic = RPC_MAGIC_REQUEST;
@@ -147,25 +148,30 @@ void set_request_id(std::uint8_t *frame_bytes, std::uint32_t rid) {
   reinterpret_cast<RPCHeader *>(frame_bytes)->request_id = rid;
 }
 
-std::vector<std::uint8_t> build_reset_frame(std::uint64_t decoder_id, std::uint32_t rid) {
+std::vector<std::uint8_t> build_reset_frame(std::uint64_t decoder_id,
+                                            std::uint32_t rid) {
   wire::ResetRequestPayload p{static_cast<std::int64_t>(decoder_id)};
   return build_frame(wire::kResetDecoderFunctionId, rid, &p, sizeof(p));
 }
 
-std::vector<std::uint8_t> build_enqueue_frame(std::uint64_t decoder_id, std::uint32_t rid,
-                                              const std::uint8_t *bits, std::size_t n_bits) {
+std::vector<std::uint8_t> build_enqueue_frame(std::uint64_t decoder_id,
+                                              std::uint32_t rid,
+                                              const std::uint8_t *bits,
+                                              std::size_t n_bits) {
   wire::EnqueueRequestPayload p{static_cast<std::int64_t>(decoder_id),
                                 /*counter=*/0,
                                 /*syndrome_mapping_id=*/0,
                                 static_cast<std::int64_t>(n_bits)};
-  return build_frame(wire::kEnqueueSyndromesFunctionId, rid, &p, sizeof(p), bits, n_bits);
+  return build_frame(wire::kEnqueueSyndromesFunctionId, rid, &p, sizeof(p),
+                     bits, n_bits);
 }
 
 std::vector<std::uint8_t> build_get_corrections_frame(std::uint64_t decoder_id,
-                                                       std::int64_t return_size,
-                                                       std::uint32_t rid) {
+                                                      std::int64_t return_size,
+                                                      std::uint32_t rid) {
   // reset=1 always: a playback read consumes the shot it reports on.
-  wire::GetCorrectionsRequestPayload p{static_cast<std::int64_t>(decoder_id), return_size,
+  wire::GetCorrectionsRequestPayload p{static_cast<std::int64_t>(decoder_id),
+                                       return_size,
                                        /*reset=*/1};
   return build_frame(wire::kGetCorrectionsFunctionId, rid, &p, sizeof(p));
 }
@@ -178,20 +184,22 @@ std::uint32_t return_size_for(const event &e) {
 /// A session that returns OK but hands back fewer bytes than `return_size`
 /// bits requires is indistinguishable from "the correction happens to be
 /// all-zero" once those bytes are naively unpacked from a zero-initialized
-/// buffer 
+/// buffer
 RpcStatus reject_truncated_reply(RpcStatus status, std::size_t reply_len,
                                  std::uint32_t return_size) {
-  if (status == RpcStatus::OK && reply_len < wire::bit_packed_bytes(return_size))
+  if (status == RpcStatus::OK &&
+      reply_len < wire::bit_packed_bytes(return_size))
     return RpcStatus::INTERNAL_ERROR;
   return status;
 }
 
-bool mismatches_expected(const schedule &sched, const event &e, const std::uint8_t *bits,
-                         std::size_t n) {
+bool mismatches_expected(const schedule &sched, const event &e,
+                         const std::uint8_t *bits, std::size_t n) {
   if (e.expected_count == 0)
     return false; // nothing to compare against
   return n != e.expected_count ||
-        !std::equal(bits, bits + n, sched.expected_arena.begin() + e.expected_offset);
+         !std::equal(bits, bits + n,
+                     sched.expected_arena.begin() + e.expected_offset);
 }
 
 /// Reject a schedule whose `until=`/`after=` can never come up before it is
@@ -202,15 +210,15 @@ void check_signal_order(const schedule &sched) {
     const auto &e = sched.events[i];
     if (e.op == operation::stream && e.until_signal_id != kNoSignal &&
         !raised[e.until_signal_id])
-      throw std::invalid_argument(
-          "event " + std::to_string(i) + " streams until signal '" +
-          sched.signal_names[e.until_signal_id] +
-          "', which no earlier 'signal=' event raises");
+      throw std::invalid_argument("event " + std::to_string(i) +
+                                  " streams until signal '" +
+                                  sched.signal_names[e.until_signal_id] +
+                                  "', which no earlier 'signal=' event raises");
     if (e.after_signal_id != kNoSignal && !raised[e.after_signal_id])
-      throw std::invalid_argument(
-          "event " + std::to_string(i) + " dispatches after signal '" +
-          sched.signal_names[e.after_signal_id] +
-          "', which no earlier 'signal=' event raises");
+      throw std::invalid_argument("event " + std::to_string(i) +
+                                  " dispatches after signal '" +
+                                  sched.signal_names[e.after_signal_id] +
+                                  "', which no earlier 'signal=' event raises");
     if (e.signal_id != kNoSignal)
       raised[e.signal_id] = true;
   }
@@ -218,9 +226,11 @@ void check_signal_order(const schedule &sched) {
 
 } // namespace
 
-std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_map<std::uint64_t, session *> &router,
-             const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
-             const run_params &params) {
+std::shared_ptr<run_plan>
+plan(const schedule &sched_in,
+     const std::unordered_map<std::uint64_t, session *> &router,
+     const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
+     const run_params &params) {
   auto impl = std::make_shared<run_plan>();
   impl->sched = sched_in;
   impl->router = router;
@@ -241,8 +251,9 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
     if (e.source_id != kNoSource &&
         (e.op == operation::stream || e.op == operation::enqueue_data) &&
         !sources.contains(e.source_id))
-      throw std::invalid_argument("no syndrome_source registered for source_id=" +
-                                  std::to_string(e.source_id));
+      throw std::invalid_argument(
+          "no syndrome_source registered for source_id=" +
+          std::to_string(e.source_id));
   }
 
   // -- Draw and serialize everything whose bytes are known before t0, in
@@ -261,8 +272,8 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
                      std::uint32_t bits_count) {
       if (max_frame_bytes != 0 && bytes.size() > max_frame_bytes)
         throw std::invalid_argument(
-            "event " + std::to_string(i) + " (decoder_id=" +
-            std::to_string(e.decoder_id) + ") builds a " +
+            "event " + std::to_string(i) +
+            " (decoder_id=" + std::to_string(e.decoder_id) + ") builds a " +
             std::to_string(bytes.size()) +
             "-byte frame, exceeding the session's max_frame_bytes=" +
             std::to_string(max_frame_bytes));
@@ -271,7 +282,8 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
       rp.frame_len = static_cast<std::uint32_t>(bytes.size());
       rp.bits_offset = bits_offset;
       rp.bits_count = bits_count;
-      impl->frame_arena.insert(impl->frame_arena.end(), bytes.begin(), bytes.end());
+      impl->frame_arena.insert(impl->frame_arena.end(), bytes.begin(),
+                               bytes.end());
       ep.push_back(rp);
     };
 
@@ -280,7 +292,8 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
       place(build_reset_frame(e.decoder_id, /*rid=*/0), 0, 0);
       break;
     case operation::get_corrections:
-      place(build_get_corrections_frame(e.decoder_id, return_size_for(e), /*rid=*/0),
+      place(build_get_corrections_frame(e.decoder_id, return_size_for(e),
+                                        /*rid=*/0),
             0, 0);
       break;
     case operation::stream:
@@ -290,7 +303,8 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
         // already pinned the count, so every frame is known now.
         for (std::uint32_t r = 0; r < e.stream_min_rounds; ++r)
           place(build_enqueue_frame(e.decoder_id, /*rid=*/0,
-                                    sched.syndrome_arena.data() + e.syndrome_offset,
+                                    sched.syndrome_arena.data() +
+                                        e.syndrome_offset,
                                     e.syndrome_count),
                 e.syndrome_offset, e.syndrome_count);
         break;
@@ -314,7 +328,8 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
                                                      : src.next_round();
         if (round.empty())
           break; // dry: dispatch reports SOURCE_EXHAUSTED for what is missing
-        const auto off = static_cast<std::uint32_t>(sched.syndrome_arena.size());
+        const auto off =
+            static_cast<std::uint32_t>(sched.syndrome_arena.size());
         const auto len = static_cast<std::uint32_t>(round.size());
         sched.syndrome_arena.insert(sched.syndrome_arena.end(), round.begin(),
                                     round.end());
@@ -335,11 +350,12 @@ std::shared_ptr<run_plan> plan(const schedule &sched_in, const std::unordered_ma
   {
     std::unordered_map<session *, std::uint64_t> owner;
     for (const auto &e : sched.events) {
-      auto [it, inserted] = owner.emplace(router.at(e.decoder_id), e.decoder_id);
+      auto [it, inserted] =
+          owner.emplace(router.at(e.decoder_id), e.decoder_id);
       if (!inserted && it->second != e.decoder_id)
         throw std::invalid_argument(
-            "decoder_id=" + std::to_string(e.decoder_id) + " and decoder_id=" +
-            std::to_string(it->second) +
+            "decoder_id=" + std::to_string(e.decoder_id) +
+            " and decoder_id=" + std::to_string(it->second) +
             " share one session instance -- each decoder_id must have its "
             "own");
     }
@@ -369,7 +385,8 @@ public:
   struct pending {
     std::uint32_t request_id = 0;
     std::uint32_t event_index = 0;
-    std::uint32_t log_index = 0; // into request_return_ns_log/request_status_log
+    std::uint32_t log_index =
+        0; // into request_return_ns_log/request_status_log
   };
 
   /// One event's requests, as they land. `term` is the stream/enqueue_data
@@ -385,14 +402,16 @@ public:
   };
 
   using collect_fn = std::function<collected(session &, const pending &)>;
-  using complete_fn = std::function<void(std::uint32_t event_index, const progress &)>;
+  using complete_fn =
+      std::function<void(std::uint32_t event_index, const progress &)>;
 
   /// `collect` awaits and records one reply; `complete` runs once an event's
   /// requests are all collected, and owns writing that event's record.
   reader_thread(session &s, collect_fn collect, complete_fn complete,
-               std::chrono::nanoseconds drain_timeout)
-      : session_(s), collect_(std::move(collect)), complete_(std::move(complete)),
-        drain_timeout_(drain_timeout), thread_([this] { loop(); }) {}
+                std::chrono::nanoseconds drain_timeout)
+      : session_(s), collect_(std::move(collect)),
+        complete_(std::move(complete)), drain_timeout_(drain_timeout),
+        thread_([this] { loop(); }) {}
 
   ~reader_thread() { close(); }
 
@@ -489,8 +508,8 @@ private:
         drain_deadline = std::chrono::steady_clock::now() + drain_timeout_;
       if (std::chrono::steady_clock::now() < *drain_deadline)
         continue;
-      std::vector<std::pair<std::uint32_t, progress>> leftover(progress_.begin(),
-                                                                progress_.end());
+      std::vector<std::pair<std::uint32_t, progress>> leftover(
+          progress_.begin(), progress_.end());
       progress_.clear();
       outstanding_.clear();
       lock.unlock();
@@ -584,7 +603,8 @@ void abort_on_hard_error(const run_ctx &c, RpcStatus status, std::uint32_t i) {
     return;
   if (try_abort(c.st))
     warn(c, event_label(c, i) + " returned status " +
-                std::to_string(static_cast<int>(status)) + "; aborting the run");
+                std::to_string(static_cast<int>(status)) +
+                "; aborting the run");
 }
 
 /// One request's slot in the per-request logs.
@@ -616,13 +636,14 @@ issued_request begin_request(const run_ctx &c, record &rec,
     if (first_round)
       rec.syndrome_offset =
           static_cast<std::uint32_t>(c.result.syndrome_log.size());
-    c.result.syndrome_log.insert(c.result.syndrome_log.end(), bits, bits + n_bits);
+    c.result.syndrome_log.insert(c.result.syndrome_log.end(), bits,
+                                 bits + n_bits);
     rec.syndrome_count += static_cast<std::uint32_t>(n_bits);
   }
   return {rid, idx};
 }
 
-/// Timing-thread-only element write, right after the frame is on the wire 
+/// Timing-thread-only element write, right after the frame is on the wire
 void stamp_dispatch(const run_ctx &c, std::uint32_t log_index) {
   c.result.request_dispatch_ns_log[log_index] = now_ns() - c.t0;
 }
@@ -630,7 +651,8 @@ void stamp_dispatch(const run_ctx &c, std::uint32_t log_index) {
 /// One `stream` or `enqueue_data` event: draw a round, send it, decide
 /// whether to send another, until a terminal status is reached; `rec` and
 /// `result` are updated in place. Both ops share this loop since they are the
-/// same wire operation; `enqueue_data` just pulls a data readout with 1/1 bounds.
+/// same wire operation; `enqueue_data` just pulls a data readout with 1/1
+/// bounds.
 void run_stream(const run_ctx &c, std::uint32_t i,
                 std::uint64_t deadline_abs_ns, session &s) {
   auto &plan = c.plan;
@@ -697,11 +719,12 @@ void run_stream(const run_ctx &c, std::uint32_t i,
 
     // Where this round's bits live and how its frame is produced are the
     // only things the two modes disagree on.
-    const std::uint8_t *bits = prebuilt ? plan.sched.syndrome_arena.data() +
-                                              ep[rounds].bits_offset
-                                        : drawn.data();
+    const std::uint8_t *bits =
+        prebuilt ? plan.sched.syndrome_arena.data() + ep[rounds].bits_offset
+                 : drawn.data();
     const std::size_t n_bits = prebuilt ? ep[rounds].bits_count : drawn.size();
-    const auto [rid, log_index] = begin_request(c, rec, bits, n_bits, rounds == 0);
+    const auto [rid, log_index] =
+        begin_request(c, rec, bits, n_bits, rounds == 0);
     reader_thread::pending p{rid, i, log_index};
     if (prebuilt) {
       const round_plan &rp = ep[rounds];
@@ -726,7 +749,8 @@ void run_stream(const run_ctx &c, std::uint32_t i,
     // thing capping how far ahead of the reader it can get. Paced (every>0)
     // doesn't need this -- wait_until() above already spaced the rounds out.
     if (e.stream_every_ticks == 0)
-      std::this_thread::sleep_for(std::chrono::nanoseconds(kUnpacedStreamFloorNs));
+      std::this_thread::sleep_for(
+          std::chrono::nanoseconds(kUnpacedStreamFloorNs));
   }
 
   rec.rounds_streamed = rounds;
@@ -746,7 +770,7 @@ collected stamp_request_result(const run_ctx &c, std::uint32_t log_index,
 
 /// Collect one submitted request's bare acknowledgement (reset, or one
 /// stream/enqueue_data round). `abort_on_bad_status` gates whether a
-/// non-OK/NOT_READY status aborts the run. 
+/// non-OK/NOT_READY status aborts the run.
 collected collect_ack(const run_ctx &c, const reader_thread::pending &p,
                       session &s, bool abort_on_bad_status) {
   std::size_t reply_len = 0;
@@ -782,10 +806,9 @@ collected collect_corrections(const run_ctx &c, const reader_thread::pending &p,
         static_cast<std::uint32_t>(c.result.correction_log.size());
     append_unpacked_bits(c.result.correction_log, reply.data(), return_size);
   }
-  rec.correction_mismatch =
-      mismatches_expected(c.plan.sched, e,
-                          c.result.correction_log.data() + rec.correction_offset,
-                          return_size);
+  rec.correction_mismatch = mismatches_expected(
+      c.plan.sched, e, c.result.correction_log.data() + rec.correction_offset,
+      return_size);
   return stamp_request_result(c, p.log_index, status);
 }
 
@@ -820,9 +843,9 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
   const auto decoder_id = e.decoder_id;
   const std::uint64_t t0 = c.t0;
 
-  const std::uint64_t deadline_ns = e.trig == trigger::tick
-                                        ? e.deadline_ns
-                                        : add_sat(prev_return_ns, e.deadline_ns);
+  const std::uint64_t deadline_ns =
+      e.trig == trigger::tick ? e.deadline_ns
+                              : add_sat(prev_return_ns, e.deadline_ns);
   rec.deadline_ns = deadline_ns;
 
   wait_until(add_sat(t0, deadline_ns));
@@ -864,7 +887,7 @@ run_result run(std::shared_ptr<run_plan> p) {
 
   run_result result;
   result.records.resize(sched.events.size());
-  // Every event gets an identified slot up front, dispatched or not 
+  // Every event gets an identified slot up front, dispatched or not
   // record::dispatched is how a caller tells "ran" from
   // "pre-empted by the abort."
   for (std::size_t i = 0; i < sched.events.size(); ++i) {
@@ -880,12 +903,13 @@ run_result run(std::shared_ptr<run_plan> p) {
   wait_until(t0);
 
   // Everything the timing thread and the readers share. Populated in full
-  // here. 
+  // here.
   run_state st;
   st.signals = std::vector<std::atomic<bool>>(sched.signal_names.size());
 
   const run_ctx c{plan, result, st, t0};
-  const std::chrono::nanoseconds ack_drain_timeout(plan.params.ack_drain_timeout_ns);
+  const std::chrono::nanoseconds ack_drain_timeout(
+      plan.params.ack_drain_timeout_ns);
 
   // One reader per decoder present in the schedule.
   for (const auto &e : sched.events) {
@@ -898,17 +922,20 @@ run_result run(std::shared_ptr<run_plan> p) {
             [c](session &s, const reader_thread::pending &p) {
               return collect_reply(c, p, s);
             },
-            [c](std::uint32_t event_index, const reader_thread::progress &prog) {
+            [c](std::uint32_t event_index,
+                const reader_thread::progress &prog) {
               if (prog.collected < prog.issued)
                 warn(c, event_label(c, event_index) + ": " +
                             std::to_string(prog.issued - prog.collected) +
                             " request(s) never got a reply; giving up on them");
               record &rec = c.rec(event_index);
-              rec.return_ns = prog.collected ? prog.last_return_ns : now_ns() - c.t0;
-              rec.status = prog.term ? (prog.any_error
-                                            ? static_cast<std::int32_t>(stream_terminate::ERROR)
-                                            : *prog.term)
-                                     : static_cast<std::int32_t>(prog.last_status);
+              rec.return_ns =
+                  prog.collected ? prog.last_return_ns : now_ns() - c.t0;
+              rec.status = prog.term
+                               ? (prog.any_error ? static_cast<std::int32_t>(
+                                                       stream_terminate::ERROR)
+                                                 : *prog.term)
+                               : static_cast<std::int32_t>(prog.last_status);
               const auto signal_id = c.ev(event_index).signal_id;
               if (signal_id != kNoSignal)
                 c.st.raise_signal(signal_id);
@@ -916,10 +943,11 @@ run_result run(std::shared_ptr<run_plan> p) {
             ack_drain_timeout));
   }
 
-  // The whole dispatch model: one thread, schedule order. 
+  // The whole dispatch model: one thread, schedule order.
   std::uint64_t prev_return_ns = 0;
   for (std::size_t i = 0;
-       i < sched.events.size() && !st.aborted.load(std::memory_order_relaxed); ++i)
+       i < sched.events.size() && !st.aborted.load(std::memory_order_relaxed);
+       ++i)
     dispatch_event(c, static_cast<std::uint32_t>(i),
                    *plan.router.at(sched.events[i].decoder_id), prev_return_ns);
 
@@ -948,13 +976,14 @@ std::string bits_to_string(const std::uint8_t *bits, std::size_t count) {
 }
 
 /// Bounds-checks (offset, count) against `arena` and returns how many bits
-/// are actually safe to read 
+/// are actually safe to read
 std::pair<const std::uint8_t *, std::size_t>
 safe_bit_span(const std::vector<std::uint8_t> &arena, std::uint32_t offset,
-             std::uint32_t count) {
+              std::uint32_t count) {
   if (arena.empty() || offset >= arena.size())
     return {nullptr, 0};
-  return {arena.data() + offset, std::min<std::size_t>(count, arena.size() - offset)};
+  return {arena.data() + offset,
+          std::min<std::size_t>(count, arena.size() - offset)};
 }
 
 /// One record's slice of a per-request log as a single space-separated cell:
@@ -990,13 +1019,14 @@ void write_csv(const run_result &result, std::ostream &out) {
         result.correction_log, r.correction_offset, r.correction_count);
     out << r.event_index << ',' << r.decoder_id << ',' << to_string(r.op) << ','
         << r.deadline_ns << ',' << r.call_ns << ',' << r.return_ns << ','
-        << r.status << ',' << r.rounds_streamed << ',' << (r.read_completed ? 1 : 0)
-        << ',' << bits_to_string(syndrome_bits, syndrome_n) << ','
+        << r.status << ',' << r.rounds_streamed << ','
+        << (r.read_completed ? 1 : 0) << ','
+        << bits_to_string(syndrome_bits, syndrome_n) << ','
         << bits_to_string(correction_bits, correction_n) << ','
         << (r.correction_mismatch ? 1 : 0) << ','
-        << join_log(result.request_id_log, r.request_id_offset, r.request_id_count)
-        << ','
-        << (r.dispatched ? 1 : 0) << ','
+        << join_log(result.request_id_log, r.request_id_offset,
+                    r.request_id_count)
+        << ',' << (r.dispatched ? 1 : 0) << ','
         << join_log(result.request_dispatch_ns_log, r.request_id_offset,
                     r.request_id_count)
         << ','

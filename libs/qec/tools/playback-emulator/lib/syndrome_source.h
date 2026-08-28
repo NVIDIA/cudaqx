@@ -79,9 +79,9 @@ public:
   /// `params` selects and configures one of Stim's built-in generated
   /// memory-circuit families: required keys "code", "task", "distance",
   /// plus stim::CircuitGenParameters's four noise probabilities (optional,
-  /// default 0). 
+  /// default 0).
   stim_memory_source(const cudaqx::heterogeneous_map &params,
-                      std::uint64_t seed);
+                     std::uint64_t seed);
   ~stim_memory_source() override;
 
   stim_memory_source(const stim_memory_source &) = delete;
@@ -140,7 +140,7 @@ public:
   /// rounds from the current one.
   void reset() override;
 
-  /// False: data is pregenerated, and cannot be used in contexts where the 
+  /// False: data is pregenerated, and cannot be used in contexts where the
   /// number of rounds is not known ahead of time
   bool is_streamed() const override { return false; }
 

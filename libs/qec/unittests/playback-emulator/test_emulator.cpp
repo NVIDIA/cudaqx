@@ -79,9 +79,8 @@ TEST(Analyzer, AnEmptyResultProducesTheHeaderAndNothingElse) {
   EXPECT_EQ(std::count(csv.begin(), csv.end(), '\n'), 1);
   const auto header = columns_of(lines_of(csv)[0]);
   for (const char *col : {"event_index", "decoder_id", "op", "deadline_ns",
-                          "call_ns", "return_ns",
-                          "status", "rounds_streamed", "read_completed",
-                          "syndrome_bits", "correction_bits",
+                          "call_ns", "return_ns", "status", "rounds_streamed",
+                          "read_completed", "syndrome_bits", "correction_bits",
                           "correction_mismatch", "request_ids", "dispatched",
                           "request_dispatch_ns", "request_return_ns"})
     EXPECT_NE(std::find(header.begin(), header.end(), col), header.end())
@@ -168,7 +167,8 @@ std::vector<std::string> only_row(const run_result &r) {
 
 // -- malformed / out-of-range record bounds -------------------------------
 
-TEST(AnalyzerEdgeCases, EveryOutOfRangeBitSpanClampsInsteadOfReadingPastTheArena) {
+TEST(AnalyzerEdgeCases,
+     EveryOutOfRangeBitSpanClampsInsteadOfReadingPastTheArena) {
   // safe_bit_span's guard is `offset >= arena.size()`, so an offset one past
   // the last valid index has to clamp to nothing while one *at* the last
   // index still reads it -- the off-by-one either way is a read past the end
@@ -205,14 +205,16 @@ TEST(AnalyzerEdgeCases, EveryOutOfRangeBitSpanClampsInsteadOfReadingPastTheArena
     crec.correction_count = c.count;
     cor.correction_log = c.log;
     cor.records.push_back(crec);
-    EXPECT_EQ(only_row(cor)[kColCorrectionBits], c.expected) << "correction_bits";
+    EXPECT_EQ(only_row(cor)[kColCorrectionBits], c.expected)
+        << "correction_bits";
   }
 }
 
-TEST(AnalyzerEdgeCases, RequestIdSliceRunningPastTheLogClampsInsteadOfReadingOOB) {
+TEST(AnalyzerEdgeCases,
+     RequestIdSliceRunningPastTheLogClampsInsteadOfReadingOOB) {
   // The request_ids column indexes its own log the same way the bit-string
-  // columns index theirs, so it needs the same guard: a count reaching past the end
-  // renders what is actually there, and an offset past the end renders
+  // columns index theirs, so it needs the same guard: a count reaching past the
+  // end renders what is actually there, and an offset past the end renders
   // nothing.
   run_result r;
   record over_long, past_end;
@@ -291,7 +293,8 @@ TEST(AnalyzerEdgeCases, EveryEnumValueSurvivesIntoItsColumn) {
 
 // -- boolean 0/1 encoding ----------------------------------------------------
 
-TEST(AnalyzerEdgeCases, ReadCompletedAndCorrectionMismatchEncodeExactlyAsZeroOrOne) {
+TEST(AnalyzerEdgeCases,
+     ReadCompletedAndCorrectionMismatchEncodeExactlyAsZeroOrOne) {
   run_result r;
   for (bool read_completed : {false, true})
     for (bool mismatch : {false, true}) {
@@ -393,7 +396,7 @@ TEST(AnalyzerEdgeCases, ManyRecordsProduceExactlyOneRowEachAndFinishQuickly) {
 namespace {
 struct FakeSession : blocking_session {
   RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
-                       std::size_t &reply_len) override {
+                      std::size_t &reply_len) override {
     reply_len = 0;
     return RpcStatus::OK;
   }
@@ -414,7 +417,7 @@ struct GrowingSource : syndrome_source {
 TEST(Capabilities, PlanRefusesEverythingItCanProveWillNotWork) {
   // Two decoder_ids sharing a session instance would interleave frames for
   // different decoders on one socket and match each other's replies, so it
-  // is refused 
+  // is refused
   FakeSession small, unbounded, shared;
   small.max_frame_bytes = 16; // the header alone is 24 bytes
 
@@ -425,11 +428,17 @@ TEST(Capabilities, PlanRefusesEverythingItCanProveWillNotWork) {
     const char *why;
   } cases[] = {
       {"0 reset\n", {0}, {{0, &small}}, "no frame fits the session's limit"},
-      {"0 enqueue source=7\n", {0}, {{0, &unbounded}},
+      {"0 enqueue source=7\n",
+       {0},
+       {{0, &unbounded}},
        "no source registered for an enqueue"},
-      {"0 stream source=7 rounds=3\n", {0}, {{0, &unbounded}},
+      {"0 stream source=7 rounds=3\n",
+       {0},
+       {{0, &unbounded}},
        "no source registered for a stream"},
-      {"0 reset\n0 reset session=1\n", {0, 1}, {{0, &shared}, {1, &shared}},
+      {"0 reset\n0 reset session=1\n",
+       {0, 1},
+       {{0, &shared}, {1, &shared}},
        "two decoders with events on one session"},
   };
   for (const auto &c : cases) {
@@ -476,7 +485,7 @@ TEST(Capabilities, AStreamedRoundTooBigForItsSessionFailsLoudlyAtRunTime) {
 
   ASSERT_EQ(result.records.size(), 1u);
   EXPECT_EQ(result.records[0].status,
-           static_cast<std::int32_t>(stream_terminate::ERROR));
+            static_cast<std::int32_t>(stream_terminate::ERROR));
   EXPECT_EQ(result.records[0].rounds_streamed, 0u);
 }
 
@@ -621,7 +630,7 @@ TEST(Timing, AnOverrunIsRecordedRatherThanAbsorbedOrRealigned) {
       << "expected event 0's ~30ms delay to show up as event 1's lateness";
   EXPECT_LT(second.call_ns - first.call_ns, 35'000'000u)
       << "event 1 should fire as soon as event 0's dispatch finishes "
-        "submitting";
+         "submitting";
 }
 
 TEST(Timing, ARelativeDeadlineResolvesAgainstThePreviousDispatchOrT0) {
@@ -651,7 +660,8 @@ TEST(Timing, ARelativeDeadlineResolvesAgainstThePreviousDispatchOrT0) {
 TEST(Timing, LeadInAtEitherExtremeKeepsTimestampsRelativeToT0AndSane) {
   // call_ns/return_ns are unsigned and relative to t0, so a lead-in bug
   // shows up as a huge wrapped value rather than a small negative one.
-  for (std::uint64_t lead_in_ns : {std::uint64_t{0}, std::uint64_t{100'000'000}}) {
+  for (std::uint64_t lead_in_ns :
+       {std::uint64_t{0}, std::uint64_t{100'000'000}}) {
     SCOPED_TRACE(lead_in_ns);
     auto s = make_null_session();
     run_params params;
@@ -772,7 +782,6 @@ run_result run_multi_text(const std::string &text,
 
 } // namespace
 
-
 // ---------------------------------------------------------------------------
 // Signals: parsing
 // ---------------------------------------------------------------------------
@@ -841,8 +850,8 @@ TEST(Signals, AWaitOnlyPlansIfSomeEarlierLineRaisesThatSignal) {
   const char *waiter =
       "0 stream session=1 source=0 min_rounds=1 max_rounds=8 until=go\n";
 
-  for (const std::string &text : {std::string(waiter),                 // nobody
-                                  std::string(waiter) + raiser}) {     // too late
+  for (const std::string &text : {std::string(waiter),             // nobody
+                                  std::string(waiter) + raiser}) { // too late
     SCOPED_TRACE(text);
     auto src = deep_source();
     auto sched = parse(text, kTwoDecoders, 1000);
@@ -865,10 +874,11 @@ TEST(Signals, AStreamKeepsGoingPastItsFloorUntilTheSignalArrives) {
   // signal comes up, and must stop soon after rather than at its ceiling.
   DelayedCountingSession s0(std::chrono::milliseconds(40)), s1;
   auto src = deep_source();
-  auto result = run_multi_text("0 get_corrections return_size=8 signal=go\n"
-                               "0 stream session=1 source=0 every=1 min_rounds=1 "
-                               "max_rounds=2000 until=go\n",
-                               {{0, &s0}, {1, &s1}}, *src, /*tick_ns=*/100'000);
+  auto result =
+      run_multi_text("0 get_corrections return_size=8 signal=go\n"
+                     "0 stream session=1 source=0 every=1 min_rounds=1 "
+                     "max_rounds=2000 until=go\n",
+                     {{0, &s0}, {1, &s1}}, *src, /*tick_ns=*/100'000);
   const auto &r = result.records[1];
   EXPECT_EQ(r.status, static_cast<std::int32_t>(stream_terminate::OK));
   EXPECT_GT(r.rounds_streamed, 1u);    // past the floor, waiting
@@ -880,10 +890,11 @@ TEST(Signals, AStreamWhoseSignalArrivesTooLateExhaustsItsRoundsAndSaysSo) {
   // is what ends it. Bounded and loud, never hung.
   DelayedCountingSession s0(std::chrono::milliseconds(500)), s1;
   auto src = deep_source();
-  auto result = run_multi_text("0 get_corrections return_size=8 signal=go\n"
-                               "0 stream session=1 source=0 every=0 min_rounds=1 "
-                               "max_rounds=4 until=go\n",
-                               {{0, &s0}, {1, &s1}}, *src);
+  auto result =
+      run_multi_text("0 get_corrections return_size=8 signal=go\n"
+                     "0 stream session=1 source=0 every=0 min_rounds=1 "
+                     "max_rounds=4 until=go\n",
+                     {{0, &s0}, {1, &s1}}, *src);
   const auto &r = result.records[1];
   EXPECT_EQ(r.status,
             static_cast<std::int32_t>(stream_terminate::EXHAUSTED_ROUNDS));
@@ -1021,7 +1032,7 @@ TEST(RequestIds, AnUndispatchedEventRecordsNoIdsAndTheLogStopsAtTheAbort) {
   // that race into a formality (see AbortOnHardError for the same pattern).
   struct FailOnSecond : blocking_session {
     int calls = 0;
-      RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
+    RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                         std::size_t &reply_len) override {
       reply_len = 0;
       return ++calls == 2 ? RpcStatus::BAD_REQUEST : RpcStatus::OK;
@@ -1137,7 +1148,8 @@ TEST(AbortOnHardError, AHardErrorEventuallyStopsTheRun) {
 
     ASSERT_EQ(result.records.size(), 1001u);
     EXPECT_TRUE(result.records[0].dispatched);
-    EXPECT_EQ(result.records[0].status, static_cast<std::int32_t>(RpcStatus::OK));
+    EXPECT_EQ(result.records[0].status,
+              static_cast<std::int32_t>(RpcStatus::OK));
     EXPECT_TRUE(result.records[1].dispatched);
     EXPECT_EQ(result.records[1].status, static_cast<std::int32_t>(c.status));
     // records is never truncated, so `dispatched` is what tells "ran" from
@@ -1154,7 +1166,7 @@ TEST(AbortOnHardError, NotReadyNeverAbortsTheRun) {
   // Never answers anything but NOT_READY -- if NOT_READY were (wrongly)
   // treated as a hard error, this would abort after the first event.
   struct AlwaysNotReadySession : blocking_session {
-      RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
+    RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                         std::size_t &reply_len) override {
       reply_len = 0;
       return RpcStatus::NOT_READY;
@@ -1169,9 +1181,9 @@ TEST(AbortOnHardError, NotReadyNeverAbortsTheRun) {
   // Both events were dispatched; NOT_READY never aborts.
   ASSERT_EQ(result.records.size(), 2u);
   EXPECT_EQ(result.records[0].status,
-           static_cast<int32_t>(RpcStatus::NOT_READY));
+            static_cast<int32_t>(RpcStatus::NOT_READY));
   EXPECT_EQ(result.records[1].status,
-           static_cast<int32_t>(RpcStatus::NOT_READY));
+            static_cast<int32_t>(RpcStatus::NOT_READY));
 }
 
 // ─── MultiDecoderAdversarial ────────────────────────────────────────────────
@@ -1189,7 +1201,6 @@ using cudaq::qec::decoding_server::slot::parse_reset;
 /// arrived really was a reset.
 class ResetOkSession : public blocking_session {
 public:
-
   RpcStatus send_sync(const frame &f, std::span<std::uint8_t>,
                       std::size_t &reply_len) override {
     reply_len = 0;
@@ -1208,9 +1219,10 @@ private:
 // behind it, whichever decoder they address, must not dispatch.
 // record::dispatched is how a caller tells "ran" from "pre-empted by the
 // abort." --
-TEST(MultiDecoderAdversarial, HardErrorOnOneDecoderStopsEveryOtherDecodersEvents) {
+TEST(MultiDecoderAdversarial,
+     HardErrorOnOneDecoderStopsEveryOtherDecodersEvents) {
   struct ImmediateBadRequestSession : blocking_session {
-      RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
+    RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
                         std::size_t &reply_len) override {
       reply_len = 0;
       return RpcStatus::BAD_REQUEST;
@@ -1241,7 +1253,7 @@ TEST(MultiDecoderAdversarial, HardErrorOnOneDecoderStopsEveryOtherDecodersEvents
 
   EXPECT_FALSE(result.records.back().dispatched)
       << "decoder 1's events sit behind decoder 0's failure on the one "
-        "timeline, so the abort must eventually have pre-empted them";
+         "timeline, so the abort must eventually have pre-empted them";
 }
 
 // ─── TruncatedReply ─────────────────────────────────────────────────────────
@@ -1296,17 +1308,16 @@ TEST(TruncatedReply, AShortReplyIsRejectedAndOnlyAnExactlyFullOneIsTrusted) {
     SCOPED_TRACE(c.why);
     TruncatingSession s;
     s.bytes_written = c.bytes_written;
-    auto sched = parse(std::string("0 get_corrections ") + c.expected_bits +
-                           "\n",
-                       {0}, 1000);
+    auto sched = parse(
+        std::string("0 get_corrections ") + c.expected_bits + "\n", {0}, 1000);
     std::unordered_map<std::uint64_t, session *> router{{0, &s}};
     auto result = run(plan(sched, router, {}));
 
     ASSERT_EQ(result.records.size(), 1u);
     const auto &rec = result.records[0];
-    EXPECT_EQ(rec.status, static_cast<std::int32_t>(
-                              c.accepted ? RpcStatus::OK
-                                         : RpcStatus::INTERNAL_ERROR));
+    EXPECT_EQ(rec.status,
+              static_cast<std::int32_t>(
+                  c.accepted ? RpcStatus::OK : RpcStatus::INTERNAL_ERROR));
     EXPECT_EQ(rec.read_completed, c.accepted);
     if (!c.accepted)
       EXPECT_EQ(rec.correction_count, 0u)

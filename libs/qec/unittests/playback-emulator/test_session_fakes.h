@@ -34,9 +34,11 @@ public:
   // reader can key completions by id consistently.
   std::uint32_t submit(const frame &f) override {
     if (f.size < sizeof(cudaq::realtime::RPCHeader))
-      throw std::invalid_argument("blocking_session: frame is smaller than RPCHeader");
+      throw std::invalid_argument(
+          "blocking_session: frame is smaller than RPCHeader");
     const std::uint32_t id =
-        reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)->request_id;
+        reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
+            ->request_id;
     auto held = std::make_shared<held_reply>();
     held->bytes.resize(kHeldReplyBytes);
     std::size_t len = 0;
@@ -55,7 +57,7 @@ public:
                             std::chrono::milliseconds timeout) override {
     std::unique_lock<std::mutex> lock(mu_);
     if (!completed_cv_.wait_for(lock, timeout,
-                               [&] { return !completed_.empty(); }))
+                                [&] { return !completed_.empty(); }))
       return false;
     request_id = completed_.front();
     completed_.pop_front();

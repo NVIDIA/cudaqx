@@ -8,8 +8,8 @@
 /// jitter floor, and the UDP backend (timeouts, max_frame_bytes
 /// trustworthiness, plan()'s oversized-enqueue rejection).
 
-#include "session.h"
 #include "emulator.h"
+#include "session.h"
 #include "syndrome_source.h"
 
 #include <algorithm>
@@ -89,8 +89,9 @@ private:
     while (!stop_.load()) {
       sockaddr_in from{};
       socklen_t from_len = sizeof(from);
-      const ssize_t n = ::recvfrom(fd_, buf.data(), buf.size(), 0,
-                                   reinterpret_cast<sockaddr *>(&from), &from_len);
+      const ssize_t n =
+          ::recvfrom(fd_, buf.data(), buf.size(), 0,
+                     reinterpret_cast<sockaddr *>(&from), &from_len);
       if (n < static_cast<ssize_t>(sizeof(RPCHeader)))
         continue;
       RPCHeader hdr{};
@@ -233,7 +234,8 @@ TEST(SessionOrdering, AnUnblockingReadKeepsItsPlaceInTheSyndromeStream) {
   auto sessions = make_udp_sessions(
       std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
       /*timeout_ms=*/5000);
-  std::unordered_map<std::uint64_t, session *> router{{0, sessions[0].second.get()}};
+  std::unordered_map<std::uint64_t, session *> router{
+      {0, sessions[0].second.get()}};
   static_source src(std::vector<std::vector<std::uint8_t>>(8, {1}));
 
   auto sched = parse("0 stream source=0 rounds=1\n"
@@ -262,9 +264,9 @@ TEST(SessionOrdering, AnUnblockingReadKeepsItsPlaceInTheSyndromeStream) {
 TEST(SessionOrdering, ParserAndPlanRejectAnUncollectableRead) {
   EXPECT_THROW(parse("0 get_corrections return_size=1 signal=\n", {0}, 1000),
                std::invalid_argument); // `signal=` with nothing to raise
-  EXPECT_THROW(parse("0 get_corrections return_size=1 signal=a signal=b\n",
-                     {0}, 1000),
-               std::invalid_argument); // one read, one answer, one signal
+  EXPECT_THROW(
+      parse("0 get_corrections return_size=1 signal=a signal=b\n", {0}, 1000),
+      std::invalid_argument); // one read, one answer, one signal
   EXPECT_NO_THROW(
       parse("0 get_corrections return_size=1 signal=done\n", {0}, 1000));
 
@@ -287,7 +289,8 @@ TEST(SessionOrdering, ParserAndPlanRejectAnUncollectableRead) {
 // edges -- empty/huge frames, reply-buffer bounds, repeated calls -- since a
 // backend whose job is to cost nothing is the likeliest to skip a bounds check.
 
-TEST(NullBackendAdvanced, FramesOfEverySizeAreDiscardedWithoutCrashingOrReplying) {
+TEST(NullBackendAdvanced,
+     FramesOfEverySizeAreDiscardedWithoutCrashingOrReplying) {
   // 0 is the interesting end (a null pointer with no bytes to checksum) and
   // the odd sizes either side of a power of two are the other: the checksum
   // loop is per-byte, so a partial trailing word is where it would run off.
@@ -384,7 +387,8 @@ std::vector<std::uint8_t> make_reset_frame(std::uint64_t decoder_id,
   using cudaq::qec::decoding::rpc::ResetRequestPayload;
   using cudaq::realtime::RPCHeader;
 
-  std::vector<std::uint8_t> buf(sizeof(RPCHeader) + sizeof(ResetRequestPayload));
+  std::vector<std::uint8_t> buf(sizeof(RPCHeader) +
+                                sizeof(ResetRequestPayload));
   RPCHeader hdr{};
   hdr.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
   hdr.function_id = kResetDecoderFunctionId;
@@ -418,7 +422,8 @@ std::string closed_loopback_endpoint() {
 
 } // namespace
 
-TEST(UdpBackendAdvanced, AwaitOnAGenuinelyClosedPortTimesOutBoundedAndReturnsAnError) {
+TEST(UdpBackendAdvanced,
+     AwaitOnAGenuinelyClosedPortTimesOutBoundedAndReturnsAnError) {
   auto endpoint = closed_loopback_endpoint();
   constexpr std::uint32_t kTimeoutMs = 80;
   auto sessions = make_udp_sessions(
@@ -447,7 +452,8 @@ TEST(UdpBackendAdvanced, AwaitOnAGenuinelyClosedPortTimesOutBoundedAndReturnsAnE
   EXPECT_LT(elapsed_ms, 2 * static_cast<long long>(kTimeoutMs));
 }
 
-TEST(UdpBackendAdvanced, TheReceiverThreadSurvivesATransientErrorAndKeepsListening) {
+TEST(UdpBackendAdvanced,
+     TheReceiverThreadSurvivesATransientErrorAndKeepsListening) {
   auto endpoint = closed_loopback_endpoint();
   constexpr std::uint32_t kTimeoutMs = 150;
   auto sessions = make_udp_sessions(
@@ -475,8 +481,9 @@ TEST(UdpBackendAdvanced, TheReceiverThreadSurvivesATransientErrorAndKeepsListeni
     std::vector<std::uint8_t> buf(256);
     sockaddr_in from{};
     socklen_t from_len = sizeof(from);
-    const ssize_t n = ::recvfrom(fd, buf.data(), buf.size(), 0,
-                                 reinterpret_cast<sockaddr *>(&from), &from_len);
+    const ssize_t n =
+        ::recvfrom(fd, buf.data(), buf.size(), 0,
+                   reinterpret_cast<sockaddr *>(&from), &from_len);
     if (n < static_cast<ssize_t>(sizeof(RPCHeader)))
       return;
     RPCHeader hdr{};
@@ -486,8 +493,8 @@ TEST(UdpBackendAdvanced, TheReceiverThreadSurvivesATransientErrorAndKeepsListeni
     resp.status = 0;
     resp.result_len = 0;
     resp.request_id = hdr.request_id;
-    ::sendto(fd, &resp, sizeof(resp), 0,
-            reinterpret_cast<sockaddr *>(&from), from_len);
+    ::sendto(fd, &resp, sizeof(resp), 0, reinterpret_cast<sockaddr *>(&from),
+             from_len);
   });
 
   auto second = make_reset_frame(0, 2);
@@ -500,7 +507,8 @@ TEST(UdpBackendAdvanced, TheReceiverThreadSurvivesATransientErrorAndKeepsListeni
   EXPECT_EQ(status, RpcStatus::OK);
 }
 
-TEST(UdpBackendAdvanced, MaxFrameBytesIsTheMaxUdpDatagramPayloadNotZeroOrUnbounded) {
+TEST(UdpBackendAdvanced,
+     MaxFrameBytesIsTheMaxUdpDatagramPayloadNotZeroOrUnbounded) {
   // No listener needed: connect() on a UDP socket just records the default
   // destination, it doesn't require a live peer.
   auto endpoint = closed_loopback_endpoint();
@@ -511,8 +519,9 @@ TEST(UdpBackendAdvanced, MaxFrameBytesIsTheMaxUdpDatagramPayloadNotZeroOrUnbound
   // session_udp.cpp: kMaxDatagram = 65535 - 8 (UDP header) - 20 (IPv4
   // header) = 65507.
   EXPECT_EQ(sessions[0].second->max_frame_bytes, 65507u);
-  EXPECT_NE(sessions[0].second->max_frame_bytes, 0u) << "0 would mean unbounded, which UDP "
-                                        "is not";
+  EXPECT_NE(sessions[0].second->max_frame_bytes, 0u)
+      << "0 would mean unbounded, which UDP "
+         "is not";
 }
 
 TEST(UdpBackendAdvanced,
@@ -528,7 +537,8 @@ TEST(UdpBackendAdvanced,
   ASSERT_EQ(sessions[0].second->max_frame_bytes, 65507u);
 
   constexpr std::size_t kBits = 523'616; // 56 + 523616/8 = 65508 > 65507
-  std::string sched_text = "0 enqueue source=0b" + std::string(kBits, '1') + "\n";
+  std::string sched_text =
+      "0 enqueue source=0b" + std::string(kBits, '1') + "\n";
   auto sched = parse(sched_text, {0}, 1000);
   std::unordered_map<std::uint64_t, session *> router;
   router[0] = sessions[0].second.get();
