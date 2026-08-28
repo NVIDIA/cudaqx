@@ -41,7 +41,43 @@ void static_source::reset() { next_ = 0; }
 // next_round() call, or by the circuit's terminal segment per read_data()
 // call. Both happen synchronously on the calling thread.
 
+namespace {
+
 constexpr std::size_t kSimdWidth = stim::MAX_BITWORD_WIDTH;
+
+// Builds one of Stim's built-in memory-circuit families from `params`. Keys:
+// "code" ("surface_code"/"repetition_code"/"color_code"), "task", "distance"
+// (all required) and the four stim::CircuitGenParameters noise probabilities
+// (optional, default 0).
+stim::Circuit generate_circuit(const cudaqx::heterogeneous_map &params) {
+  auto code = params.get<std::string>("code");
+  auto task = params.get<std::string>("task");
+  auto distance = params.get<std::size_t>("distance");
+  auto rounds = params.get<std::size_t>("rounds", std::size_t{3});
+
+  stim::CircuitGenParameters gen_params(static_cast<std::uint64_t>(rounds),
+                                        static_cast<std::uint32_t>(distance),
+                                        task);
+  gen_params.after_clifford_depolarization =
+      params.get<double>("after_clifford_depolarization", 0.0);
+  gen_params.before_round_data_depolarization =
+      params.get<double>("before_round_data_depolarization", 0.0);
+  gen_params.before_measure_flip_probability =
+      params.get<double>("before_measure_flip_probability", 0.0);
+  gen_params.after_reset_flip_probability =
+      params.get<double>("after_reset_flip_probability", 0.0);
+
+  if (code == "surface_code")
+    return stim::generate_surface_code_circuit(gen_params).circuit;
+  if (code == "repetition_code")
+    return stim::generate_rep_code_circuit(gen_params).circuit;
+  if (code == "color_code")
+    return stim::generate_color_code_circuit(gen_params).circuit;
+  throw std::invalid_argument("stim_memory_source: unknown code family '" +
+                              code + "'");
+}
+
+} // namespace
 
 struct stim_memory_source::impl {
   stim::Circuit prefix, round_body, terminal_body;
@@ -52,10 +88,12 @@ struct stim_memory_source::impl {
   bool prefix_played = false;   // cleared by rebuild_sim(); see next_round()
   std::unique_ptr<stim::FrameSimulator<kSimdWidth>> sim;
 
-  // Splits the circuit at its (first) REPEAT block into a prefix, the repeating 
-  // stabilizer-round body, and whatever terminal (data-qubit readout) segment follows, if any.
-  impl(std::string stim_circuit_text, std::uint64_t seed) : base_seed(seed) {
-    stim::Circuit full(stim_circuit_text);
+  // Generates the circuit from `params`, then splits it at its REPEAT block
+  // into a prefix, the repeating stabilizer-round body, and whatever
+  // terminal (data-qubit readout) segment follows, if any.
+  impl(const cudaqx::heterogeneous_map &params, std::uint64_t seed)
+      : base_seed(seed) {
+    const stim::Circuit full = generate_circuit(params);
     std::size_t i = 0;
     for (; i < full.operations.size(); ++i)
       if (full.operations[i].gate_type == stim::GateType::REPEAT)
@@ -143,9 +181,9 @@ struct stim_memory_source::impl {
   }
 };
 
-stim_memory_source::stim_memory_source(std::string stim_circuit_text,
+stim_memory_source::stim_memory_source(const cudaqx::heterogeneous_map &params,
                                         std::uint64_t seed)
-    : impl_(std::make_unique<impl>(std::move(stim_circuit_text), seed)) {}
+    : impl_(std::make_unique<impl>(params, seed)) {}
 
 stim_memory_source::~stim_memory_source() = default;
 

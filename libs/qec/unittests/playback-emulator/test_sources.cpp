@@ -7,22 +7,19 @@
  ******************************************************************************/
 
 /// Tests syndrome sources. static_source (exact replay) pins down replay,
-/// exhaustion, and rewind. stim_memory_source's tests centre on round width,
-/// seed determinism, and reset/generation logic, cross-checked against a
+/// exhaustion, and rewind. stim_memory_source is cross-checked against a
 /// whole-circuit run of Stim's built-ins; cudaq_memory_source is validated
 /// against direct runs of the `memory_circuit` kernel.
 
 #include "syndrome_source.h"
 
 #include "cudaq.h"
+#include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/noise_model.h"
 #include "device/memory_circuit.h"
 #include "stim.h"
-#include "stim/gen/gen_color_code.h"
-#include "stim/gen/gen_rep_code.h"
-#include "stim/gen/gen_surface_code.h"
 #include "stim/simulators/frame_simulator_util.h"
 
 #include <chrono>
@@ -30,6 +27,7 @@
 #include <span>
 
 using namespace cudaq::qec::playback;
+using cudaqx::heterogeneous_map;
 
 using rounds_t = std::vector<std::vector<uint8_t>>;
 
@@ -99,61 +97,80 @@ TEST(StaticSource, PassesThroughNonBinaryValuesUnchanged) {
 }
 
 // ─── stim_memory_source ─────────────────────────────────────────────────────
+//
+// stim_memory_source only accepts parameters for one of Stim's six built-in
+// memory-circuit families, so every test below drives it that way and
+// cross-checks against a circuit built directly through stim's own API.
 
 namespace {
 
-// One measurement per round, in a REPEAT block wide enough to be
-// practically unbounded for a test.
-const char *kSingleM = R"CIRCUIT(
-R 0
-REPEAT 1000000 {
-  H 0
-  M 0
-}
-)CIRCUIT";
+constexpr std::size_t kSimdWidth = stim::MAX_BITWORD_WIDTH;
 
-// Several separate M instructions in one round: the width is the sum across
-// all of them (1 + 3), not just the last one seen.
-const char *kMultiM = R"CIRCUIT(
-R 0 1 2 3
-REPEAT 1000000 {
-  H 0 1 2 3
-  M 0
-  M 1 2 3
-}
-)CIRCUIT";
+/// Every one of Stim's built-in generated-circuit families.
+constexpr std::pair<const char *, const char *> kGeneratedTasks[] = {
+    {"repetition_code", "memory"},      {"surface_code", "rotated_memory_x"},
+    {"surface_code", "rotated_memory_z"}, {"surface_code", "unrotated_memory_x"},
+    {"surface_code", "unrotated_memory_z"}, {"color_code", "memory_xyz"},
+};
 
-// A single M instruction spanning many qubits.
-const char *kManyQubitSingleM = R"CIRCUIT(
-R 0 1 2 3 4
-REPEAT 1000000 {
-  H 0 1 2 3 4
-  M 0 1 2 3 4
-}
-)CIRCUIT";
+struct shape {
+  std::uint32_t distance;
+  std::uint32_t rounds;
+};
 
-// Dozens of qubits split across several M instructions, so "many qubits" and
-// "many instructions" are exercised together.
-const char *kWide = R"CIRCUIT(
-R 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39
-REPEAT 1000000 {
-  H 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39
-  M 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19
-  M 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39
+/// Distance changes round width; rounds changes how many times the round
+/// repeats. Rounds start at 3: stim inlines the round body instead of
+/// emitting a REPEAT block for 1 or 2 rounds.
+constexpr shape kSweep[] = {
+    {2, 3}, {3, 3}, {3, 5}, {3, 12}, {5, 3}, {5, 8}, {7, 4},
+};
+
+/// color_code:memory_xyz takes odd distances only, and emits a *second*
+/// REPEAT block from 4 rounds up (see MoreThanOneRepeatBlockIsRejected).
+constexpr shape kColorSweep[] = {{3, 2}, {3, 3}, {5, 2}, {5, 3}, {7, 3}};
+
+/// One of Stim's built-in generated circuits, via stim's own public API --
+/// entirely independent of stim_memory_source's internals.
+stim::Circuit generate(const std::string &code, const std::string &task,
+                       shape s, double noise = 0.0) {
+  stim::CircuitGenParameters params(s.rounds, s.distance, task);
+  params.after_clifford_depolarization = noise;
+  params.before_measure_flip_probability = noise;
+  if (code == "surface_code")
+    return stim::generate_surface_code_circuit(params).circuit;
+  if (code == "repetition_code")
+    return stim::generate_rep_code_circuit(params).circuit;
+  return stim::generate_color_code_circuit(params).circuit;
 }
-)CIRCUIT";
+
+/// The heterogeneous_map stim_memory_source's constructor expects, for the
+/// same (code, task, shape) generate() builds a reference circuit from.
+heterogeneous_map params_for(const std::string &code, const std::string &task,
+                             shape s, double noise = 0.0) {
+  return heterogeneous_map{
+      {"code", code},           {"task", task},
+      {"distance", static_cast<std::size_t>(s.distance)},
+      {"rounds", static_cast<std::size_t>(s.rounds)},
+      {"after_clifford_depolarization", noise},
+      {"before_measure_flip_probability", noise}};
+}
 
 } // namespace
 
-TEST(StimMemorySource, RoundWidthIsEveryMeasurementInTheRepeatBlockSummed) {
-  const std::pair<const char *, std::size_t> cases[] = {
-      {kSingleM, 1}, {kMultiM, 4}, {kManyQubitSingleM, 5}, {kWide, 40}};
-  for (const auto &[circuit, width] : cases) {
-    SCOPED_TRACE("width=" + std::to_string(width));
-    stim_memory_source src(circuit, /*seed=*/1);
+TEST(StimMemorySource, RoundWidthMatchesTheGeneratedCircuitsPerRoundMeasurementCount) {
+  // One extra round adds exactly round_width() measurements to the whole
+  // circuit's count, since only the REPEAT block's replay count changed.
+  for (const auto &[code, task] : kGeneratedTasks) {
+    SCOPED_TRACE(std::string(code) + ":" + task);
+    const shape s = std::string(code) == "color_code" ? shape{5, 3} : shape{3, 5};
+    const std::size_t width =
+        generate(code, task, {s.distance, s.rounds + 1}).count_measurements() -
+        generate(code, task, s).count_measurements();
+
+    stim_memory_source src(params_for(code, task, s), /*seed=*/1);
     EXPECT_EQ(src.round_width(), width);
-    // Drawn well past any plausible internal batch boundary: every round is
-    // exactly round_width() wide and holds only real bits.
+    // Drawn well past the generated circuit's own REPEAT count: every round
+    // is exactly round_width() wide and holds only real bits.
     for (int i = 0; i < 300; ++i) {
       auto round = src.next_round();
       ASSERT_EQ(round.size(), width) << "round " << i;
@@ -163,17 +180,33 @@ TEST(StimMemorySource, RoundWidthIsEveryMeasurementInTheRepeatBlockSummed) {
   }
 }
 
+TEST(StimMemorySource, RoundsDefaultsTo3AndWorksForEveryFamily) {
+  // next_round() replays the REPEAT block's body forever regardless of the
+  // round count it was generated with, so omitting "rounds" (default 3)
+  // must still produce a working, unbounded source for every family.
+  for (const auto &[code, task] : kGeneratedTasks) {
+    SCOPED_TRACE(std::string(code) + ":" + task);
+    heterogeneous_map params{{"code", std::string(code)},
+                             {"task", std::string(task)},
+                             {"distance", std::size_t{3}}};
+    stim_memory_source src(params, /*seed=*/1);
+    EXPECT_GT(src.round_width(), 0u);
+    EXPECT_EQ(src.next_round().size(), src.round_width());
+  }
+}
+
 TEST(StimMemorySource, IsUnboundedAndOneSeedAlwaysGivesOneStream) {
-  stim_memory_source a(kSingleM, /*seed=*/42);
+  // Needs noise > 0: a noiseless memory circuit's outcome is deterministic,
+  // so two different seeds would spuriously agree forever.
+  auto params = params_for("repetition_code", "memory", {3, 5}, /*noise=*/0.2);
+  stim_memory_source a(params, /*seed=*/42);
   EXPECT_TRUE(a.is_streamed());
 
-  stim_memory_source same_seed(kSingleM, /*seed=*/42);
+  stim_memory_source same_seed(params, /*seed=*/42);
   for (int i = 0; i < 100; ++i)
     ASSERT_EQ(a.next_round(), same_seed.next_round()) << "round " << i;
 
-  // ...and a different seed must not silently produce the same stream, which
-  // is what a seed that never reached the simulator would look like.
-  stim_memory_source b(kSingleM, /*seed=*/1), c(kSingleM, /*seed=*/2);
+  stim_memory_source b(params, /*seed=*/1), c(params, /*seed=*/2);
   bool any_different = false;
   for (int i = 0; i < 200 && !any_different; ++i)
     any_different = b.next_round() != c.next_round();
@@ -181,18 +214,17 @@ TEST(StimMemorySource, IsUnboundedAndOneSeedAlwaysGivesOneStream) {
 }
 
 TEST(StimMemorySource, ResetReseedsWithoutWedgingOrStallingTheSource) {
-  // reset() bumps a generation counter and rebuilds the simulator. Covers
-  // the shapes that could wedge it: resetting before any draw, resetting
-  // repeatedly with none in between, and alternating tightly with draws.
-  // A fresh shot re-seeds rather than rewinds, so bits need not repeat.
+  // Covers the shapes that could wedge reset(): before any draw, back to
+  // back with nothing in between, and alternating tightly with draws.
   const auto start = std::chrono::steady_clock::now();
-  stim_memory_source src(kMultiM, /*seed=*/11);
+  auto params = params_for("surface_code", "rotated_memory_z", {3, 5});
+  stim_memory_source src(params, /*seed=*/11);
 
-  src.reset(); // before any next_round() at all
+  src.reset();
   ASSERT_EQ(src.next_round().size(), src.round_width());
 
   for (int i = 0; i < 100; ++i)
-    src.reset(); // back to back, nothing drawn between
+    src.reset();
   ASSERT_EQ(src.next_round().size(), src.round_width());
 
   for (int iter = 0; iter < 50; ++iter) {
@@ -205,31 +237,49 @@ TEST(StimMemorySource, ResetReseedsWithoutWedgingOrStallingTheSource) {
 }
 
 TEST(StimMemorySource, DestructionAfterUseDoesNotHangOrCrash) {
+  auto params = params_for("repetition_code", "memory", {3, 5});
   for (int i = 0; i < 20; ++i) {
-    stim_memory_source src(kSingleM, /*seed=*/static_cast<uint64_t>(i));
+    stim_memory_source src(params, /*seed=*/static_cast<uint64_t>(i));
     src.next_round();
     src.next_round();
-    // src goes out of scope here -- generation is synchronous (no producer
-    // thread to join), but the destructor must still be well-formed.
   }
 }
 
-TEST(StimMemorySource, RejectsACircuitWithNoRepeatBlock) {
-  EXPECT_THROW(stim_memory_source("H 0\nM 0\n", /*seed=*/1),
+TEST(StimMemorySource, RejectsAnUnknownCodeFamily) {
+  EXPECT_THROW(stim_memory_source(params_for("not_a_real_code_family",
+                                             "memory", {3, 5}),
+                                  /*seed=*/1),
+              std::invalid_argument);
+}
+
+TEST(StimMemorySource, RejectsGeneratorParamsWithTooFewRoundsForARepeatBlock) {
+  // Stim inlines the round body instead of emitting a REPEAT block for 1 or
+  // 2 rounds, so there is no round for the constructor to derive.
+  for (std::uint32_t rounds : {1u, 2u}) {
+    SCOPED_TRACE(rounds);
+    EXPECT_THROW(stim_memory_source(
+                     params_for("repetition_code", "memory", {3, rounds}),
+                     /*seed=*/1),
+                std::runtime_error);
+  }
+}
+
+TEST(StimMemorySource, MoreThanOneRepeatBlockIsRejected) {
+  // Stim emits a second REPEAT block for color_code:memory_xyz from four
+  // rounds up; only a single REPEAT block is a valid round to stream.
+  EXPECT_THROW(stim_memory_source(
+                   params_for("color_code", "memory_xyz", {3, 8}),
+                   /*seed=*/1),
               std::runtime_error);
 }
 
 // ─── stim_memory_source vs. a single whole-circuit run ─────────────────────
 //
-// Cross-checks stim_memory_source's round-by-round generation against a
-// single whole-circuit `do_circuit()` call: splitting into prefix/round/
-// terminal must produce EXACTLY the same bits. Covers all six of Stim's
-// generated-circuit families; color_code:memory_xyz's zero-measurement
-// prefix guards against it being skipped and desyncing the RNG.
+// Cross-checks stim_memory_source's round-by-round output against a single
+// whole-circuit `do_circuit()` call, for the same number of rounds, across
+// all six of Stim's built-in generated-circuit families.
 
 namespace {
-
-constexpr std::size_t kSimdWidth = stim::MAX_BITWORD_WIDTH;
 
 std::string to_bit_string(const stim::simd_bits<kSimdWidth> &bits,
                           std::size_t count) {
@@ -262,8 +312,6 @@ std::string sample_whole_circuit_once(
   return bits;
 }
 
-// The all-zero reference: sample_batch_measurements then returns the frame
-// simulator's output untouched.
 stim::simd_bits<kSimdWidth> zero_reference(const stim::Circuit &circuit) {
   return stim::simd_bits<kSimdWidth>(circuit.count_measurements());
 }
@@ -272,9 +320,10 @@ stim::simd_bits<kSimdWidth> zero_reference(const stim::Circuit &circuit) {
 // the reference circuit has is covered, then one read_data() call for the
 // terminal segment. How many next_round() calls that takes varies by family
 // (prefix folds differently), so this counts by total bits, not round count.
-std::string sample_via_stim_memory_source(const std::string &circuit_text, std::uint64_t seed,
+std::string sample_via_stim_memory_source(const heterogeneous_map &params,
+                                          std::uint64_t seed,
                                           std::size_t total_measurements) {
-  stim_memory_source source(circuit_text, seed);
+  stim_memory_source source(params, seed);
   const std::size_t stabilizer_bits_needed = total_measurements - source.data_width();
   std::string bits;
   while (bits.size() < stabilizer_bits_needed)
@@ -285,68 +334,19 @@ std::string sample_via_stim_memory_source(const std::string &circuit_text, std::
   return bits;
 }
 
-/// Every one of Stim's built-in generated-circuit families. Each has a
-/// differently-shaped prefix/round/terminal split, which is what makes them
-/// worth running one by one.
-constexpr std::pair<const char *, const char *> kGeneratedTasks[] = {
-    {"repetition_code", "memory"},      {"surface_code", "rotated_memory_x"},
-    {"surface_code", "rotated_memory_z"}, {"surface_code", "unrotated_memory_x"},
-    {"surface_code", "unrotated_memory_z"}, {"color_code", "memory_xyz"},
-};
-
-/// One of Stim's built-in generated circuits, by code family name.
-stim::GeneratedCircuit generate(const std::string &code,
-                                const stim::CircuitGenParameters &params) {
-  if (code == "surface_code")
-    return stim::generate_surface_code_circuit(params);
-  if (code == "repetition_code")
-    return stim::generate_rep_code_circuit(params);
-  if (code == "color_code")
-    return stim::generate_color_code_circuit(params);
-  throw std::invalid_argument("unknown code family: " + code);
-}
-
-/// One (distance, rounds) point to generate a circuit at.
-struct shape {
-  std::uint32_t distance;
-  std::uint32_t rounds;
-};
-
-/// Distance changes round width; rounds changes REPEAT replay count and how
-/// much sits outside it -- both move the prefix/round/terminal split, so
-/// both are swept. Rounds start at 3 because stim inlines the body for 1 or
-/// 2 (see NoRepeatBlockIsRejected).
-constexpr shape kSweep[] = {
-    {2, 3},  // the smallest distance stim will generate
-    {3, 3}, {3, 5}, {3, 12}, // one distance, several round counts
-    {5, 3}, {5, 8},
-    {7, 4},  // wide rounds, to catch a width the split gets wrong only when big
-};
-
-/// color_code:memory_xyz takes odd distances only, and emits a *second*
-/// REPEAT block from 4 rounds up -- which is outside what stim_memory_source
-/// documents it accepts (see TwoRepeatBlocksStillProduceTheRightBits).
-constexpr shape kColorSweep[] = {{3, 2}, {3, 3}, {5, 2}, {5, 3}, {7, 3}};
-
-void check_task(const std::string &code, const std::string &task,
-                shape s) {
+void check_task(const std::string &code, const std::string &task, shape s) {
   constexpr std::uint64_t kSeed = 424242;
   SCOPED_TRACE("distance=" + std::to_string(s.distance) + " rounds=" +
                std::to_string(s.rounds));
 
-  stim::CircuitGenParameters params(s.rounds, s.distance, task);
-  params.after_clifford_depolarization = 0.001;
-  params.before_measure_flip_probability = 0.001;
-
-  const stim::GeneratedCircuit gen = generate(code, params);
-
-  const std::string reference = sample_whole_circuit_once(
-      gen.circuit, kSeed, zero_reference(gen.circuit));
+  const stim::Circuit gen = generate(code, task, s, /*noise=*/0.001);
+  const std::string reference =
+      sample_whole_circuit_once(gen, kSeed, zero_reference(gen));
   const std::string via_source = sample_via_stim_memory_source(
-      gen.circuit.str(), kSeed, gen.circuit.count_measurements());
+      params_for(code, task, s, /*noise=*/0.001), kSeed, gen.count_measurements());
 
   EXPECT_EQ(via_source, reference) << "mismatch for " << code << ":" << task;
-  EXPECT_EQ(via_source.size(), gen.circuit.count_measurements())
+  EXPECT_EQ(via_source.size(), gen.count_measurements())
       << "round-by-round generation didn't cover every measurement for "
       << code << ":" << task;
 }
@@ -355,9 +355,7 @@ void check_task(const std::string &code, const std::string &task,
 
 TEST(StimMemorySourceVsFullCircuit, EveryGeneratedCodeFamilyMatchesOneWholeCircuitRun) {
   // All six of Stim's built-in generated-circuit families, across a range of
-  // distances and round counts. color_code:memory_xyz is the sharpest case:
-  // its prefix is a bare `R` with zero measurements, which next_round() must
-  // still execute rather than skip.
+  // distances and round counts, at the same round count on both sides.
   int cases = 0;
   for (const auto &[code, task] : kGeneratedTasks) {
     SCOPED_TRACE(std::string(code) + ":" + task);
@@ -373,154 +371,25 @@ TEST(StimMemorySourceVsFullCircuit, EveryGeneratedCodeFamilyMatchesOneWholeCircu
   EXPECT_EQ(cases, 5 * std::size(kSweep) + std::size(kColorSweep));
 }
 
-TEST(StimMemorySourceVsFullCircuit, AGeneratedCircuitWithTooFewRoundsHasNoRepeatBlock) {
-  // Not a contrived input: stim inlines the round body rather than emitting
-  // a REPEAT block whenever a generated circuit asks for 1 or 2 rounds, so
-  // the documented precondition is one an ordinary caller can trip. It has
-  // to be a constructor error, because there is no round to derive.
-  for (std::uint32_t rounds : {1u, 2u}) {
-    SCOPED_TRACE(rounds);
-    stim::CircuitGenParameters params(rounds, /*distance=*/3, "memory");
-    const auto gen = generate("repetition_code", params);
-    EXPECT_THROW(stim_memory_source(gen.circuit.str(), /*seed=*/1),
-                 std::runtime_error);
-  }
-}
-
-TEST(StimMemorySourceVsFullCircuit, MoreThanOneRepeatBlockIsRejected) {
-  // Only the first REPEAT can be the round; a later one is copied by
-  // safe_append() without its block body, so its measurements would
-  // disappear (here, 7 in the circuit but only 4 ever produced). The
-  // constructor refuses this rather than returning a short shot.
-  const std::string text = R"CIRCUIT(
-R 0 1
-REPEAT 2 {
-  X_ERROR(0.1) 0
-  M 0
-}
-REPEAT 3 {
-  X_ERROR(0.1) 1
-  M 1
-}
-M 0 1
-)CIRCUIT";
-  ASSERT_EQ(stim::Circuit(text).count_measurements(), 7u);
-  EXPECT_THROW(stim_memory_source(text, /*seed=*/1), std::runtime_error);
-
-  // Reachable without hand-writing anything: stim emits a second REPEAT for
-  // color_code:memory_xyz from four rounds up.
-  stim::CircuitGenParameters params(/*rounds=*/8, /*distance=*/3, "memory_xyz");
-  const auto gen = generate("color_code", params);
-  EXPECT_THROW(stim_memory_source(gen.circuit.str(), /*seed=*/1),
-               std::runtime_error);
-}
-
 TEST(StimMemorySourceVsFullCircuit, AGeneratedMemoryCircuitsReferenceSampleIsAllZero) {
   // Why the check above can compare noise frames as measurement outcomes: a
   // memory circuit's stabilizers have noiseless result 0, so its reference
-  // sample is all zero and `frame == outcome` for every bit. If that stopped
-  // holding, the test above would silently check something weaker.
-  constexpr std::uint32_t kRounds = 3, kDistance = 3;
+  // sample is all zero and `frame == outcome` for every bit.
+  constexpr shape s{3, 3};
   for (const auto &[code, task] : kGeneratedTasks) {
     SCOPED_TRACE(std::string(code) + ":" + task);
-    stim::CircuitGenParameters params(kRounds, kDistance, task);
-    const stim::GeneratedCircuit gen = generate(code, params);
+    const stim::Circuit gen = generate(code, task, s);
     const auto reference =
-        stim::TableauSimulator<kSimdWidth>::reference_sample_circuit(
-            gen.circuit);
-    EXPECT_EQ(to_bit_string(reference, gen.circuit.count_measurements())
-                  .find('1'),
+        stim::TableauSimulator<kSimdWidth>::reference_sample_circuit(gen);
+    EXPECT_EQ(to_bit_string(reference, gen.count_measurements()).find('1'),
               std::string::npos);
   }
-}
-
-TEST(StimMemorySourceVsFullCircuit, TheFrameSourcePlusAReferenceSampleIsStimsMeasurements) {
-  // The general statement on a circuit whose noiseless outcome is *not* all
-  // zero: stim_memory_source reports the frame relative to that noiseless
-  // run, so XORing back stim's own reference sample must reproduce exactly
-  // what stim's own sampler returns. That relationship is what makes the
-  // output a *syndrome*: a 1 means disagreement with the noiseless trajectory.
-  constexpr std::uint64_t kSeed = 424242;
-  constexpr int kRounds = 4;
-  // stim_memory_source needs a REPEAT count it will never reach; the
-  // reference circuit uses exactly the rounds this test samples.
-  const char *kBody = "  X_ERROR(0.05) 0 1\n  M 0 1\n";
-  const std::string streamed_text =
-      std::string("R 0 1\nX 0\nREPEAT 1000000 {\n") + kBody + "}\n";
-  const std::string reference_text = std::string("R 0 1\nX 0\nREPEAT ") +
-                                     std::to_string(kRounds) + " {\n" + kBody +
-                                     "}\n";
-
-  const stim::Circuit full(reference_text);
-  const std::size_t n = full.count_measurements();
-  ASSERT_EQ(n, static_cast<std::size_t>(kRounds) * 2);
-
-  const auto reference_sample =
-      stim::TableauSimulator<kSimdWidth>::reference_sample_circuit(full);
-  const std::string reference_bits = to_bit_string(reference_sample, n);
-  // Non-trivial in both directions, or the XOR below would prove nothing.
-  ASSERT_NE(reference_bits.find('1'), std::string::npos);
-  ASSERT_NE(reference_bits.find('0'), std::string::npos);
-
-  const std::string absolute =
-      sample_whole_circuit_once(full, kSeed, reference_sample);
-
-  stim_memory_source source(streamed_text, kSeed);
-  std::string frame;
-  for (int i = 0; i < kRounds; ++i)
-    for (auto b : source.next_round())
-      frame += char('0' + b);
-  ASSERT_EQ(frame.size(), n);
-  ASSERT_EQ(absolute.size(), n);
-
-  for (std::size_t i = 0; i < n; ++i)
-    EXPECT_EQ(absolute[i] - '0', (frame[i] - '0') ^ (reference_bits[i] - '0'))
-        << "measurement " << i;
-}
-
-// Narrower regression coverage for the zero-measurement-prefix case: a
-// hand-written circuit whose prefix is a bare reset (no measurements)
-// followed by a REPEAT body, isolated from any Stim-generated circuit's
-// incidental structure. Uses a small fixed REPEAT count (matching the
-// rounds actually sampled) so sample_whole_circuit_once stays cheap.
-TEST(StimMemorySourceVsFullCircuit, ZeroMeasurementPrefixIsStillExecuted) {
-  constexpr std::uint64_t kSeed = 7;
-  constexpr int kRounds = 3;
-  const std::string streamed_text = R"CIRCUIT(
-R 0
-REPEAT 1000000 {
-  X_ERROR(0.5) 0
-  M 0
-}
-)CIRCUIT";
-  const std::string reference_text = R"CIRCUIT(
-R 0
-REPEAT 3 {
-  X_ERROR(0.5) 0
-  M 0
-}
-)CIRCUIT";
-
-  stim::Circuit full(reference_text);
-  const std::string reference =
-      sample_whole_circuit_once(full, kSeed, zero_reference(full));
-
-  stim_memory_source source(streamed_text, kSeed);
-  std::string via_source;
-  for (int i = 0; i < kRounds; ++i)
-    for (auto b : source.next_round())
-      via_source += char('0' + b);
-
-  EXPECT_EQ(via_source, reference);
 }
 
 // ─── cudaq_memory_source ────────────────────────────────────────────────────
 //
 // Validated against direct runs of `memory_circuit` itself (raw ancilla/
 // data-qubit bits, not sample_memory_circuit's XOR-combined detectors).
-// cudaq_memory_source re-launches the kernel once per round count under one
-// seed, relying on shared-prefix RNG draws staying bit-identical; these
-// tests confirm that holds against a direct kernel run for every r.
 
 namespace {
 

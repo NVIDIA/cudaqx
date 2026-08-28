@@ -344,16 +344,23 @@ def test_a_static_source_is_consumed_by_a_run_and_reset_rewinds_it():
     assert list(third.syndrome_log) == [1, 1, 0] * 3
 
 
-def test_a_stim_memory_source_drives_a_run_and_rejects_a_bad_circuit():
-    circuit = "R 0\nREPEAT 1000000 {\n  H 0\n  M 0\n}\n"
-    source = pb.stim_memory_source(circuit, 1)
+def test_a_stim_memory_source_drives_a_run_and_rejects_bad_params():
+    params = dict(code="repetition_code", task="memory", distance=3)
+    source = pb.stim_memory_source(1, **params)
     result = pb.run("0 stream source=0 rounds=4\n", 1000, {0: source},
                     null_decoder_ids=[0])
     assert result.records[0].rounds_streamed == 4
-    assert len(result.syndrome_log) == 4  # one measurement per round
+    assert len(result.syndrome_log) == 4 * 2  # 2 ancilla bits/round at distance 3
     source.reset()
 
     # The C++ constructor throws std::runtime_error, which nanobind maps to
-    # RuntimeError rather than ValueError.
+    # RuntimeError rather than ValueError. Stim inlines the round body
+    # instead of emitting a REPEAT block for 1-2 rounds, so there is no
+    # round for stim_memory_source to derive.
     with pytest.raises(RuntimeError):
-        pb.stim_memory_source("H 0\nM 0\n", 1)
+        pb.stim_memory_source(1, **{**params, "rounds": 1})
+
+    # An unrecognized code family throws std::invalid_argument, which
+    # nanobind maps to ValueError.
+    with pytest.raises(ValueError):
+        pb.stim_memory_source(1, **{**params, "code": "not_a_real_code"})

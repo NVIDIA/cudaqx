@@ -17,6 +17,7 @@
 #include "session.h"
 #include "syndrome_source.h"
 #include "emulator.h"
+#include "type_casters.h"
 
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
@@ -165,8 +166,14 @@ void bindPlaybackEmulator(nb::module_ &mod) {
       .def("reset", &static_source::reset);
 
   nb::class_<stim_memory_source, syndrome_source>(m, "stim_memory_source")
-      .def(nb::init<std::string, std::uint64_t>(), nb::arg("stim_circuit_text"),
-          nb::arg("seed"))
+      .def("__init__",
+          [](stim_memory_source *self, std::uint64_t seed, nb::kwargs params) {
+            new (self) stim_memory_source(cudaqx::hetMapFromKwargs(params), seed);
+          },
+          "seed, then keyword arguments selecting and configuring one of "
+          "Stim's built-in memory-circuit families: 'code', 'task', "
+          "'distance' (required), 'rounds' (optional, default 3), plus "
+          "Stim's four noise-probability knobs.")
       .def("reset", &stim_memory_source::reset);
 
   m.def(

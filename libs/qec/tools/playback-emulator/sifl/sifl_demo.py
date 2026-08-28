@@ -110,14 +110,14 @@ def spawn_server(multi):
         raise RuntimeError(f"decoding_server did not report all ring ports: got {ports}")
     return proc, ports
 
-def run(label, backend, gen, max_rounds, tick_ns, shots=15):
+def run(label, backend, stim_params, max_rounds, tick_ns, shots=15):
     preamble_rounds = 10
     sched = build_schedule(shots, stream_cap=max_rounds - preamble_rounds,
                            preamble_rounds=preamble_rounds)
     print(sched)
 
     result = pb.run(sched, tick_ns=tick_ns, **backend,
-                    sources={0: pb.stim_memory_source(str(gen(10_000)), 1)})
+                    sources={0: pb.stim_memory_source(1, **stim_params)})
     recs = [r for r in result.records if r.op == pb.operation.stream]
     rounds = [r.rounds_streamed for r in recs]
     gc = [r for r in result.records if r.op == pb.operation.get_corrections]
@@ -151,6 +151,10 @@ if __name__ == "__main__":
                                                 distance=D, before_measure_flip_probability=P,
                                                 after_clifford_depolarization=P)
     round_width = gen(2).num_measurements - gen(1).num_measurements
+    stim_params = {"code": "surface_code", "task": "rotated_memory_z",
+                   "distance": D, "rounds": 10_000,
+                   "before_measure_flip_probability": P,
+                   "after_clifford_depolarization": P}
     template_dir = f"{TEMPLATE_ROOT}/d{D}_p{P}_scratch"
     build_templates(gen, template_dir, MAX_ROUNDS)
     multi = make_multi_config(template_dir, round_width,
@@ -163,8 +167,8 @@ if __name__ == "__main__":
         proc, ports = spawn_server(multi)
         backend = dict(udp_endpoints={r: f"127.0.0.1:{p}" for r, p in ports.items()})
     try:
-        run(f"slow cadence [{args.decoder}]", backend, gen, MAX_ROUNDS, tick_ns=200_000)
-        run(f"fast cadence [{args.decoder}]", backend, gen, MAX_ROUNDS, tick_ns=5_000)
+        run(f"slow cadence [{args.decoder}]", backend, stim_params, MAX_ROUNDS, tick_ns=200_000)
+        run(f"fast cadence [{args.decoder}]", backend, stim_params, MAX_ROUNDS, tick_ns=5_000)
     finally:
         if proc:
             proc.terminate(); proc.wait()

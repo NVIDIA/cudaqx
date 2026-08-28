@@ -10,9 +10,10 @@
 
 /// @file syndrome_source.h
 /// @brief `syndrome_source` and its implementations: `static_source` (replay
-/// pre-supplied rounds), `stim_memory_source` (JIT rounds from a Stim memory
-/// circuit, produced strictly on demand), and `cudaq_memory_source` (streams
-/// derived from CUDA-Q's own `memory_circuit` kernel).
+/// pre-supplied rounds), `stim_memory_source` (JIT rounds from a generated
+/// Stim memory circuit), and `cudaq_memory_source` (streams `memory_circuit`).
+
+#include "cuda-qx/core/heterogeneous_map.h"
 
 #include <cstdint>
 #include <memory>
@@ -70,18 +71,17 @@ private:
   std::size_t next_ = 0;
 };
 
-/// Just-in-time round generation from a Stim memory circuit: each
-/// `next_round()` advances a persistent Pauli-frame simulator by one round
-/// (folding in the circuit's prefix on the first call after a shot
-/// boundary). `read_data()` runs the terminal segment against that same
-/// state, then starts a fresh simulator for the next shot.
+/// Just-in-time round generation from one of Stim's built-in memory-circuit
+/// families. Each `next_round()` advances a persistent Pauli-frame
+/// simulator by one round; `read_data()` runs the terminal segment.
 class stim_memory_source : public syndrome_source {
 public:
-  /// `stim_circuit_text` must have a body of exactly one `REPEAT N { ... }`
-  /// syndrome-extraction block, optionally preceded by a prefix and followed
-  /// by a terminal readout segment. No terminal segment is valid too --
-  /// `read_data()` then just returns zero bits and starts a fresh simulator.
-  stim_memory_source(std::string stim_circuit_text, std::uint64_t seed);
+  /// `params` selects and configures one of Stim's built-in generated
+  /// memory-circuit families: required keys "code", "task", "distance",
+  /// plus stim::CircuitGenParameters's four noise probabilities (optional,
+  /// default 0). 
+  stim_memory_source(const cudaqx::heterogeneous_map &params,
+                      std::uint64_t seed);
   ~stim_memory_source() override;
 
   stim_memory_source(const stim_memory_source &) = delete;
@@ -110,10 +110,8 @@ private:
 
 /// Streams raw `memory_circuit` measurements (ancilla per round, data at
 /// readout) by re-launching the kernel once per `1 <= r <= max_rounds` under
-/// the same seed at construction/reset -- the stim backend has no state to
-/// snapshot mid-execution, so round-by-round output is cached per launch
-/// instead. Output is bit-identical to one real shot at that seed and length,
-/// at O(max_rounds^2) cost rather than an incremental simulator's O(max_rounds).
+/// the same seed, caching each launch's output for round-by-round replay.
+/// O(max_rounds^2) cost, since Stim has no mid-circuit state to resume from.
 class cudaq_memory_source : public syndrome_source {
 public:
   /// `code` must outlive this object; `statePrep` and `noise` are copied.

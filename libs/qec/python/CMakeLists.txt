@@ -55,6 +55,7 @@ if(TARGET cudaq-qec-playback-emulator)
   )
   target_include_directories(${MODULE_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python
+    ${CMAKE_CURRENT_SOURCE_DIR}/bindings
   )
   # The emulator's own headers (emulator.h, session.h, syndrome_source.h)
   # ride in on this target's PUBLIC include directories.

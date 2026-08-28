@@ -456,14 +456,23 @@ std::string event_label(const run_ctx &c, std::uint32_t i) {
          ", decoder_id=" + std::to_string(c.ev(i).decoder_id) + ")";
 }
 
+/// Flips `aborted` from false to true; returns whether this call did it, so
+/// concurrent failures racing the same run (e.g. several already-dispatched
+/// requests all timing out against one dead endpoint) log only one warning.
+bool try_abort(run_state &st) {
+  bool expected = false;
+  return st.aborted.compare_exchange_strong(expected, true,
+                                            std::memory_order_relaxed);
+}
+
 /// Records the warning and flips `aborted` so the timing thread stops
 /// dispatching further events.
 void abort_on_hard_error(const run_ctx &c, RpcStatus status, std::uint32_t i) {
   if (status == RpcStatus::OK || status == RpcStatus::NOT_READY)
     return;
-  c.st.aborted.store(true, std::memory_order_relaxed);
-  warn(c, event_label(c, i) + " returned status " +
-              std::to_string(static_cast<int>(status)) + "; aborting the run");
+  if (try_abort(c.st))
+    warn(c, event_label(c, i) + " returned status " +
+                std::to_string(static_cast<int>(status)) + "; aborting the run");
 }
 
 /// Take the next request_id and note it against `rec`. Every RPC the run puts
@@ -537,9 +546,9 @@ void run_stream(const run_ctx &c, std::uint32_t i,
                                                 : source->next_round();
       } catch (const std::exception &ex) {
         term = stream_terminate::ERROR;
-        st.aborted.store(true, std::memory_order_relaxed);
-        warn(c, event_label(c, i) + " threw while drawing from its source: " +
-                    ex.what() + "; aborting the run");
+        if (try_abort(st))
+          warn(c, event_label(c, i) + " threw while drawing from its source: " +
+                      ex.what() + "; aborting the run");
         break;
       }
       if (drawn.empty()) {
@@ -549,10 +558,10 @@ void run_stream(const run_ctx &c, std::uint32_t i,
       built = build_enqueue_frame(e.decoder_id, 0, drawn.data(), drawn.size());
       if (s.max_frame_bytes != 0 && built.size() > s.max_frame_bytes) {
         term = stream_terminate::ERROR;
-        st.aborted.store(true, std::memory_order_relaxed);
-        warn(c, event_label(c, i) +
-                    " drew a round exceeding the session's max_frame_bytes; "
-                    "aborting the run");
+        if (try_abort(st))
+          warn(c, event_label(c, i) +
+                      " drew a round exceeding the session's max_frame_bytes; "
+                      "aborting the run");
         break;
       }
     }
