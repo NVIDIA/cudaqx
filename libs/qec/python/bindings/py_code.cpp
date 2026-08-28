@@ -22,6 +22,7 @@
 #include "cudaq/qec/version.h"
 
 #include "cuda-qx/core/kwargs_utils.h"
+#include "cudaq_type_casters.h"
 #include "type_casters.h"
 
 namespace nb = nanobind;

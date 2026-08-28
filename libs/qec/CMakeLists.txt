@@ -71,6 +71,21 @@ set(CUDAQ_QEC_BUILD_TRT_DECODER "AUTO" CACHE STRING
 set_property(CACHE CUDAQ_QEC_BUILD_TRT_DECODER
              PROPERTY STRINGS "AUTO" "ON" "OFF")
 
+# Decoders-only build: the decoder interface (libcudaq-qec-decoders.so), the
+# built-in decoders, and the decoder plugins, with no CUDA-Q install and no
+# LLVM/MLIR required. Skips libcudaq-qec.so (codes, experiments, DEM
+# sampling), tools, and unit tests; with CUDAQX_QEC_BINDINGS_PYTHON=ON it
+# builds a decoders-only python module instead of the full cudaq_qec one.
+# A CUDA toolkit is still required (the decoder API links cudart).
+option(CUDAQ_QEC_DECODERS_ONLY
+       "Build only the decoder stack; no CUDA-Q install required."
+       OFF)
+if (CUDAQ_QEC_DECODERS_ONLY AND NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  message(FATAL_ERROR
+    "CUDAQ_QEC_DECODERS_ONLY requires configuring libs/qec as the top-level "
+    "project: cmake -S libs/qec -B <build-dir> -DCUDAQ_QEC_DECODERS_ONLY=ON")
+endif()
+
 # Find and configure LLVM, Clang and MLIR
 # ==============================================================================
 # The user can specify the path to LLVM cmake directory using
@@ -79,6 +94,9 @@ set_property(CACHE CUDAQ_QEC_BUILD_TRT_DECODER
 # using `LLVM_VERSION_MAJOR`, e.g. "-LLVM_VERSION_MAJOR=16".  Note that this
 # version variable is set to the latest LLVM version by default, and setting it
 # to an older version might break the project.
+# Skipped entirely in decoders-only mode: nothing on the decoder path needs
+# LLVM, MLIR, or Clang.
+if(NOT CUDAQ_QEC_DECODERS_ONLY)
 if(NOT LLVM_VERSION_MAJOR)
   set(LLVM_VERSION_MAJOR 22)
 endif()
@@ -191,6 +209,7 @@ include_directories(SYSTEM
 
 link_directories(${LLVM_BUILD_LIBRARY_DIR})
 add_definitions(${LLVM_DEFINITIONS})
+endif() # NOT CUDAQ_QEC_DECODERS_ONLY
 
 # Check for CUDA Support (ref: cuda-quantum/CMakeLists.txt)
 # ==============================================================================
@@ -243,10 +262,25 @@ endif()
 # ==============================================================================
 
 if (CUDAQX_QEC_STANDALONE_BUILD)
-  cudaqx_import_cudaq_targets()
+  if (CUDAQ_QEC_DECODERS_ONLY)
+    # The only CUDA-Q-provided target the decoder stack consumes is fmt
+    # (normally imported via NVQIRConfig.cmake); fetch the same pinned commit
+    # directly instead of importing the CUDA-Q targets.
+    include(FetchContent)
+    set(FMT_INSTALL OFF CACHE BOOL "Generate the fmt install target." FORCE)
+    FetchContent_Declare(
+      fmt
+      GIT_REPOSITORY https://github.com/fmtlib/fmt
+      GIT_TAG fc8d07cfe54ba9f5019453dfdb112491246ee017
+      EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(fmt)
+  else()
+    cudaqx_import_cudaq_targets()
 
-  if (CUDAQX_QEC_BINDINGS_PYTHON)
-    find_package(CUDAQPythonInterop CONFIG)
+    if (CUDAQX_QEC_BINDINGS_PYTHON)
+      find_package(CUDAQPythonInterop CONFIG)
+    endif()
   endif()
   # FIXME
   add_subdirectory(../core core_build)
@@ -287,13 +321,15 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.cpp.in"
 # ==============================================================================
 
 add_subdirectory(lib)
-add_subdirectory(tools)
+if (NOT CUDAQ_QEC_DECODERS_ONLY)
+  add_subdirectory(tools)
+endif()
 
 if (CUDAQX_QEC_BINDINGS_PYTHON)
   add_subdirectory(python)
 endif()
 
-if (CUDAQX_QEC_INCLUDE_TESTS)
+if (CUDAQX_QEC_INCLUDE_TESTS AND NOT CUDAQ_QEC_DECODERS_ONLY)
   add_custom_target(CUDAQXQECUnitTests)
   if (CUDAQX_QEC_STANDALONE_BUILD)
     include(CTest)
