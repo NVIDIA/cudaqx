@@ -43,9 +43,8 @@ struct type_caster<cudaq::spin_op> {
 
   static handle from_cpp(cudaq::spin_op v, rv_policy, cleanup_list *) noexcept {
     try {
-      nanobind::object tv_py =
-          nanobind::module_::import_("cudaq").attr("SpinOperator")(
-              v.get_data_representation());
+      nanobind::object tv_py = nanobind::module_::import_("cudaq").attr(
+          "SpinOperator")(v.get_data_representation());
       return tv_py.release();
     } catch (...) {
       return handle();
@@ -103,9 +102,8 @@ struct type_caster<cudaq::observe_result> {
   static handle from_cpp(cudaq::observe_result v, rv_policy,
                          cleanup_list *) noexcept {
     try {
-      nanobind::object tv_py =
-          nanobind::module_::import_("cudaq").attr("ObserveResult")(
-              v.expectation(), v.get_spin(), v.raw_data());
+      nanobind::object tv_py = nanobind::module_::import_("cudaq").attr(
+          "ObserveResult")(v.expectation(), v.get_spin(), v.raw_data());
       return tv_py.release();
     } catch (...) {
       return handle();
