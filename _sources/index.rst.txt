@@ -8,9 +8,17 @@ libraries and Python packages that enable research, development, and application
 creation for use cases in quantum error correction and hybrid quantum-classical
 solvers.
 
+.. note::
+
+   **CUDA-Q QEC is actively developed and fully supported.** The deprecation
+   notice below applies *only* to the CUDA-Q Solvers library; it does not
+   affect CUDA-Q QEC, which continues to receive new features, performance
+   improvements, and releases.
+
 .. attention::
 
-   **CUDA-Q Solvers is deprecated.** Version 0.6.0 is the final planned
+   **CUDA-Q Solvers is deprecated (this does not affect CUDA-Q QEC).**
+   Version 0.6.0 is the final planned
    release of the CUDA-Q Solvers library. Development continues in **CUDA-Q
    Algorithms**, which supersedes CUDA-Q Solvers and expands on it. Install it
    with :code:`pip install cudaq-algorithms`
@@ -65,7 +73,7 @@ The libraries provided are cudaq-qec, a library enabling performant research wor
 for quantum error correction, and cudaq-solvers, a library that provides high-level
 APIs for common quantum-classical solver workflows.
 
-* **cudaq-qec**: Quantum Error Correction Library
+* **cudaq-qec** (actively developed and supported): Quantum Error Correction Library
     * Extensible framework describing quantum error correcting codes as a collection of CUDA-Q kernels.
     * Extensible framework for describing syndrome decoders
     * State-of-the-art, performant decoder implementations on NVIDIA GPUs

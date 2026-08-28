@@ -656,9 +656,17 @@ state-of-the-art CPUs, GPUs, and QPUs. It provides a collection of C++
 libraries and Python packages that enable research, development, and application
 creation for use cases in quantum error correction and hybrid quantum-classical
 solvers.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><strong>CUDA-Q QEC is actively developed and fully supported.</strong> The deprecation
+notice below applies <em>only</em> to the CUDA-Q Solvers library; it does not
+affect CUDA-Q QEC, which continues to receive new features, performance
+improvements, and releases.</p>
+</div>
 <div class="admonition attention">
 <p class="admonition-title">Attention</p>
-<p><strong>CUDA-Q Solvers is deprecated.</strong> Version 0.6.0 is the final planned
+<p><strong>CUDA-Q Solvers is deprecated (this does not affect CUDA-Q QEC).</strong>
+Version 0.6.0 is the final planned
 release of the CUDA-Q Solvers library. Development continues in <strong>CUDA-Q
 Algorithms</strong>, which supersedes CUDA-Q Solvers and expands on it. Install it
 with <code class="code docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">cudaq-algorithms</span></code>
@@ -729,7 +737,7 @@ for quantum error correction, and cudaq-solvers, a library that provides high-le
 APIs for common quantum-classical solver workflows.</p>
 <ul class="simple">
 <li><dl class="simple">
-<dt><strong>cudaq-qec</strong>: Quantum Error Correction Library</dt><dd><ul>
+<dt><strong>cudaq-qec</strong> (actively developed and supported): Quantum Error Correction Library</dt><dd><ul>
 <li><p>Extensible framework describing quantum error correcting codes as a collection of CUDA-Q kernels.</p></li>
 <li><p>Extensible framework for describing syndrome decoders</p></li>
 <li><p>State-of-the-art, performant decoder implementations on NVIDIA GPUs</p></li>
