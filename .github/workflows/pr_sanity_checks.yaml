@@ -259,6 +259,11 @@ jobs:
 
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo "🟥 License header check failed (see log above)." >> $GITHUB_STEP_SUMMARY
+            echo
+            echo "Each file listed above must carry a header matching this (see .licenserc.yaml):"
+            echo "---"
+            sed -n '/^    content: |/,/^    pattern: |/p' .licenserc.yaml | sed '1d;$d' | sed 's/^      //'
+            echo "---"
           else
             echo "🟩 License header check passed" >> $GITHUB_STEP_SUMMARY
           fi

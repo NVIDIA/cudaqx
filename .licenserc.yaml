@@ -45,7 +45,8 @@ header:
     # Zero-byte package-init markers, no content to attach a header to.
     - 'libs/qec/python/cudaq_qec/plugins/decoders/__init__.py'
     - 'libs/qec/python/cudaq_qec/plugins/decoders/tensor_network_utils/__init__.py'
-
-  comment: on-failure
+    # Symlink to a directory (docs/sphinx/examples) that is separately checked.
+    # license-eye's walker doesn't handle symlink-to-directory.
+    - 'examples'
 
   license-location-threshold: 80
