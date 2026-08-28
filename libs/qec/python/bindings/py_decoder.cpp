@@ -9,7 +9,6 @@
 #include "cuda-qx/core/library_utils.h"
 #include "sparse_matrix_casters.h"
 #include "type_casters.h"
-#include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/logger.h"

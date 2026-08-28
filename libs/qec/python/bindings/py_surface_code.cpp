@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "py_surface_code.h"
+#include "cudaq_type_casters.h"
 #include "type_casters.h"
 
 #include <nanobind/nanobind.h>
