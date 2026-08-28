@@ -72,7 +72,6 @@
 // these at compile time).
 #include "../../lib/realtime/decoding-server-cqr/DeviceGraphRingConsumer.h"
 
-
 #include "cudaq/realtime/daemon/bridge/bridge_interface.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 
