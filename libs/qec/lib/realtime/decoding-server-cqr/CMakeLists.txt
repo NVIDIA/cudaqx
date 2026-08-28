@@ -206,12 +206,25 @@ endif()
 # registers the HOST_CALL handlers, which serve each request inline on the
 # CUDAQ dispatcher thread (DecodingSession::handle_*).
 # ---------------------------------------------------------------------------
-if(CUDAQ_QEC_DEVICE_CALL_SERVICE_HEADERS_AVAILABLE)
+if(CUDAQ_REALTIME_INCLUDE_DIR)
+  # decoding_server_cqr.cpp is the table + handlers: cudaq-realtime only, no
+  # CUDA-Q types, reachable through the plain-C
+  # cudaqx_qec_decoding_server_host_call_table() accessor.
+  set(_server_cqr_sources decoding_server_cqr.cpp)
+
+  # The in-process DeviceCallService shim is CUDA-Q's discovery ABI, and the
+  # only part that needs libcudaq-device-call-runtime (it defines the two
+  # service base classes' key functions).  Build it only with a full CUDA-Q
+  # install: an external decoding server reaches the same table through the
+  # accessor, and the in-process path needs nvq++-compiled callers anyway.
+  set(_server_cqr_build_device_call_shim FALSE)
+  if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE AND NOT CUDAQ_QEC_DECODERS_ONLY)
+    set(_server_cqr_build_device_call_shim TRUE)
+    list(APPEND _server_cqr_sources decoding_server_cqr_device_call_service.cpp)
+  endif()
+
   add_library(cudaq-qec-realtime-decoding-server-cqr SHARED
-    decoding_server_cqr.cpp
-    # Supplies the DeviceCallService/DeviceCallServiceSession key functions in
-    # place of libcudaq-device-call-runtime; see the file comment.
-    device_call_service_anchor.cpp
+    ${_server_cqr_sources}
   )
 
   target_compile_options(cudaq-qec-realtime-decoding-server-cqr
@@ -233,19 +246,24 @@ if(CUDAQ_QEC_DEVICE_CALL_SERVICE_HEADERS_AVAILABLE)
     $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,libcudaq-qec-decoding-server.a>
   )
 
-  # No CUDA-Q libraries here: the service side is driven entirely by
-  # libcudaq-realtime (a separate product from CUDA-Q), which
-  # cudaq-qec-realtime-decoding already links.  cudaq::cudaq-common was unused
-  # (--as-needed already dropped it from DT_NEEDED), and the two device-call
-  # base-class destructors that used to come from
-  # libcudaq-device-call-runtime -- the caller-side ring implementation -- now
-  # come from device_call_service_anchor.cpp.
+  # No CUDA-Q libraries on the base path: the service side is driven entirely
+  # by libcudaq-realtime, a separate product from CUDA-Q, which
+  # cudaq-qec-realtime-decoding already links.
   target_link_libraries(cudaq-qec-realtime-decoding-server-cqr
     PUBLIC
       cudaq-qec-realtime-decoding
     PRIVATE
       cudaq-qec-decoding-server
   )
+
+  # libcudaq-device-call-runtime defines DeviceCallService::~DeviceCallService
+  # and DeviceCallServiceSession::~DeviceCallServiceSession, the key functions
+  # of the two base classes the shim derives from.  Needed only when the shim
+  # is compiled.
+  if(_server_cqr_build_device_call_shim)
+    target_link_libraries(cudaq-qec-realtime-decoding-server-cqr
+      PRIVATE ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY})
+  endif()
 
   set(_server_cqr_build_rpath "${CMAKE_BINARY_DIR}/lib")
   set(_server_cqr_install_rpath

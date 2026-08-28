@@ -128,16 +128,10 @@ if(CMAKE_CUDA_COMPILER)
                      "QEC lowered device_call host-dispatch service will not be built.")
     endif()
 
-    # The *service* (decoding-server) side needs only the device_call headers:
-    # it implements DeviceCallService and is driven by libcudaq-realtime.  The
-    # caller (QPU) side additionally needs libcudaq-device-call-runtime, which
-    # is part of CUDA-Q proper rather than cudaq-realtime -- so the two are
-    # tracked separately and only the caller-side targets require the runtime.
-    set(CUDAQ_QEC_DEVICE_CALL_SERVICE_HEADERS_AVAILABLE FALSE)
-    if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
-      set(CUDAQ_QEC_DEVICE_CALL_SERVICE_HEADERS_AVAILABLE TRUE)
-    endif()
-
+    # Gates the CUDA-Q-facing device_call pieces: the in-process
+    # DeviceCallService shim in decoding-server-cqr and the caller-side
+    # simulation-cqr wrappers.  The decoding server proper needs neither --
+    # it reaches the HOST_CALL table through a plain-C accessor.
     set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE FALSE)
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
       set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE TRUE)

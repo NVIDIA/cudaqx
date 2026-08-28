@@ -72,7 +72,6 @@
 // these at compile time).
 #include "../../lib/realtime/decoding-server-cqr/DeviceGraphRingConsumer.h"
 
-#include "cudaq/realtime/device_call_service.h"
 
 #include "cudaq/realtime/daemon/bridge/bridge_interface.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
@@ -101,7 +100,10 @@
 #include <utility>
 #include <vector>
 
-extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
+// The CQR plugin's HOST_CALL function table.  Plain C, deliberately naming no
+// CUDA-Q type: this server is driven by cudaq-realtime alone.
+extern "C" const cudaq_function_entry_t *
+cudaqx_qec_decoding_server_host_call_table(std::uint32_t *count);
 // Opaque graph resources of a decoder hosted by the CQR plugin's registry.
 extern "C" void *cudaqx_qec_decoding_server_graph_resources(std::uint64_t);
 // Device-graph ring-consumer C API (strong definitions live in the
@@ -487,41 +489,24 @@ int main(int argc, char **argv) {
 #endif
 
   // [2] Pull the QEC HOST_CALL function table from the decoding-server-cqr
-  // service plugin -- the same table the in-process host_dispatch test uses.
-  cudaqx_qec_realtime_device_call_service_force_link();
-  auto pluginInfo = cudaqGetDeviceCallServicePluginInfo();
-  if (!pluginInfo.getService) {
-    std::cerr << "ERROR: QEC device_call service plugin missing" << std::endl;
-    return 1;
-  }
-  auto *service = pluginInfo.getService();
-  if (!service) {
-    std::cerr << "ERROR: QEC device_call service create failed" << std::endl;
-    return 1;
-  }
-  // The session owns the function table; keep it alive for the server's
-  // lifetime (the dispatcher reads table.entries in place).  Creating it
-  // also starts the DecodingServer (decoder construction + one worker thread
-  // per decoder) -- before the READY line below, so slow decoder
-  // initialization never races the first client request.
-  std::unique_ptr<cudaq::realtime::DeviceCallServiceSession> session;
-  try {
-    session = service->createDispatchSession(
-        cudaq::realtime::DeviceCallDispatchMode::Host);
-  } catch (const std::exception &e) {
-    std::cerr << "ERROR: decoding-server startup failed: " << e.what()
+  // library -- the same table, built the same way, that the in-process
+  // host_dispatch users get.  They reach it through CUDA-Q's
+  // DeviceCallService discovery ABI; an external server needs the entries,
+  // not the discovery, so it calls the accessor directly and stays free of
+  // CUDA-Q.  The entries have process lifetime, so there is no session object
+  // to keep alive here.
+  //
+  // Building the table also starts the DecodingServer (decoder construction +
+  // one worker thread per decoder) -- before the READY line below, so slow
+  // decoder initialization never races the first client request.  A null
+  // return means that failed; the accessor has already reported why.
+  std::uint32_t entry_count = 0;
+  const cudaq_function_entry_t *entries =
+      cudaqx_qec_decoding_server_host_call_table(&entry_count);
+  if (!entries || entry_count == 0) {
+    std::cerr << "ERROR: decoding-server startup failed: QEC host dispatch "
+                 "table unavailable"
               << std::endl;
-    return 1;
-  }
-  if (!session) {
-    std::cerr << "ERROR: QEC device_call service does not support host "
-                 "dispatch"
-              << std::endl;
-    return 1;
-  }
-  const auto &table = session->dispatchTable();
-  if (!table.entries || table.count == 0) {
-    std::cerr << "ERROR: QEC host dispatch table unavailable" << std::endl;
     return 1;
   }
 
@@ -695,8 +680,8 @@ int main(int argc, char **argv) {
   // payload's decoder_id; a decoder's ring simply only ever carries its own
   // id).
   cudaq_function_table_t function_table{};
-  function_table.entries = table.entries;
-  function_table.count = table.count;
+  function_table.entries = const_cast<cudaq_function_entry_t *>(entries);
+  function_table.count = entry_count;
 
   if (cudaq_dispatch_manager_create(&manager) != CUDAQ_OK) {
     std::cerr << "ERROR: dispatch manager create failed" << std::endl;
