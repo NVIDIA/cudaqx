@@ -128,6 +128,10 @@ if(CMAKE_CUDA_COMPILER)
                      "QEC lowered device_call host-dispatch service will not be built.")
     endif()
 
+    # Gates the CUDA-Q-facing device_call pieces: the in-process
+    # DeviceCallService shim in decoding-server-cqr and the caller-side
+    # simulation-cqr wrappers.  The decoding server proper needs neither --
+    # it reaches the HOST_CALL table through a plain-C accessor.
     set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE FALSE)
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
       set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE TRUE)
@@ -327,9 +331,18 @@ else()
 endif()
 
 add_subdirectory(decoding-server-cqr)
-add_subdirectory(quantinuum)
-add_subdirectory(simulation)
-if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
+# quantinuum/ and simulation/ are QPU-side device wrappers: they compile with
+# nvq++ (cudaqx_add_device_code), so they need a full CUDA-Q install and are
+# not part of a decoders-only build.  The decoding server is the service side
+# and needs neither.
+if(NOT CUDAQ_QEC_DECODERS_ONLY)
+  add_subdirectory(quantinuum)
+  add_subdirectory(simulation)
+endif()
+# simulation-cqr is the caller (QPU) side of the device_call ring: it links
+# cudaq::cudaq-common and the device-call caller runtime, both from CUDA-Q
+# proper, so it is not available in decoders-only builds.
+if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE AND NOT CUDAQ_QEC_DECODERS_ONLY)
   # cudaq-realtime (cqr) host-dispatch: simulated-QPU client that drives the
   # decoding server over cudaq-realtime.
   add_subdirectory(simulation-cqr)

@@ -749,12 +749,13 @@ if(TARGET decoding_server
     PUBLIC
       ${CMAKE_SOURCE_DIR}/libs/qec/include
       ${CMAKE_SOURCE_DIR}/libs/core/include)
+  # Like every other decoder plugin, this one needs only the decoder interface.
+  # It must not link cudaq-qec or the CUDA-Q libraries: a decoder plugin is
+  # dlopen'd by decoding_server, which no longer preloads CUDA-Q, so a plugin
+  # that drags in libcudaq-qec.so fails to load with an undefined NVQIR symbol.
   target_link_libraries(cudaq-qec-concurrency-test-decoder
-    PUBLIC
-      cudaq::cudaq-operator
     PRIVATE
-      cudaq::cudaq-common
-      cudaq-qec)
+      cudaq-qec-decoders)
   set_target_properties(cudaq-qec-concurrency-test-decoder PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/decoder-plugins
     BUILD_RPATH "$ORIGIN"
