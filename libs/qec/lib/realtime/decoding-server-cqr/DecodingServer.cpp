@@ -13,7 +13,6 @@
 #include "cudaq/qec/realtime/decoding_config.h"
 
 #include <fstream>
-#include <iostream>
 #include <iterator>
 #include <stdexcept>
 
@@ -148,17 +147,6 @@ void DecodingServer::run() {
   // there is nothing to receive on the CPU.  Park until stop().
   std::unique_lock<std::mutex> lk(stop_mutex_);
   stop_cv_.wait(lk, [this] { return shutdown_; });
-}
-
-void DecodingServer::print_session_stats() const {
-  for (const auto &[id, session] : registry_.sessions()) {
-    std::cout << "QEC_DECODING_SERVER_DECODER_STATS id=" << id
-              << " decodes=" << session->decode_count.load()
-              << " enqueues=" << session->enqueue_count.load()
-              << " corrections=" << session->get_corrections_count.load()
-              << " resets=" << session->reset_count.load()
-              << " errors=" << session->error_count.load() << std::endl;
-  }
 }
 
 void DecodingServer::stop() {
