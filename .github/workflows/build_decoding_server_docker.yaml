@@ -11,9 +11,10 @@ on:
       dev_base_image_version:
         type: string
         description: >-
-          Version segment of the ghcr.io/nvidia/cudaqx-dev base image tag:
-          "latest" (tracks main) or a release version like "0.7.0" (no
-          leading "v") for a reproducible release build
+          Version segment of the ghcr.io/nvidia/cuda-quantum-dev base image
+          tag. Upstream currently only retains "latest" (versioned tags are
+          not kept -- pinning release builds needs coordination with the
+          cuda-quantum team on tag retention).
         default: latest
         required: false
       assets_repo:
@@ -41,8 +42,10 @@ jobs:
         cuda_version: ['12.6', '13.0']
         include:
           - cuda_version: '12.6'
+            cuda_major: '12'
             cuda_runtime_image_tag: 12.6.3-runtime-ubuntu24.04
           - cuda_version: '13.0'
+            cuda_major: '13'
             cuda_runtime_image_tag: 13.0.3-runtime-ubuntu24.04
     steps:
       - name: Checkout repository
@@ -114,6 +117,7 @@ jobs:
             artifacts=./artifacts
           build-args: |
             CUDA_VERSION=${{ matrix.cuda_version }}
+            cuda_major=${{ matrix.cuda_major }}
             cuda_runtime_image_tag=${{ matrix.cuda_runtime_image_tag }}
             dev_base_image_version=${{ inputs.dev_base_image_version }}
           labels: |
