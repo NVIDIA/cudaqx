@@ -123,6 +123,15 @@ decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome) {
   return result;
 }
 
+// Decoders with no batch-level results inherit this: run the ordinary batch
+// decode and leave the out-param unset.
+std::vector<decoder_result> decoder::decode_batch(
+    const std::vector<std::vector<float_t>> &syndrome,
+    std::optional<cudaqx::heterogeneous_map> &batch_opt_results) {
+  batch_opt_results.reset();
+  return decode_batch(syndrome);
+}
+
 std::string decoder::get_version() const {
   std::stringstream ss;
   ss << "CUDA-Q QEC Base Decoder Interface " << cudaq::qec::getVersion() << " ("
