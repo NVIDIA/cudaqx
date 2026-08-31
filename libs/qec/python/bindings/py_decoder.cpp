@@ -9,7 +9,6 @@
 #include "cuda-qx/core/library_utils.h"
 #include "sparse_matrix_casters.h"
 #include "type_casters.h"
-#include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/logger.h"
@@ -107,7 +106,8 @@ struct batch_decoder_result {
   // checked here since nanobind cannot see them.
   batch_decoder_result(nb::ndarray<nb::numpy, float_t, nb::ndim<2>> result_arr,
                        nb::ndarray<nb::numpy, bool, nb::ndim<1>> converged_arr,
-                       nb::object opt_results) {
+                       nb::object opt_results, nb::object batch_opt_results)
+      : batch_opt_results(batch_opt_results) {
     size = converged_arr.shape(0);
     if (result_arr.shape(0) != size)
       throw std::runtime_error(
@@ -140,13 +140,17 @@ struct batch_decoder_result {
   // Trusted internal constructor: callers guarantee shape/dtype invariants.
   // Used by makeBatchDecoderResult and batchSliceToBatchDecoderResult.
   batch_decoder_result(nb::object result, nb::object converged,
-                       nb::list opt_results, std::size_t size)
+                       nb::list opt_results, std::size_t size,
+                       nb::object batch_opt_results = nb::none())
       : result(result), converged(converged), opt_results(opt_results),
-        size(size) {}
+        batch_opt_results(batch_opt_results), size(size) {}
 
   nb::object result;
   nb::object converged;
   nb::list opt_results;
+  // Batch-level results, or None. Describes the batch as a whole, so it is
+  // deliberately not sliced or indexed alongside the per-shot arrays.
+  nb::object batch_opt_results;
   std::size_t size = 0;
 };
 
@@ -192,6 +196,9 @@ batchSliceToBatchDecoderResult(const batch_decoder_result &batch,
   nb::object converged = batch.converged.attr("__getitem__")(slice);
   nb::list opt_results =
       nb::cast<nb::list>(batch.opt_results.attr("__getitem__")(slice));
+  // batch_opt_results is dropped: its arrays are indexed by position in the
+  // full batch, so carrying them onto a slice unchanged would silently
+  // misalign them with the sliced per-shot rows.
   return batch_decoder_result(result, converged, opt_results,
                               nb::len(converged));
 }
@@ -276,13 +283,15 @@ decoderResultsOptResultsToList(const std::vector<decoder_result> &results) {
   return opt_results;
 }
 
-batch_decoder_result
-makeBatchDecoderResult(const std::vector<decoder_result> &results) {
+batch_decoder_result makeBatchDecoderResult(
+    const std::vector<decoder_result> &results,
+    const std::optional<cudaqx::heterogeneous_map> &batch_opt_results) {
   return batch_decoder_result{
       decoderResultsToNumpy(results),
       decoderResultsConvergedToNumpy(results),
       decoderResultsOptResultsToList(results),
       results.size(),
+      batch_opt_results.has_value() ? nb::cast(*batch_opt_results) : nb::none(),
   };
 }
 
@@ -391,7 +400,8 @@ void bindDecoder(nb::module_ &mod) {
     constructor to produce one. `result` should be a 2-D NumPy array of the
     configured QEC floating point dtype (float64 in standard wheels);
     `converged` should be a 1-D NumPy bool array; `opt_results` is a list of
-    per-shot dicts or None entries. The constructor coerces `result` and
+    per-shot dicts or None entries; `batch_opt_results` is an optional dict of
+    batch-level results. The constructor coerces `result` and
     `converged` to C-contiguous storage of the expected dtype (via
     `np.ascontiguousarray`), copying when the input doesn't already satisfy
     those invariants. Wrong rank (e.g. 1-D `result`) is rejected with
@@ -423,9 +433,11 @@ void bindDecoder(nb::module_ &mod) {
          incompatible. Avoid in hot loops; prefer pattern 1.
 )pbdoc")
       .def(nb::init<nb::ndarray<nb::numpy, float_t, nb::ndim<2>>,
-                    nb::ndarray<nb::numpy, bool, nb::ndim<1>>, nb::object>(),
+                    nb::ndarray<nb::numpy, bool, nb::ndim<1>>, nb::object,
+                    nb::object>(),
            nb::arg("result"), nb::arg("converged"),
-           nb::arg("opt_results") = nb::none())
+           nb::arg("opt_results") = nb::none(),
+           nb::arg("batch_opt_results") = nb::none())
       .def_prop_ro(
           "result",
           [](const batch_decoder_result &self) { return self.result; },
@@ -446,6 +458,23 @@ void bindDecoder(nb::module_ &mod) {
           [](const batch_decoder_result &self) { return self.opt_results; },
           R"pbdoc(
         A list of per-shot optional result dictionaries, or None entries.
+    )pbdoc")
+      .def_prop_ro(
+          "batch_opt_results",
+          [](const batch_decoder_result &self) {
+            return self.batch_opt_results;
+          },
+          R"pbdoc(
+        A dict of batch-level optional results, or None.
+
+        Unlike `opt_results`, this describes the batch as a whole rather than
+        any single shot: its arrays are indexed by position in the batch. Most
+        decoders produce None here. It is the fast path for data that would
+        otherwise cost one Python dict and several small arrays per shot.
+
+        Because its arrays are indexed by position in the full batch, slicing a
+        BatchDecoderResult drops this field rather than carrying it through
+        misaligned.
     )pbdoc")
       .def(
           "__getitem__",
@@ -533,8 +562,11 @@ void bindDecoder(nb::module_ &mod) {
           "decode_batch",
           [](decoder &decoder,
              const std::vector<std::vector<float_t>> &syndrome) {
-            auto results = decoder.decode_batch(syndrome);
-            return makeBatchDecoderResult(results);
+            // Always the two-argument overload: decoders with no batch-level
+            // results inherit the base implementation and leave it unset.
+            std::optional<cudaqx::heterogeneous_map> batch_opt_results;
+            auto results = decoder.decode_batch(syndrome, batch_opt_results);
+            return makeBatchDecoderResult(results, batch_opt_results);
           },
           "Decode multiple syndromes and return the results",
           nb::arg("syndrome"))

@@ -143,11 +143,6 @@ for ((i = 0; i < ${#EXTRA_APP_ARGS[@]}; i++)); do
 done
 
 export CUDAQ_DEFAULT_SIMULATOR=stim
-if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
-  export CUDAQ_QEC_REALTIME_MODE=external_server
-else
-  export CUDAQ_QEC_REALTIME_MODE=${CUDAQ_QEC_REALTIME_MODE:-inproc_rpc}
-fi
 
 P_SPAM=0.01
 
@@ -241,7 +236,6 @@ echo "  num_rounds     = $NUM_ROUNDS"
 echo "  decoder_type   = $DECODER_TYPE"
 echo "  num_shots      = $NUM_SHOTS"
 echo "  num_logical    = $NUM_LOGICAL"
-echo "  realtime mode  = $CUDAQ_QEC_REALTIME_MODE"
 if [[ -n "$ONNX_PATH" ]]; then
   echo "  onnx_path      = $ONNX_PATH"
 fi
@@ -628,16 +622,6 @@ if [[ -n "$SERVER_PORT" ]]; then
     done
   fi
   echo "Server evidence: dispatches=$server_dispatches, max_concurrent=$server_max_concurrent"
-fi
-
-# REQUIRE_HOST_MODE (relay trio ctest): assert the realtime session actually
-# initialized in HOST dispatch mode, so the test cannot pass vacuously through
-# the legacy direct-call path. Needs CUDAQ_LOG_LEVEL=info.
-if [[ -n "${REQUIRE_HOST_MODE:-}" ]]; then
-  if ! grep -q "using HOST dispatch mode" "$REALTIME_LOG"; then
-    echo "FAIL: 'using HOST dispatch mode' not found (realtime session did not initialize; is CUDAQ_LOG_LEVEL=info set?)"
-    return_code=1
-  fi
 fi
 
 echo ""

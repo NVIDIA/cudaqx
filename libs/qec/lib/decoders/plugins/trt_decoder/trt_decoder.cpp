@@ -425,6 +425,7 @@ public:
 
   virtual decoder_result decode(const std::vector<float_t> &syndrome) override;
 
+  using decoder::decode_batch; // keep the batch_opt_results overload visible
   virtual std::vector<decoder_result>
   decode_batch(const std::vector<std::vector<float_t>> &syndromes) override;
 
@@ -762,8 +763,15 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       global_decoder_params_ =
           params.get<cudaqx::heterogeneous_map>("global_decoder_params");
       if (!global_decoder_name.empty()) {
+        // A DEM-native global decoder is constructed from the model text; the
+        // matrix arm is what every other global decoder takes.
         global_decoder_ =
-            decoder::get(global_decoder_name, H, global_decoder_params_);
+            global_decoder_params_.contains("stim_dem")
+                ? decoder::get(
+                      global_decoder_name,
+                      global_decoder_params_.get<std::string>("stim_dem"),
+                      global_decoder_params_)
+                : decoder::get(global_decoder_name, H, global_decoder_params_);
         CUDA_QEC_INFO("TensorRT decoder: global_decoder '{}' attached",
                       global_decoder_name);
       }

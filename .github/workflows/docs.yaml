@@ -123,8 +123,7 @@ jobs:
       - name: Install requirements
         run: |
           apt update
-          apt install -y --no-install-recommends \
-            gfortran libblas-dev doxygen
+          apt install -y --no-install-recommends doxygen
 
           python3 -m pip install IPython breathe enum_tools myst_parser nbsphinx \
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \

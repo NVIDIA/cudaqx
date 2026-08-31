@@ -25,6 +25,30 @@ endif()
 
 # ==============================================================================
 
+# Decoders-only module: binds the decoder API (py_decoder.cpp is cudaq-free;
+# the CUDA-Q result-type casters live in cudaq_type_casters.h, which only the
+# full module below compiles). Bindings land under `module.qecrt`.
+if (CUDAQ_QEC_DECODERS_ONLY)
+  set(MODULE_NAME _qec_decoders_standalone)
+
+  cudaqx_add_pymodule(${MODULE_NAME}
+    bindings/cudaqx_qec_decoders_only.cpp
+    bindings/py_decoder.cpp
+  )
+
+  target_link_libraries(${MODULE_NAME} PRIVATE cudaq-qec-decoders)
+
+  find_package(CUDAToolkit REQUIRED)
+  target_link_libraries(${MODULE_NAME} PRIVATE CUDA::cudart)
+  target_include_directories(${MODULE_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+
+  set_target_properties(${MODULE_NAME} PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+    BUILD_RPATH "$ORIGIN/../lib")
+
+  return()
+endif()
+
 set(MODULE_NAME _pycudaqx_qec_the_suffix_matters_cudaq_qec)
 
 cudaqx_add_pymodule(${MODULE_NAME}

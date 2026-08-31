@@ -88,13 +88,13 @@ test_examples() {
           pip install onnxscript
         fi
         pip install cudaq-qec[tensor_network_decoder,trt_decoder] --find-links /root/wheels
-        pip install cudaq-solvers[gqe] --find-links /root/wheels
         source $CONDA_PREFIX/lib/python${python_version}/site-packages/distributed_interfaces/activate_custom_mpi.sh
         export OMPI_MCA_opal_cuda_support=true OMPI_MCA_btl='^openib'
 
         # Needed for tests:
         pip install pytest
-        pip install openfermion openfermionpyscf
+        # Needed by docs/sphinx/examples/qec/python/pseudo_threshold.py.
+        pip install matplotlib
 
         if [[ "$(uname -m)" == "x86_64" ]]; then
             # Stim is not currently available on manylinux ARM wheels, so don't
@@ -118,32 +118,15 @@ test_examples() {
             echo "Testing with target: ${target}"
 
             # Test Python examples
-            for domain in "solvers" "qec"; do
+            for domain in "qec"; do
                 echo "Testing ${domain} Python examples with Python ${python_version} and target ${target}..."
                 cd examples/${domain}/python
                 shopt -s nullglob # don't throw errors if no Python files exist
                 for f in *.py; do
                     echo Testing $f...
-                    if [ "$f" = "gqe_h2.py" ]; then
-                        # This test expects a PyTorch build that can run on the host GPU.
-                        # Skip it (no failure) when the wheel lacks kernels for this device.
-                        if ! python3 -c "from cudaq_solvers.gqe_algorithm.cuda_utils import pytorch_cuda_execution_available; import sys; sys.exit(0 if pytorch_cuda_execution_available() else 1)"; then
-                            echo "Skipping ${f} and ${f} --mpi: PyTorch cannot execute CUDA kernels on this GPU."
-                            continue
-                        fi
-                        if ! python3 "$f"; then
-                            echo "Python tests failed for ${domain} with Python ${python_version} (default target)"
-                            num_failures=$((num_failures + 1))
-                        fi
-                        if ! python3 "$f" --mpi; then
-                            echo "Python tests failed for ${domain} with Python ${python_version} using --mpi"
-                            num_failures=$((num_failures + 1))
-                        fi
-                    else
-                        if ! python3 "$f" --target ${target}; then
-                            echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}"
-                            num_failures=$((num_failures + 1))
-                        fi
+                    if ! python3 "$f" --target ${target}; then
+                        echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}"
+                        num_failures=$((num_failures + 1))
                     fi
                 done
                 shopt -u nullglob  # reset setting, just for cleanliness

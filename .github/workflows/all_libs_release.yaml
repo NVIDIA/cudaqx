@@ -64,10 +64,8 @@ jobs:
         id: set-release-number
         run: |
           echo "CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
-          echo "CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
           # And output to the GitHub Actions summary.
           echo "Setting CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
-          echo "Setting CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Fetch assets and set QEC_EXTERNAL_DECODERS
         env:

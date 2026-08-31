@@ -9,27 +9,19 @@
 #include "realtime_decoding.h"
 #include "../hardware_guards.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
-#include <cstring>
-#include <dlfcn.h>
+#include <filesystem>
 #include <fmt/core.h>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <set>
 #include <stdexcept>
-
-#ifdef CUDAQ_REALTIME_ROOT
-#include "qec_realtime_session.h"
-#include "rpc_producer.h"
-#else
-namespace cudaq::qec::realtime {
-class qec_realtime_session {};
-} // namespace cudaq::qec::realtime
-#endif
 
 // Optional syndrome capture callback for --save_syndrome feature
 namespace {
@@ -38,103 +30,6 @@ SyndromeCaptureCallback g_syndrome_capture_callback = nullptr;
 } // namespace
 
 std::vector<std::unique_ptr<cudaq::qec::decoder>> g_decoders;
-std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
-
-namespace {
-
-#ifdef CUDAQ_REALTIME_ROOT
-inline cudaq_dispatch_launch_fn_t resolve_launch_dispatch_kernel_regular() {
-  return reinterpret_cast<cudaq_dispatch_launch_fn_t>(
-      ::dlsym(RTLD_DEFAULT, "cudaq_launch_dispatch_kernel_regular"));
-}
-#endif
-
-bool realtime_mode_inproc_rpc_requested() {
-  const char *env = std::getenv("CUDAQ_QEC_REALTIME_MODE");
-  if (!env || env[0] == '\0')
-    return false;
-  return std::strcmp(env, "inproc_rpc") == 0;
-}
-
-bool any_decoder_supports_graph_dispatch() {
-  for (const auto &dec : g_decoders) {
-    if (dec && dec->supports_graph_dispatch())
-      return true;
-  }
-  return false;
-}
-
-} // namespace
-
-#ifdef CUDAQ_REALTIME_ROOT
-namespace {
-
-void maybe_init_realtime_session() {
-  if (!realtime_mode_inproc_rpc_requested()) {
-    CUDA_QEC_INFO("CUDAQ_QEC_REALTIME_MODE not set to inproc_rpc; using "
-                  "legacy direct-call decoding path.");
-    return;
-  }
-
-  // Pick DEVICE vs HOST dispatch the same way qec_realtime_session does at
-  // initialize(): any graph-capable decoder => DEVICE mode (per-round
-  // GRAPH_LAUNCH enqueue + DEVICE_CALL get/reset, driven by the device dispatch
-  // kernel); otherwise HOST mode -- CPU decoders such as pymatching run all
-  // three RPCs inline on the CPU host loop.  A mixed (graph + non-graph) set is
-  // rejected by qec_realtime_session::initialize() below.
-  const bool device_mode = any_decoder_supports_graph_dispatch();
-
-  cudaq_dispatch_launch_fn_t launch_fn = nullptr;
-  if (device_mode) {
-    // DEVICE mode needs the dispatch-kernel launch helper from
-    // libcudaq-realtime-dispatch.a (absorbed into the final executable).  HOST
-    // mode uses no device launch helper.
-    launch_fn = resolve_launch_dispatch_kernel_regular();
-    if (!launch_fn)
-      throw std::runtime_error(
-          "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested with a graph-capable "
-          "decoder but cudaq_launch_dispatch_kernel_regular could not be "
-          "resolved via dlsym(RTLD_DEFAULT, ...). The host executable must "
-          "absorb libcudaq-realtime-dispatch.a and link with "
-          "--export-dynamic.");
-  } else {
-    CUDA_QEC_INFO("CUDAQ_QEC_REALTIME_MODE=inproc_rpc with CPU (non-graph) "
-                  "decoder(s); using HOST dispatch mode (no device kernel / no "
-                  "device shared-ring setup).");
-  }
-
-  try {
-    g_realtime_session =
-        std::make_unique<cudaq::qec::realtime::qec_realtime_session>(g_decoders,
-                                                                     launch_fn);
-    g_realtime_session->initialize();
-  } catch (const std::exception &e) {
-    const std::string what = e.what();
-    g_realtime_session.reset();
-    throw std::runtime_error("CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
-                             "qec_realtime_session::initialize() threw: " +
-                             what);
-  }
-}
-
-void maybe_finalize_realtime_session() {
-  if (g_realtime_session) {
-    try {
-      g_realtime_session->finalize();
-    } catch (const std::exception &e) {
-      CUDA_QEC_WARN("qec_realtime_session::finalize threw: {}", e.what());
-    }
-    g_realtime_session.reset();
-  }
-}
-
-} // namespace
-#else
-namespace {
-void maybe_init_realtime_session() {}
-void maybe_finalize_realtime_session() {}
-} // namespace
-#endif
 
 // Helper to pack syndrome bits into bytes (8 bits per byte, MSB first for
 // readability)
@@ -156,14 +51,35 @@ static std::vector<uint8_t> pack_syndrome_bits(const uint8_t *syndromes,
 
 namespace cudaq::qec::decoding::host {
 
+/// Read the DEM a decoder entry names.
+std::string read_stim_dem(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
+  // A directory opens as a stream and fails only when read, past the check
+  // below.
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(decoder_config.stim_dem_path, ec))
+    throw std::runtime_error(
+        fmt::format("stim_dem_path is not a readable file: {}",
+                    decoder_config.stim_dem_path));
+  std::ifstream file(decoder_config.stim_dem_path);
+  if (!file)
+    throw std::runtime_error(fmt::format(
+        "stim_dem_path could not be opened: {}", decoder_config.stim_dem_path));
+  return std::string((std::istreambuf_iterator<char>(file)),
+                     std::istreambuf_iterator<char>());
+}
+
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
   // Placement knob: surfaced for every decoder type (deliberately before the
-  // trt-only early return below); consumed by decoder::get() at construction.
+  // decoder-type early return below); consumed by decoder::get() at
+  // construction.
   if (decoder_config.cuda_device_id.has_value())
     params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
-  if (decoder_config.type != "trt_decoder")
+  const bool is_trt_decoder = decoder_config.type == "trt_decoder";
+  const bool is_pymatching_decoder = decoder_config.type == "pymatching";
+  if (!is_trt_decoder && !is_pymatching_decoder)
     return params;
 
   // batch_size > 1 has no effect on the realtime path: enqueue_syndrome decodes
@@ -171,7 +87,7 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   // all but slot 0. Warn rather than reject -- the result is correct, just
   // wasteful. (Offline decode_batch users set batch_size via a raw params map,
   // not this realtime config path.)
-  if (params.contains("batch_size") &&
+  if (is_trt_decoder && params.contains("batch_size") &&
       params.get<std::size_t>("batch_size") > 1)
     CUDA_QEC_WARN(
         "trt_decoder batch_size > 1 has no effect on the realtime decode path "
@@ -184,13 +100,23 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   // provide a hand-built map with only "global_decoder"; synthesize params here
   // before the O_sparse early return so that decoder still attaches.
   const bool has_global_decoder =
-      params.contains("global_decoder") &&
+      is_trt_decoder && params.contains("global_decoder") &&
       !params.get<std::string>("global_decoder").empty();
   const bool has_pymatching_global =
       has_global_decoder &&
       params.get<std::string>("global_decoder") == "pymatching";
   if (has_global_decoder && !params.contains("global_decoder_params"))
     params.insert("global_decoder_params", cudaqx::heterogeneous_map());
+
+  // A DEM-native global decoder (chromobius) cannot be built from the parent's
+  // H, so pass the model text down beside it. Decoders that do not ask for it
+  // ignore the key.
+  if (has_global_decoder && !decoder_config.stim_dem_path.empty()) {
+    auto global_decoder_params =
+        params.get<cudaqx::heterogeneous_map>("global_decoder_params");
+    global_decoder_params.insert("stim_dem", read_stim_dem(decoder_config));
+    params.insert("global_decoder_params", global_decoder_params);
+  }
 
   if (decoder_config.O_sparse.empty())
     return params;
@@ -224,6 +150,17 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
     throw std::invalid_argument("Decoder ID is outside the uint32_t range: " +
                                 std::to_string(config_in.id));
 
+  // The parser rejects a config describing two forms, but a programmatically
+  // built one never passes through it. These two are what corrupt: chunk
+  // priors over an unrelated model, and an O_sparse that overwrites the
+  // mapping a DEM-native decoder installed for itself.
+  if (!config_in.stim_dem_path.empty() &&
+      (config_in.dem_chunks.has_value() || !config_in.O_sparse.empty()))
+    throw std::runtime_error(
+        "dem_chunks and O_sparse must not be set with stim_dem_path for "
+        "decoder " +
+        std::to_string(config_in.id));
+
   // A chunk-form configuration names its DEM one round at a time. Expand it
   // here so everything below is written against the flat form only.
   auto expanded_config = config_in;
@@ -236,16 +173,24 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
         "D_sparse must be provided in decoder configuration");
   // pcm_from_sparse_vec() turns an empty H_sparse into an all-zero matrix
   // rather than failing, so without this check a config that described no DEM
-  // at all would build a decoder whose parity-check matrix decodes nothing.
-  if (decoder_config.H_sparse.empty())
+  // at all would build a decoder whose parity-check matrix decodes nothing. A
+  // DEM-sourced decoder is built from the model text instead, so it has no
+  // H_sparse to check.
+  if (decoder_config.H_sparse.empty() && decoder_config.stim_dem_path.empty())
     throw std::runtime_error(
         "H_sparse must be provided to build decoder " +
         std::to_string(decoder_config.id) +
-        ", either directly or by way of dem_chunks and num_rounds.");
+        ", either directly or by way of dem_chunks and num_rounds. A "
+        "DEM-native decoder can name a model with stim_dem_path instead.");
 
   auto t0 = std::chrono::high_resolution_clock::now();
   CUDA_QEC_INFO("Creating decoder {} of type {}", decoder_config.id,
                 decoder_config.type);
+
+  // Needed both to construct the decoder and to derive its observable mapping.
+  const std::string stim_dem_text = decoder_config.stim_dem_path.empty()
+                                        ? std::string{}
+                                        : read_stim_dem(decoder_config);
 
   auto params = prepare_decoder_params(decoder_config);
   // The phases carry a prior per fault, which the derived matrices do not. A
@@ -254,25 +199,59 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
   if (closed_dem && !params.contains("error_rate_vec"))
     params.insert("error_rate_vec", closed_dem->error_rates);
 
-  auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
-                                             decoder_config.syndrome_size,
-                                             decoder_config.block_size);
   const auto num_observables = std::count(decoder_config.O_sparse.begin(),
                                           decoder_config.O_sparse.end(), -1);
-  // Materialize O before decoder construction to validate its sparse shape and
-  // column indices for every decoder type. TRT also receives this matrix in its
-  // constructor parameters through prepare_decoder_params() above.
-  (void)cudaq::qec::pcm_from_sparse_vec(
-      decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  auto decoder = cudaq::qec::get_decoder(decoder_config.type, pcm, params);
+
+  std::unique_ptr<cudaq::qec::decoder> decoder;
+  if (!decoder_config.stim_dem_path.empty()) {
+    // A DEM-native decoder is constructed from the model text itself. It
+    // derives its own dimensions and, like chromobius, installs the observable
+    // mapping its results are expressed in, so neither is supplied here.
+    decoder =
+        cudaq::qec::get_decoder(decoder_config.type, stim_dem_text, params);
+    const auto num_D_rows = std::count(decoder_config.D_sparse.begin(),
+                                       decoder_config.D_sparse.end(), -1);
+    if (num_D_rows != static_cast<std::int64_t>(decoder->get_syndrome_size()))
+      throw std::runtime_error(fmt::format(
+          "Number of rows in D_sparse vector is not equal to the number of "
+          "detectors in {}: {} != {}",
+          decoder_config.stim_dem_path, num_D_rows,
+          decoder->get_syndrome_size()));
+  } else {
+    auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
+                                               decoder_config.syndrome_size,
+                                               decoder_config.block_size);
+    // Materialize O before decoder construction to validate its sparse shape
+    // and column indices for every decoder type. TRT also receives this matrix
+    // in its constructor parameters through prepare_decoder_params() above.
+    (void)cudaq::qec::pcm_from_sparse_vec(
+        decoder_config.O_sparse, num_observables, decoder_config.block_size);
+    decoder = cudaq::qec::get_decoder(decoder_config.type, pcm, params);
+  }
   decoder->set_decoder_id(decoder_config.id);
-  decoder->set_O_sparse(decoder_config.O_sparse);
+  // A decoder that predicts observables directly installs the mapping its
+  // results are expressed in at construction (chromobius derives an identity
+  // map from the DEM it read), so installing an empty one here would drop it
+  // and leave get_corrections with nowhere to write.
+  if (!decoder_config.O_sparse.empty()) {
+    const bool pymatching_configured_observables =
+        decoder_config.type == "pymatching" && num_observables > 0;
+    if (!pymatching_configured_observables)
+      decoder->set_O_sparse(decoder_config.O_sparse);
+  } else if (!stim_dem_text.empty() && decoder->get_num_observables() == 0) {
+    // DEM form names no O_sparse and the LUT decoders install none, leaving the
+    // realtime path nothing to project onto. dem_from_stim_text() is what
+    // make_pcm_decoder() used, so the columns line up with the decoder's own.
+    const auto dem = cudaq::qec::dem_from_stim_text(stim_dem_text);
+    decoder->set_O_sparse(
+        cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix));
+  }
   decoder->set_D_sparse(decoder_config.D_sparse);
 
   // Force plugin initialization before the caller publishes the decoder for
   // realtime work. This preserves configure_decoders()'s existing behavior.
   auto t1 = std::chrono::high_resolution_clock::now();
-  std::vector<cudaq::qec::float_t> syndrome(decoder_config.syndrome_size, 0.0);
+  std::vector<cudaq::qec::float_t> syndrome(decoder->get_syndrome_size(), 0.0);
   decoder->decode(syndrome);
   auto t2 = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> creation_duration = t1 - t0;
@@ -285,10 +264,6 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
       creation_duration.count(), initialization_duration.count());
 
   return decoder;
-}
-
-cudaq::qec::realtime::qec_realtime_session *get_realtime_session() {
-  return g_realtime_session.get();
 }
 
 int configure_decoders(
@@ -323,45 +298,6 @@ int configure_decoders(
     return 3;
   }
 
-#ifdef CUDAQ_REALTIME_ROOT
-  // inproc_rpc DEVICE sessions allocate pinned, device-mapped ring buffers
-  // (cudaHostAlloc(cudaHostAllocMapped) + cudaHostGetDevicePointer).
-  // cudaSetDeviceFlags(cudaDeviceMapHost) only takes effect BEFORE the device's
-  // CUDA context is created, and the per-decoder dry-run below
-  // (new_decoder->decode(...)) can create that context for GPU decoders -- so
-  // set the flag here, before any decoder is realized, rather than (only) later
-  // in qec_realtime_session::initialize().  Best-effort: if a context already
-  // exists this returns cudaErrorSetOnActiveProcess, which is harmless (mapped
-  // host allocation still works via UVA regardless of this device-wide flag),
-  // and HOST-mode CPU sessions do not use mapped memory at all.
-  if (realtime_mode_inproc_rpc_requested()) {
-    // The device-mapped ring buffers guarded by cudaDeviceMapHost are used only
-    // by the DEVICE-mode graph scheduler, which needs a usable GPU.  CPU
-    // decoders run in HOST mode with plain host memory and never touch the
-    // device, so probe for a GPU first and skip the flag entirely when none is
-    // present.  This keeps CPU-only / GPU-less machines from executing the
-    // device-flag call at all -- previously it ran unconditionally and logged a
-    // spurious "CUDA driver version is insufficient" warning.  (If a graph
-    // decoder is later selected without a usable device,
-    // qec_realtime_session::initialize() still fails with a clear DEVICE-mode
-    // error.)
-    int device_count = 0;
-    cudaError_t count_err = cudaGetDeviceCount(&device_count);
-    if (count_err == cudaSuccess && device_count > 0) {
-      cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
-      if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
-        CUDA_QEC_WARN(
-            "cudaSetDeviceFlags(cudaDeviceMapHost) returned '{}' before "
-            "decoder init; continuing (mapped alloc works via UVA).",
-            cudaGetErrorString(flags_err));
-    } else {
-      // Reset the sticky runtime error so a later benign cudaGetLastError()
-      // isn't surprised by the no-device / insufficient-driver probe result.
-      cudaGetLastError();
-    }
-  }
-#endif
-
   // Create the decoders based on the decoder configs.
   try {
     g_decoders.clear();
@@ -374,13 +310,11 @@ int configure_decoders(
     return 4;
   }
 
-  maybe_init_realtime_session();
   return 0;
 }
 
 void finalize_decoders() {
   CUDA_QEC_INFO("Finalizing the realtime decoding library.");
-  maybe_finalize_realtime_session();
   g_decoders.clear();
 }
 
@@ -431,22 +365,6 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                                   packed_syndrome.size());
     }
   };
-
-#ifdef CUDAQ_REALTIME_ROOT
-  if (g_realtime_session) {
-    capture_syndromes();
-    try {
-      cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
-          *g_realtime_session, decoder_id, syndromes, syndrome_length, tag);
-    } catch (
-        const cudaq::qec::decoding::rpc_producer::dispatcher_unresponsive_error
-            &) {
-      maybe_finalize_realtime_session();
-      throw;
-    }
-    return;
-  }
-#endif
 
   // Direct-call path: this caller thread runs the decode, but
   // configure_decoders() constructed every decoder sequentially on one thread,
@@ -505,22 +423,6 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
                     correction_length, num_observables));
   }
 
-#ifdef CUDAQ_REALTIME_ROOT
-  if (g_realtime_session) {
-    try {
-      cudaq::qec::decoding::rpc_producer::get_corrections(
-          *g_realtime_session, decoder_id, corrections, correction_length,
-          reset ? 1u : 0u);
-    } catch (
-        const cudaq::qec::decoding::rpc_producer::dispatcher_unresponsive_error
-            &) {
-      maybe_finalize_realtime_session();
-      throw;
-    }
-    return;
-  }
-#endif
-
   // clear_corrections may touch device memory in some plugins.
   cudaq::qec::detail_affinity::pin_decode_device(*decoder);
   auto ret = decoder->get_obs_corrections();
@@ -542,21 +444,6 @@ void reset_decoder(std::size_t decoder_id) {
     throw std::invalid_argument(
         fmt::format("Decoder {} not found", decoder_id));
   }
-
-#ifdef CUDAQ_REALTIME_ROOT
-  if (g_realtime_session) {
-    try {
-      cudaq::qec::decoding::rpc_producer::reset_decoder(*g_realtime_session,
-                                                        decoder_id);
-    } catch (
-        const cudaq::qec::decoding::rpc_producer::dispatcher_unresponsive_error
-            &) {
-      maybe_finalize_realtime_session();
-      throw;
-    }
-    return;
-  }
-#endif
 
   cudaq::qec::detail_affinity::pin_decode_device(*decoder);
   decoder->reset_decoder();

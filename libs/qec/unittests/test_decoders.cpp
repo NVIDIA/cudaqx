@@ -9,7 +9,10 @@
 #include "stim.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
+// Private header from libs/qec/lib; see this target's include directories.
+#include "decoder_stats.h"
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -39,6 +42,20 @@ public:
 private:
   std::string name;
   std::optional<std::string> oldValue;
+};
+
+// Restore the log level on scope exit so a failed expectation cannot leave the
+// rest of the suite logging.
+class ScopedLogLevel {
+public:
+  explicit ScopedLogLevel(cudaq::qec::detail::log_level level)
+      : previous(cudaq::qec::detail::get_log_level()) {
+    cudaq::qec::detail::set_log_level(level);
+  }
+  ~ScopedLogLevel() { cudaq::qec::detail::set_log_level(previous); }
+
+private:
+  cudaq::qec::detail::log_level previous;
 };
 } // namespace
 
@@ -186,6 +203,33 @@ TEST(SampleDecoder, checkAPI) {
       ASSERT_EQ(x, 0.0f);
 }
 
+// A decoder that overrides only the single-argument decode_batch (i.e. every
+// decoder written before the overload existed) must still work through the
+// two-argument one, and must report no batch-level results.
+TEST(SampleDecoder, BatchOptResultsDefaultsToEmpty) {
+  constexpr std::size_t block_size = 10;
+  constexpr std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto d = cudaq::qec::decoder::get("sample_decoder", H);
+  ASSERT_NE(d, nullptr);
+
+  std::vector<cudaq::qec::float_t> syndromes(syndrome_size, 0.0);
+  std::optional<cudaqx::heterogeneous_map> batch_opt_results;
+  auto dec_results = d->decode_batch({syndromes, syndromes}, batch_opt_results);
+
+  EXPECT_EQ(dec_results.size(), 2);
+  EXPECT_FALSE(batch_opt_results.has_value());
+  for (auto &m : dec_results)
+    EXPECT_EQ(m.result.size(), block_size);
+
+  // A stale value in the out-param must be cleared, not left for the caller to
+  // mistake for decoder output.
+  batch_opt_results = cudaqx::heterogeneous_map();
+  batch_opt_results->insert("stale", 1);
+  d->decode_batch({syndromes}, batch_opt_results);
+  EXPECT_FALSE(batch_opt_results.has_value());
+}
+
 TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
   // CUDAQ_QEC_DEBUG_DECODER enables the base decoder's printf logging paths.
   ScopedEnv debugEnv("CUDAQ_QEC_DEBUG_DECODER", "1");
@@ -227,6 +271,85 @@ TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
 
   // Longer input than the configured measurement buffer is rejected.
   EXPECT_FALSE(decoder->enqueue_syndrome(msyn.data(), msyn.size() + 1));
+}
+
+// An explicit summary is a phase boundary: later summaries must not repeat the
+// warmup samples, and destruction must not emit the last phase a second time.
+TEST(DecoderStats, ExplicitSummaryStartsFreshAggregate) {
+  ScopedLogLevel scoped(cudaq::qec::detail::log_level::info);
+  testing::internal::CaptureStdout();
+  {
+    cudaq::qec::decoder_stats stats;
+    for (int phase = 0; phase < 2; ++phase) {
+      stats.note_submit(/*first_of_shot=*/true);
+      stats.note_decode_complete();
+      stats.emit_summary();
+    }
+  }
+  const auto log = testing::internal::GetCapturedStdout();
+
+  const std::string expected = "stats_summary Decodes:1 ";
+  std::size_t summaries = 0;
+  for (std::size_t at = 0; (at = log.find(expected, at)) != std::string::npos;
+       at += expected.size())
+    ++summaries;
+  EXPECT_EQ(summaries, 2u);
+  EXPECT_EQ(log.find("stats_summary Decodes:2 "), std::string::npos);
+}
+
+// The summary's percentiles come from a fixed-size log-spaced histogram, so
+// they are estimates while the count, mean, min and max stay exact. Feed a
+// known ramp so the estimates can be held to a tolerance.
+TEST(DecoderStats, LatencySeriesPercentilesTrackKnownDistribution) {
+  cudaq::qec::latency_series series;
+  EXPECT_EQ(series.count, 0u);
+  // An empty series has nothing to report rather than a stale or garbage value.
+  EXPECT_EQ(series.percentile_us(0.5), 0.0);
+
+  // A single sample is reported exactly: the bucket it lands in is wider than
+  // the value's own precision, so the estimate is clamped to the range seen.
+  series.add(7.25);
+  EXPECT_DOUBLE_EQ(series.percentile_us(0.5), 7.25);
+  EXPECT_DOUBLE_EQ(series.percentile_us(0.99), 7.25);
+
+  cudaq::qec::latency_series ramp;
+  for (int us = 1; us <= 1000; us++)
+    ramp.add(static_cast<double>(us));
+
+  EXPECT_EQ(ramp.count, 1000u);
+  EXPECT_DOUBLE_EQ(ramp.min_us, 1.0);
+  EXPECT_DOUBLE_EQ(ramp.max_us, 1000.0);
+  EXPECT_NEAR(ramp.average_us(), 500.5, 1e-9);
+
+  // Bucket quantization is proportional to the value, so hold each estimate to
+  // 5% of the exact percentile of the ramp.
+  EXPECT_NEAR(ramp.percentile_us(0.50), 500.0, 25.0);
+  EXPECT_NEAR(ramp.percentile_us(0.90), 900.0, 45.0);
+  EXPECT_NEAR(ramp.percentile_us(0.99), 990.0, 49.5);
+
+  // Percentiles are monotonic in the requested fraction and bounded by the
+  // exact extremes, whatever the distribution.
+  EXPECT_LE(ramp.min_us, ramp.percentile_us(0.50));
+  EXPECT_LE(ramp.percentile_us(0.50), ramp.percentile_us(0.90));
+  EXPECT_LE(ramp.percentile_us(0.90), ramp.percentile_us(0.99));
+  EXPECT_LE(ramp.percentile_us(0.99), ramp.max_us);
+}
+
+// A heavy tail is what the percentiles exist to expose: a handful of slow
+// samples must move p99 without dragging p50 along with them.
+TEST(DecoderStats, LatencySeriesPercentilesSeparateTailFromBody) {
+  // 2% slow, so the slow samples start below the 99th percentile rather than
+  // straddling it.
+  cudaq::qec::latency_series series;
+  for (int i = 0; i < 980; i++)
+    series.add(2.0);
+  for (int i = 0; i < 20; i++)
+    series.add(500.0);
+
+  EXPECT_NEAR(series.percentile_us(0.50), 2.0, 0.1);
+  EXPECT_NEAR(series.percentile_us(0.90), 2.0, 0.1);
+  EXPECT_NEAR(series.percentile_us(0.99), 500.0, 25.0);
+  EXPECT_DOUBLE_EQ(series.max_us, 500.0);
 }
 
 TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
