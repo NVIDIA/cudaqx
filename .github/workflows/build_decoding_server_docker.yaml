@@ -8,9 +8,23 @@ on:
         description: GHCR image name, without a tag
         default: ghcr.io/nvidia/private/cudaq-decoders
         required: true
-      image_tag:
+      dev_base_image_version:
         type: string
-        description: Base tag; defaults to wiring-<run number>, with -cu<version> added
+        description: >-
+          Version segment of the ghcr.io/nvidia/cuda-quantum-dev base image
+          tag. Upstream currently only retains "latest" (versioned tags are
+          not kept -- pinning release builds needs coordination with the
+          cuda-quantum team on tag retention).
+        default: latest
+        required: false
+      assets_repo:
+        type: string
+        description: Retrieve decoder assets from a draft release in this repo (e.g. NVIDIA/cudaqx)
+        default: 'NVIDIA/cudaqx'
+        required: false
+      assets_tag:
+        type: string
+        description: Retrieve decoder assets from a draft release with this tag (e.g. docker-files-123)
         required: false
 
 jobs:
@@ -19,16 +33,59 @@ jobs:
     if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     runs-on: linux-${{ matrix.platform }}-cpu8
     permissions:
-      contents: read
+      contents: write
       packages: write
     strategy:
       fail-fast: false
       matrix:
         platform: [amd64, arm64]
         cuda_version: ['12.6', '13.0']
+        include:
+          - cuda_version: '12.6'
+            cuda_major: '12'
+            cuda_runtime_image_tag: 12.6.3-runtime-ubuntu24.04
+          - cuda_version: '13.0'
+            cuda_major: '13'
+            cuda_runtime_image_tag: 13.0.3-runtime-ubuntu24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Always create the dir (even empty) so build-contexts below has
+      # something to point at regardless of whether assets were supplied.
+      - name: Create artifacts dir
+        run: mkdir -p artifacts
+
+      # TEMPORARY: fetching directly in this job (instead of a separate
+      # fetch-assets job + actions/upload-artifact hand-off) while testing
+      - name: Fetch and extract decoder assets
+        if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sudo bash .github/workflows/scripts/install_git_cli.sh
+          # Suppress gh's own download progress output (filenames/sizes) --
+          # public job logs, same reasoning as not logging `gh release view`.
+          # stderr is left alone so auth/network failures are still visible.
+          gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}" > /dev/null
+
+          # nv-qldpc-decoder-<arch>_ubuntu24.04_cuda<version>_py3.<pyver>_release.tar.gz --
+          # per-Python-version variants (verified: the .so differs by
+          # build, not just incidentally). decoding_server dlopens this as
+          # a plugin and never touches Python, so any variant should be
+          # functionally equivalent; py3.12 picked for consistency with
+          # the dev image's own default interpreter.
+          tar -C artifacts -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_py3.12_release.tar.gz
+          test -f artifacts/libcudaq-qec-nv-qldpc-decoder.so
+          # The cudevice archive is NOT bundled in this tarball (verified
+          # against both docker-files-* and wheels-* releases) -- it's a
+          # separate, independently-optional artifact. Don't hard-require it.
+          if [ -f artifacts/libcudaq-qec-realtime-cudevice-proprietary.a ]; then
+            echo "cudevice archive: present"
+          else
+            echo "cudevice archive: absent (device_graph dispatch will not be linked)"
+          fi
 
       - name: Set up context for buildx
         run: docker context create builder_context
@@ -56,8 +113,13 @@ jobs:
           context: .
           file: docker/decoding-server/Dockerfile
           platforms: linux/${{ matrix.platform }}
+          build-contexts: |
+            artifacts=./artifacts
           build-args: |
             CUDA_VERSION=${{ matrix.cuda_version }}
+            cuda_major=${{ matrix.cuda_major }}
+            cuda_runtime_image_tag=${{ matrix.cuda_runtime_image_tag }}
+            dev_base_image_version=${{ inputs.dev_base_image_version }}
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -83,6 +145,7 @@ jobs:
   publish:
     name: Publish decoding-server multi-platform image (CUDA ${{ matrix.cuda_version }})
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -111,13 +174,24 @@ jobs:
       - name: Create and verify multi-platform image
         env:
           IMAGE_NAME: ${{ inputs.image_name }}
-          IMAGE_TAG: ${{ inputs.image_tag || format('wiring-{0}', github.run_number) }}
           CUDA_VERSION: ${{ matrix.cuda_version }}
+          GIT_REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
+          # Tag with the short commit SHA (traceable to an exact commit)
+          # and with the release version when built from a
+          # releases/vX.Y.Z branch. All tags point at the same
+          # multi-platform manifest.
+          short_sha="${GITHUB_SHA:0:8}"
+          tags=("${IMAGE_NAME}:${short_sha}-cu${CUDA_VERSION}")
+
+          if [[ "$GIT_REF_NAME" == releases/* ]]; then
+            release_version=$(echo "$GIT_REF_NAME" | grep -Eo '([0-9]+\.)+[0-9]+')
+            tags+=("${IMAGE_NAME}:${release_version}-cu${CUDA_VERSION}")
+          fi
+
           cd /tmp/digests
-          image_ref="${IMAGE_NAME}:${IMAGE_TAG}-cu${CUDA_VERSION}"
           mapfile -t digests < <(find . -maxdepth 1 -type f -printf '%f\n' | sort)
           if [[ "${#digests[@]}" != 2 ]]; then
             echo "::error::Expected 2 image digests, found ${#digests[@]}"
@@ -129,8 +203,16 @@ jobs:
             refs+=("${IMAGE_NAME}@sha256:${digest}")
           done
 
-          docker buildx imagetools create --tag "$image_ref" "${refs[@]}"
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            tag_args+=(--tag "$tag")
+          done
 
+          docker buildx imagetools create "${tag_args[@]}" "${refs[@]}"
+
+          # All tags above point at the same manifest; verify/inspect via
+          # the first (always-present) one.
+          image_ref="${tags[0]}"
           manifest=$(docker buildx imagetools inspect --raw "$image_ref")
           for architecture in amd64 arm64; do
             jq -e \
@@ -139,4 +221,6 @@ jobs:
               <<< "$manifest" > /dev/null
           done
 
+          echo "Tagged as:"
+          printf '  %s\n' "${tags[@]}"
           docker buildx imagetools inspect "$image_ref"
