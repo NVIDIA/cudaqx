@@ -14,12 +14,12 @@
 
 #include "py_playback_emulator.h"
 
-#include "cudaq/qec/code.h"
 #include "cudaq.h"
 #include "emulator.h"
 #include "session.h"
 #include "syndrome_source.h"
 #include "type_casters.h"
+#include "cudaq/qec/code.h"
 
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
@@ -279,7 +279,8 @@ void bindPlaybackEmulator(nb::module_ &mod) {
         "\"noise\": a cudaq.NoiseModel (optional)}). "
         "Exactly one of `decoders` (in-process decoders from a "
         "multi_decoder_config), `udp_endpoints` ({decoder_id: "
-        "\"host:port\"}), or `null_decoder_ids` (discards everything) selects the "
+        "\"host:port\"}), or `null_decoder_ids` (discards everything) selects "
+        "the "
         "session backend.");
 }
 

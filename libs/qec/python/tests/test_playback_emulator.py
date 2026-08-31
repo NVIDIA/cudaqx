@@ -61,7 +61,10 @@ def a_run():
         "1 stream source=0 rounds=2\n"
         "2 get_corrections return_size=1\n",
         1000,
-        {0: {"type": "static", "rounds": [[1, 0, 1]] * 8}},
+        {0: {
+            "type": "static",
+            "rounds": [[1, 0, 1]] * 8
+        }},
         null_decoder_ids=[0],
     )
 
@@ -334,19 +337,28 @@ def test_a_static_source_spec_replays_identically_across_separate_runs():
 
 def test_a_source_spec_missing_its_type_key_is_a_value_error():
     with pytest.raises(ValueError, match="type"):
-        pb.run("0 stream source=0 rounds=1\n", 1000, {0: {"rounds": [[1]]}},
-                null_decoder_ids=[0])
+        pb.run("0 stream source=0 rounds=1\n",
+               1000, {0: {
+                   "rounds": [[1]]
+               }},
+               null_decoder_ids=[0])
 
 
 def test_an_unrecognized_source_type_is_a_value_error():
     with pytest.raises(ValueError, match="unknown source type"):
-        pb.run("0 stream source=0 rounds=1\n", 1000,
-                {0: {"type": "not_a_real_type"}}, null_decoder_ids=[0])
+        pb.run("0 stream source=0 rounds=1\n",
+               1000, {0: {
+                   "type": "not_a_real_type"
+               }},
+               null_decoder_ids=[0])
 
 
 def test_a_stim_memory_source_spec_drives_a_run_and_rejects_bad_params():
-    params = dict(type="stim_memory", seed=1, code="repetition_code",
-                  task="memory", distance=3)
+    params = dict(type="stim_memory",
+                  seed=1,
+                  code="repetition_code",
+                  task="memory",
+                  distance=3)
     result = pb.run("0 stream source=0 rounds=4\n",
                     1000, {0: params},
                     null_decoder_ids=[0])
@@ -359,25 +371,35 @@ def test_a_stim_memory_source_spec_drives_a_run_and_rejects_bad_params():
     # instead of emitting a REPEAT block for 1-2 rounds, so there is no
     # round for stim_memory_source to derive.
     with pytest.raises(RuntimeError):
-        pb.run("0 stream source=0 rounds=1\n", 1000,
-                {0: {**params, "rounds": 1}}, null_decoder_ids=[0])
+        pb.run("0 stream source=0 rounds=1\n",
+               1000, {0: {
+                   **params, "rounds": 1
+               }},
+               null_decoder_ids=[0])
 
     # An unrecognized code family throws std::invalid_argument, which
     # nanobind maps to ValueError.
     with pytest.raises(ValueError):
-        pb.run("0 stream source=0 rounds=1\n", 1000,
-                {0: {**params, "code": "not_a_real_code"}},
-                null_decoder_ids=[0])
+        pb.run("0 stream source=0 rounds=1\n",
+               1000, {0: {
+                   **params, "code": "not_a_real_code"
+               }},
+               null_decoder_ids=[0])
 
 
 def test_a_cudaq_memory_source_spec_drives_a_run_and_rejects_bad_params():
     code = qec.get_code("repetition", distance=3)
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
-    params = dict(type="cudaq_memory", code=code, state_prep="prep0",
-                  max_rounds=3, seed=1, noise=noise)
+    params = dict(type="cudaq_memory",
+                  code=code,
+                  state_prep="prep0",
+                  max_rounds=3,
+                  seed=1,
+                  noise=noise)
 
-    result = pb.run("0 stream source=0 rounds=3\n", 1000, {0: params},
+    result = pb.run("0 stream source=0 rounds=3\n",
+                    1000, {0: params},
                     null_decoder_ids=[0])
     assert result.records[0].rounds_streamed == 3
     assert len(
@@ -385,12 +407,15 @@ def test_a_cudaq_memory_source_spec_drives_a_run_and_rejects_bad_params():
 
     # "noise" is optional -- a fresh, empty NoiseModel is used if omitted.
     no_noise = {k: v for k, v in params.items() if k != "noise"}
-    result2 = pb.run("0 stream source=0 rounds=3\n", 1000, {0: no_noise},
+    result2 = pb.run("0 stream source=0 rounds=3\n",
+                     1000, {0: no_noise},
                      null_decoder_ids=[0])
     assert result2.records[0].rounds_streamed == 3
 
     # An unrecognized state_prep name is a ValueError, not a crash.
     with pytest.raises(ValueError, match="state_prep"):
-        pb.run("0 stream source=0 rounds=1\n", 1000,
-                {0: {**params, "state_prep": "not_a_real_op"}},
-                null_decoder_ids=[0])
+        pb.run("0 stream source=0 rounds=1\n",
+               1000, {0: {
+                   **params, "state_prep": "not_a_real_op"
+               }},
+               null_decoder_ids=[0])
