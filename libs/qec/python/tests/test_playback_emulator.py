@@ -24,6 +24,7 @@ import socket
 
 import pytest
 
+import cudaq
 import cudaq_qec as qec
 
 # The bindings are only built where the emulator itself is: a
@@ -55,13 +56,12 @@ def a_run():
     """One successful run covering three of the four ops (reset, stream,
     get_corrections); `enqueue_data` has no schedule spelling reachable from
     here. Runs entirely against the null backend, which never fails."""
-    source = pb.static_source([[1, 0, 1]] * 8)
     return pb.run(
         "0 reset\n"
         "1 stream source=0 rounds=2\n"
         "2 get_corrections return_size=1\n",
         1000,
-        {0: source},
+        {0: {"type": "static", "rounds": [[1, 0, 1]] * 8}},
         null_decoder_ids=[0],
     )
 
@@ -102,9 +102,6 @@ def test_module_exports_exactly_the_documented_surface():
         "record",
         "run",
         "run_result",
-        "static_source",
-        "stim_memory_source",
-        "syndrome_source",
     ]
 
 
@@ -321,43 +318,79 @@ def test_exactly_one_backend_must_be_named(backends):
 # -- syndrome sources --------------------------------------------------------
 
 
-def test_a_static_source_is_consumed_by_a_run_and_reset_rewinds_it():
-    source = pb.static_source([[1, 1, 0]] * 3)
+def test_a_static_source_spec_replays_identically_across_separate_runs():
     schedule = "0 stream source=0 rounds=3\n"
-    first = pb.run(schedule, 1000, {0: source}, null_decoder_ids=[0])
+    spec = {0: {"type": "static", "rounds": [[1, 1, 0]] * 3}}
+
+    # A fresh source is built per run(), so the same spec replays identically.
+    first = pb.run(schedule, 1000, spec, null_decoder_ids=[0])
     assert first.records[0].rounds_streamed == 3
+    assert list(first.syndrome_log) == [1, 1, 0] * 3
 
-    # Not rewound: the source is empty, so the same schedule now terminates
-    # SOURCE_EXHAUSTED (101) with nothing sent.
-    second = pb.run(schedule, 1000, {0: source}, null_decoder_ids=[0])
-    assert second.records[0].rounds_streamed == 0
-    assert second.records[0].status == "SOURCE_EXHAUSTED"
-
-    source.reset()
-    third = pb.run(schedule, 1000, {0: source}, null_decoder_ids=[0])
-    assert third.records[0].rounds_streamed == 3
-    assert list(third.syndrome_log) == [1, 1, 0] * 3
+    second = pb.run(schedule, 1000, spec, null_decoder_ids=[0])
+    assert second.records[0].rounds_streamed == 3
+    assert list(second.syndrome_log) == [1, 1, 0] * 3
 
 
-def test_a_stim_memory_source_drives_a_run_and_rejects_bad_params():
-    params = dict(code="repetition_code", task="memory", distance=3)
-    source = pb.stim_memory_source(1, **params)
+def test_a_source_spec_missing_its_type_key_is_a_value_error():
+    with pytest.raises(ValueError, match="type"):
+        pb.run("0 stream source=0 rounds=1\n", 1000, {0: {"rounds": [[1]]}},
+                null_decoder_ids=[0])
+
+
+def test_an_unrecognized_source_type_is_a_value_error():
+    with pytest.raises(ValueError, match="unknown source type"):
+        pb.run("0 stream source=0 rounds=1\n", 1000,
+                {0: {"type": "not_a_real_type"}}, null_decoder_ids=[0])
+
+
+def test_a_stim_memory_source_spec_drives_a_run_and_rejects_bad_params():
+    params = dict(type="stim_memory", seed=1, code="repetition_code",
+                  task="memory", distance=3)
     result = pb.run("0 stream source=0 rounds=4\n",
-                    1000, {0: source},
+                    1000, {0: params},
                     null_decoder_ids=[0])
     assert result.records[0].rounds_streamed == 4
     assert len(
         result.syndrome_log) == 4 * 2  # 2 ancilla bits/round at distance 3
-    source.reset()
 
     # The C++ constructor throws std::runtime_error, which nanobind maps to
     # RuntimeError rather than ValueError. Stim inlines the round body
     # instead of emitting a REPEAT block for 1-2 rounds, so there is no
     # round for stim_memory_source to derive.
     with pytest.raises(RuntimeError):
-        pb.stim_memory_source(1, **{**params, "rounds": 1})
+        pb.run("0 stream source=0 rounds=1\n", 1000,
+                {0: {**params, "rounds": 1}}, null_decoder_ids=[0])
 
     # An unrecognized code family throws std::invalid_argument, which
     # nanobind maps to ValueError.
     with pytest.raises(ValueError):
-        pb.stim_memory_source(1, **{**params, "code": "not_a_real_code"})
+        pb.run("0 stream source=0 rounds=1\n", 1000,
+                {0: {**params, "code": "not_a_real_code"}},
+                null_decoder_ids=[0])
+
+
+def test_a_cudaq_memory_source_spec_drives_a_run_and_rejects_bad_params():
+    code = qec.get_code("repetition", distance=3)
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
+    params = dict(type="cudaq_memory", code=code, state_prep="prep0",
+                  max_rounds=3, seed=1, noise=noise)
+
+    result = pb.run("0 stream source=0 rounds=3\n", 1000, {0: params},
+                    null_decoder_ids=[0])
+    assert result.records[0].rounds_streamed == 3
+    assert len(
+        result.syndrome_log) == 3 * 2  # 2 ancilla bits/round at distance 3
+
+    # "noise" is optional -- a fresh, empty NoiseModel is used if omitted.
+    no_noise = {k: v for k, v in params.items() if k != "noise"}
+    result2 = pb.run("0 stream source=0 rounds=3\n", 1000, {0: no_noise},
+                     null_decoder_ids=[0])
+    assert result2.records[0].rounds_streamed == 3
+
+    # An unrecognized state_prep name is a ValueError, not a crash.
+    with pytest.raises(ValueError, match="state_prep"):
+        pb.run("0 stream source=0 rounds=1\n", 1000,
+                {0: {**params, "state_prep": "not_a_real_op"}},
+                null_decoder_ids=[0])

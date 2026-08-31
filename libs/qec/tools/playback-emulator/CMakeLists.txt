@@ -51,5 +51,3 @@ install(TARGETS playback-emulator
   COMPONENT qec-tools
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-
-add_subdirectory(sifl)

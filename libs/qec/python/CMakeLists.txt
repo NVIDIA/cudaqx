@@ -57,13 +57,8 @@ if(TARGET cudaq-qec-playback-emulator)
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python
     ${CMAKE_CURRENT_SOURCE_DIR}/bindings
   )
-  # The emulator's own headers (emulator.h, session.h, syndrome_source.h)
-  # ride in on this target's PUBLIC include directories.
   target_link_libraries(${MODULE_NAME} PRIVATE cudaq-qec-playback-emulator)
   target_compile_definitions(${MODULE_NAME} PRIVATE CUDAQX_QEC_HAS_PLAYBACK)
-else()
-  message(STATUS "Skipping cudaq_qec.playback bindings: "
-                 "cudaq-qec-playback-emulator not available")
 endif()
 
 find_package(CUDAToolkit REQUIRED)

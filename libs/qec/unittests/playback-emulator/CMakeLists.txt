@@ -6,11 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# Only built where the playback emulator itself is (a realtime-enabled
-# CUDA-Q install; see ../../tools/playback-emulator/lib/CMakeLists.txt).
 if(NOT TARGET cudaq-qec-playback-emulator)
-  message(STATUS "Skipping playback_emulator unit tests: "
-                 "cudaq-qec-playback-emulator not available")
   return()
 endif()
 
@@ -43,9 +39,7 @@ target_include_directories(test_playback_emulator PRIVATE
 )
 
 # test_sources.cpp's CudaqMemorySource tests run the actual memory_circuit
-# kernel and need a concrete NVQIR backend statically linked in -- there's no
-# C++-level cudaq.set_target(). Same approach as test_qec_stim.cpp.
-target_link_directories(test_playback_emulator PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+# kernel and need a concrete NVQIR backend statically linked in 
 
 target_link_libraries(test_playback_emulator PRIVATE
   GTest::gtest_main
@@ -61,7 +55,5 @@ target_link_libraries(test_playback_emulator PRIVATE
   libstim
 )
 
-add_dependencies(CUDAQXQECUnitTests test_playback_emulator
-  cudaq-qec-example
-)
+add_dependencies(CUDAQXQECUnitTests test_playback_emulator)
 gtest_discover_tests(test_playback_emulator)

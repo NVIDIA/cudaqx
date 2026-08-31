@@ -14,6 +14,8 @@
 
 #include "py_playback_emulator.h"
 
+#include "cudaq/qec/code.h"
+#include "cudaq.h"
 #include "emulator.h"
 #include "session.h"
 #include "syndrome_source.h"
@@ -45,13 +47,68 @@ std::pair<std::size_t, std::size_t> request_slice(const record &rec,
   return {first, last};
 }
 
+/// Maps a state-prep spec string to cudaq::qec::operation, a different
+/// enum from the already-bound playback::operation of the same name.
+cudaq::qec::operation state_prep_from_string(const std::string &name) {
+  using cudaq::qec::operation;
+  static const std::unordered_map<std::string, operation> kByName{
+      {"x", operation::x},
+      {"y", operation::y},
+      {"z", operation::z},
+      {"h", operation::h},
+      {"s", operation::s},
+      {"cx", operation::cx},
+      {"cy", operation::cy},
+      {"cz", operation::cz},
+      {"stabilizer_round", operation::stabilizer_round},
+      {"prep0", operation::prep0},
+      {"prep1", operation::prep1},
+      {"prepp", operation::prepp},
+      {"prepm", operation::prepm},
+  };
+  auto it = kByName.find(name);
+  if (it == kByName.end())
+    throw std::invalid_argument("unknown state_prep: \"" + name + "\"");
+  return it->second;
+}
+
+/// Builds one syndrome_source from a spec dict tagged by "type": "static",
+/// "stim_memory", or "cudaq_memory" -- see run()'s docstring for each
+/// type's keys.
+std::unique_ptr<syndrome_source> make_source(const nb::dict &spec) {
+  if (!spec.contains("type"))
+    throw std::invalid_argument("source spec missing required \"type\" key");
+  auto type = nb::cast<std::string>(spec["type"]);
+  if (type == "static")
+    return std::make_unique<static_source>(
+        nb::cast<std::vector<std::vector<std::uint8_t>>>(spec["rounds"]));
+  if (type == "stim_memory")
+    // heterogeneous_map::get() ignores unrelated keys, so "type"/"seed"
+    // riding along in the same dict is harmless.
+    return std::make_unique<stim_memory_source>(
+        cudaqx::hetMapFromKwargs(nb::cast<nb::kwargs>(spec)),
+        nb::cast<std::uint64_t>(spec["seed"]));
+  if (type == "cudaq_memory") {
+    cudaq::noise_model noise;
+    if (spec.contains("noise"))
+      noise = nb::cast<const cudaq::noise_model &>(spec["noise"]);
+    return std::make_unique<cudaq_memory_source>(
+        nb::cast<const code &>(spec["code"]),
+        state_prep_from_string(nb::cast<std::string>(spec["state_prep"])),
+        nb::cast<std::size_t>(spec["max_rounds"]), std::move(noise),
+        nb::cast<std::uint64_t>(spec["seed"]));
+  }
+  throw std::invalid_argument("unknown source type: \"" + type + "\"");
+}
+
 /// Parses, plans, and runs `schedule_text` in one call -- the session
 /// backend is picked by which one of `decoders` / `udp_endpoints` /
 /// `null_decoder_ids` is given (exactly one must be). `sources` maps a
-/// schedule's source_id to the syndrome_source instance it reads from.
+/// schedule's source_id to a plain spec dict (see `make_source`); a fresh
+/// syndrome_source is built from each spec for this run alone.
 run_result run_schedule(
     const std::string &schedule_text, std::uint64_t tick_ns,
-    const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
+    const std::unordered_map<std::uint32_t, nb::dict> &sources,
     const std::optional<cudaq::qec::decoding::config::multi_decoder_config>
         &decoders,
     const std::optional<std::unordered_map<std::uint64_t, std::string>>
@@ -84,12 +141,22 @@ run_result run_schedule(
   for (auto &[id, _] : router)
     known_decoder_ids.push_back(id);
 
+  std::unordered_map<std::uint32_t, std::unique_ptr<syndrome_source>>
+      owned_sources;
+  std::unordered_map<std::uint32_t, syndrome_source *> source_router;
+  for (auto &[id, spec] : sources) {
+    owned_sources[id] = make_source(spec);
+    source_router[id] = owned_sources[id].get();
+  }
+
   run_params params;
   params.lead_in_ns = lead_in_ns;
 
   auto sched = parse(schedule_text, known_decoder_ids, tick_ns);
-  auto run_plan_ = plan(sched, router, sources, params);
+  auto run_plan_ = plan(sched, router, source_router, params);
 
+  // Release the GIL only for run() itself, not the dict-touching setup above.
+  nb::gil_scoped_release release;
   return run(std::move(run_plan_));
 }
 
@@ -198,38 +265,22 @@ void bindPlaybackEmulator(nb::module_ &mod) {
           "write_csv", [](const run_result &r) { return write_csv(r); },
           "Serialize this run's records to a CSV string.");
 
-  nb::class_<syndrome_source>(m, "syndrome_source");
-
-  nb::class_<static_source, syndrome_source>(m, "static_source")
-      .def(nb::init<std::vector<std::vector<std::uint8_t>>>(),
-           nb::arg("rounds"))
-      .def("reset", &static_source::reset);
-
-  nb::class_<stim_memory_source, syndrome_source>(m, "stim_memory_source")
-      .def(
-          "__init__",
-          [](stim_memory_source *self, std::uint64_t seed, nb::kwargs params) {
-            new (self)
-                stim_memory_source(cudaqx::hetMapFromKwargs(params), seed);
-          },
-          "seed, then keyword arguments selecting and configuring one of "
-          "Stim's built-in memory-circuit families: 'code', 'task', "
-          "'distance' (required), 'rounds' (optional, default 3), plus "
-          "Stim's four noise-probability knobs.")
-      .def("reset", &stim_memory_source::reset);
-
-  m.def("run", &run_schedule, nb::call_guard<nb::gil_scoped_release>(),
-        nb::arg("schedule"), nb::arg("tick_ns"), nb::arg("sources"),
-        nb::arg("decoders") = nb::none(), nb::arg("udp_endpoints") = nb::none(),
-        nb::arg("udp_timeout_ms") = 200,
+  m.def("run", &run_schedule, nb::arg("schedule"), nb::arg("tick_ns"),
+        nb::arg("sources"), nb::arg("decoders") = nb::none(),
+        nb::arg("udp_endpoints") = nb::none(), nb::arg("udp_timeout_ms") = 200,
         nb::arg("null_decoder_ids") = nb::none(),
         nb::arg("lead_in_ns") = 20'000'000,
         "Parse, plan, and run a line-oriented playback schedule. `sources` "
-        "maps a schedule's source_id -> syndrome_source. Exactly one of "
-        "`decoders` (in-process decoders from a multi_decoder_config), "
-        "`udp_endpoints` ({decoder_id: \"host:port\"}), or "
-        "`null_decoder_ids` (the discard-everything jitter floor, routed "
-        "under the given decoder_ids) selects the session backend.");
+        "maps a schedule's source_id -> a spec dict tagged by \"type\": "
+        "\"static\" ({\"rounds\": [[...]]}), \"stim_memory\" ({\"seed\": N, "
+        "\"code\", \"task\", \"distance\", \"rounds\" (optional), ...Stim "
+        "noise knobs}), or \"cudaq_memory\" ({\"code\": a qec.Code, "
+        "\"state_prep\": \"prep0\"|..., \"max_rounds\": N, \"seed\": N, "
+        "\"noise\": a cudaq.NoiseModel (optional)}). "
+        "Exactly one of `decoders` (in-process decoders from a "
+        "multi_decoder_config), `udp_endpoints` ({decoder_id: "
+        "\"host:port\"}), or `null_decoder_ids` (discards everything) selects the "
+        "session backend.");
 }
 
 } // namespace cudaq::qec::playback
