@@ -1,5 +1,13 @@
 #!/bin/sh
 
+# ============================================================================ #
+# Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
 # CMake flags required when CUDA-QX builds CUDA-Q's realtime dependency.
 cudaq_realtime_cmake_cuda_flags() {
   _cudaq_realtime_cuda_flags="${CMAKE_CUDA_FLAGS:-}"
