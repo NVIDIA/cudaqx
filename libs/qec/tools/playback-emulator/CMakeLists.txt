@@ -11,12 +11,9 @@
 # lives under this directory. Its tests live under
 # libs/qec/unittests/playback-emulator/, alongside the other QEC unit tests.
 
-# Only built where the in-process/UDP backends' dependency is: a
-# realtime-enabled CUDA-Q install (see lib/realtime/decoding-server-cqr's own
-# guard, which cudaq-qec-decoding-server is gated behind).
-if(NOT TARGET cudaq-qec-decoding-server)
+if(NOT TARGET cudaq-qec-decoding-server OR CUDAQ_QEC_DECODERS_ONLY)
   message(STATUS "Skipping playback-emulator tool: "
-                 "cudaq-qec-decoding-server not available")
+                 "cudaq-qec-decoding-server not available, or decoders-only build")
   return()
 endif()
 

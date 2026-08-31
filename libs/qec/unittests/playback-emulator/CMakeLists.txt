@@ -39,7 +39,9 @@ target_include_directories(test_playback_emulator PRIVATE
 )
 
 # test_sources.cpp's CudaqMemorySource tests run the actual memory_circuit
-# kernel and need a concrete NVQIR backend statically linked in 
+# kernel and need a concrete NVQIR backend statically linked in
+
+target_link_directories(test_playback_emulator PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
 
 target_link_libraries(test_playback_emulator PRIVATE
   GTest::gtest_main
