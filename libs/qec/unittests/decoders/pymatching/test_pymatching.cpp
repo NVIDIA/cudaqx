@@ -312,16 +312,28 @@ TEST(PyMatchingDecoder, DecodesHighObservableIndicesAcrossPaths) {
     // ASSERT: valid graph-like identity matrices must construct a decoder.
     ASSERT_NE(d, nullptr);
 
-    std::vector<float_t> syndrome(num_observables, 0.0);
-    syndrome.back() = 1.0;
-    auto result = d->decode(syndrome);
-    // ASSERT: both observable decoding paths must successfully converge.
-    ASSERT_TRUE(result.converged) << "num_observables=" << num_observables;
-    // ASSERT: observable-aware decoding returns one result per O row.
-    ASSERT_EQ(result.result.size(), num_observables);
-    // ASSERT: the high bit must not alias another bit through a narrow mask.
-    for (std::size_t i = 0; i < num_observables; ++i)
-      EXPECT_EQ(result.result[i], i == num_observables - 1 ? 1.0 : 0.0)
-          << "num_observables=" << num_observables << ", index=" << i;
+    // Decode several times on the same instance. At 64 observables PyMatching
+    // writes the prediction through a caller-supplied buffer that it XORs into
+    // rather than assigns, and that buffer is reused across calls, so a single
+    // decode would still pass if it were not cleared per call: the flips would
+    // instead leak into the following decode. Firing a different detector each
+    // time, and revisiting one at the end, exercises that.
+    for (const std::size_t fired : {num_observables - 1, std::size_t{0},
+                                    num_observables / 2, num_observables - 1}) {
+      std::vector<float_t> syndrome(num_observables, 0.0);
+      syndrome[fired] = 1.0;
+      auto result = d->decode(syndrome);
+      // ASSERT: both observable decoding paths must successfully converge.
+      ASSERT_TRUE(result.converged) << "num_observables=" << num_observables;
+      // ASSERT: observable-aware decoding returns one result per O row.
+      ASSERT_EQ(result.result.size(), num_observables);
+      // ASSERT: the fired detector flips its own observable and nothing else,
+      // so the high bit must not alias another bit through a narrow mask and no
+      // flip may survive from an earlier decode.
+      for (std::size_t i = 0; i < num_observables; ++i)
+        EXPECT_EQ(result.result[i], i == fired ? 1.0 : 0.0)
+            << "num_observables=" << num_observables << ", fired=" << fired
+            << ", index=" << i;
+    }
   }
 }
