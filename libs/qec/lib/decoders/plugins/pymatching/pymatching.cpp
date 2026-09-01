@@ -11,14 +11,45 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/decoder_config_schema.h"
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <map>
+#include <stdexcept>
 #include <vector>
 
 // Enable this to debug decode times.
 #define PERFORM_TIMING 0
 
 namespace cudaq::qec {
+
+namespace {
+/// @brief Claims exclusive use of a decoder for the duration of a decode.
+///
+/// The matching state and scratch buffers belong to the decoder, not the call,
+/// so overlapping decodes corrupt each other. Rejecting the second is the best
+/// available outcome. Costs one uncontended atomic exchange per decode.
+class decode_exclusive_guard {
+public:
+  explicit decode_exclusive_guard(std::atomic<bool> &active) : active_(active) {
+    if (active_.exchange(true))
+      throw std::runtime_error(
+          "pymatching: a decode is already running on this decoder. Its "
+          "matching state and scratch buffers are per decoder, so decodes "
+          "cannot overlap; serialize the calls or give each concurrent caller "
+          "its own decoder.");
+  }
+
+  // A throwing constructor means no destructor, so a rejected call cannot
+  // release the owner's claim.
+  ~decode_exclusive_guard() { active_.store(false); }
+
+  decode_exclusive_guard(const decode_exclusive_guard &) = delete;
+  decode_exclusive_guard &operator=(const decode_exclusive_guard &) = delete;
+
+private:
+  std::atomic<bool> &active_;
+};
+} // namespace
 
 /// @brief This is a wrapper around the PyMatching library that implements the
 /// MWPM decoder.
@@ -44,6 +75,19 @@ private:
 
   bool decode_to_observables = false;
 
+  // Scratch buffers reused across decode() calls so a steady-state decode
+  // allocates nothing. decode() already mutates the shared Mwpm state, so it
+  // was never safe to call concurrently on one instance; reusing these adds no
+  // new constraint. Each is reset explicitly at its use site: PyMatching XORs
+  // into the observable array and appends to the edge list, so neither may
+  // carry over the previous call's contents.
+  std::vector<uint64_t> detection_events;
+  std::vector<uint8_t> obs_scratch;
+  std::vector<int64_t> edges_scratch;
+
+  // Set for the duration of decode(). See decode_exclusive_guard.
+  std::atomic<bool> decode_active{false};
+
   // Helper function to make a canonical edge from two nodes.
   std::pair<int64_t, int64_t> make_canonical_edge(int64_t node1,
                                                   int64_t node2) {
@@ -51,7 +95,8 @@ private:
   }
 
 #if PERFORM_TIMING
-  static constexpr size_t NUM_TIMING_STEPS = 4;
+  // 0: reduce syndrome to detection events, 1: matching, 2: total.
+  static constexpr size_t NUM_TIMING_STEPS = 3;
   std::array<double, NUM_TIMING_STEPS> decode_times;
 #endif
 
@@ -204,24 +249,23 @@ public:
   /// @brief Decode the syndrome using the MWPM decoder.
   /// @param syndrome The syndrome to decode.
   /// @return The decoder result.
-  /// @throws std::runtime_error if no matching solution is found, or
-  /// std::out_of_range if an edge is not found in the edge2col_idx map.
+  /// @throws std::runtime_error if no matching solution is found, or if a
+  /// decode is already running on this decoder, or std::out_of_range if an edge
+  /// is not found in the edge2col_idx map.
   virtual decoder_result decode(const std::vector<float_t> &syndrome) {
+    const decode_exclusive_guard guard(decode_active);
 #if PERFORM_TIMING
     auto t0 = std::chrono::high_resolution_clock::now();
 #endif
     decoder_result result{false, std::vector<float_t>()};
-#if PERFORM_TIMING
-    auto t1 = std::chrono::high_resolution_clock::now();
-#endif
 
-    std::vector<uint64_t> detection_events;
+    detection_events.clear();
     detection_events.reserve(syndrome.size());
     for (size_t i = 0; i < syndrome.size(); i++)
       if (cudaq::qec::convert_soft_to_hard(syndrome[i]))
         detection_events.push_back(i);
 #if PERFORM_TIMING
-    auto t2 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::high_resolution_clock::now();
 #endif
     if (decode_to_observables) {
       if (mwpm->flooder.graph.num_observables < 64) {
@@ -236,20 +280,22 @@ public:
         result.result.resize(mwpm->flooder.graph.num_observables);
         assert(O_sparse.size() == mwpm->flooder.graph.num_observables);
         pm::total_weight_int weight = 0;
-        std::vector<uint8_t> obs(mwpm->flooder.graph.num_observables, 0);
-        obs.resize(mwpm->flooder.graph.num_observables);
-        pm::decode_detection_events(*mwpm, detection_events, obs.data(), weight,
-                                    /*edge_correlations=*/false);
-        result.result.resize(mwpm->flooder.graph.num_observables);
+        // PyMatching XORs its prediction in, so start from a cleared frame.
+        obs_scratch.assign(mwpm->flooder.graph.num_observables, 0);
+        pm::decode_detection_events(*mwpm, detection_events, obs_scratch.data(),
+                                    weight, /*edge_correlations=*/false);
         for (size_t i = 0; i < mwpm->flooder.graph.num_observables; i++) {
-          result.result[i] = static_cast<float_t>(obs[i]);
+          result.result[i] = static_cast<float_t>(obs_scratch[i]);
         }
       }
     } else {
-      std::vector<int64_t> edges;
+      // PyMatching appends to the edge list without clearing it first.
+      edges_scratch.clear();
       result.result.resize(block_size);
-      pm::decode_detection_events_to_edges(*mwpm, detection_events, edges);
+      pm::decode_detection_events_to_edges(*mwpm, detection_events,
+                                           edges_scratch);
       // Loop over the edge pairs to reconstruct errors.
+      const auto &edges = edges_scratch;
       assert(edges.size() % 2 == 0);
       for (size_t i = 0; i < edges.size(); i += 2) {
         auto edge = make_canonical_edge(edges.at(i), edges.at(i + 1));
@@ -261,7 +307,7 @@ public:
     // set converged to true.
     result.converged = true;
 #if PERFORM_TIMING
-    auto t3 = std::chrono::high_resolution_clock::now();
+    auto t2 = std::chrono::high_resolution_clock::now();
     decode_times[0] +=
         std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() /
         1e6;
@@ -269,10 +315,7 @@ public:
         std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() /
         1e6;
     decode_times[2] +=
-        std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() /
-        1e6;
-    decode_times[3] +=
-        std::chrono::duration_cast<std::chrono::microseconds>(t3 - t0).count() /
+        std::chrono::duration_cast<std::chrono::microseconds>(t2 - t0).count() /
         1e6;
 #endif
     return result;
