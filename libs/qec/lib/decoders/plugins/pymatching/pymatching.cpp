@@ -11,14 +11,45 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/decoder_config_schema.h"
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <map>
+#include <stdexcept>
 #include <vector>
 
 // Enable this to debug decode times.
 #define PERFORM_TIMING 0
 
 namespace cudaq::qec {
+
+namespace {
+/// @brief Claims exclusive use of a decoder for the duration of a decode.
+///
+/// The matching state and scratch buffers belong to the decoder, not the call,
+/// so overlapping decodes corrupt each other. Rejecting the second is the best
+/// available outcome. Costs one uncontended atomic exchange per decode.
+class decode_exclusive_guard {
+public:
+  explicit decode_exclusive_guard(std::atomic<bool> &active) : active_(active) {
+    if (active_.exchange(true))
+      throw std::runtime_error(
+          "pymatching: a decode is already running on this decoder. Its "
+          "matching state and scratch buffers are per decoder, so decodes "
+          "cannot overlap; serialize the calls or give each concurrent caller "
+          "its own decoder.");
+  }
+
+  // A throwing constructor means no destructor, so a rejected call cannot
+  // release the owner's claim.
+  ~decode_exclusive_guard() { active_.store(false); }
+
+  decode_exclusive_guard(const decode_exclusive_guard &) = delete;
+  decode_exclusive_guard &operator=(const decode_exclusive_guard &) = delete;
+
+private:
+  std::atomic<bool> &active_;
+};
+} // namespace
 
 /// @brief This is a wrapper around the PyMatching library that implements the
 /// MWPM decoder.
@@ -53,6 +84,9 @@ private:
   std::vector<uint64_t> detection_events;
   std::vector<uint8_t> obs_scratch;
   std::vector<int64_t> edges_scratch;
+
+  // Set for the duration of decode(). See decode_exclusive_guard.
+  std::atomic<bool> decode_active{false};
 
   // Helper function to make a canonical edge from two nodes.
   std::pair<int64_t, int64_t> make_canonical_edge(int64_t node1,
@@ -215,9 +249,11 @@ public:
   /// @brief Decode the syndrome using the MWPM decoder.
   /// @param syndrome The syndrome to decode.
   /// @return The decoder result.
-  /// @throws std::runtime_error if no matching solution is found, or
-  /// std::out_of_range if an edge is not found in the edge2col_idx map.
+  /// @throws std::runtime_error if no matching solution is found, or if a
+  /// decode is already running on this decoder, or std::out_of_range if an edge
+  /// is not found in the edge2col_idx map.
   virtual decoder_result decode(const std::vector<float_t> &syndrome) {
+    const decode_exclusive_guard guard(decode_active);
 #if PERFORM_TIMING
     auto t0 = std::chrono::high_resolution_clock::now();
 #endif
