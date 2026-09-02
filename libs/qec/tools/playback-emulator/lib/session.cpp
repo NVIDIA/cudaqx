@@ -25,6 +25,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <netdb.h>
 #include <stdexcept>
@@ -206,12 +207,17 @@ std::size_t reply_capacity_for(const std::uint8_t *bytes, std::size_t size) {
 }
 
 /// One decoder's input queue and the single thread that drains it, in
-/// submission order.
+/// submission order. Requests are held in a fixed ring of reusable slots
+/// indexed by request_id, so a submit/dispatch/await cycle touches no heap
+/// allocator and no hash map; slot ownership/completion is tracked with
+/// atomics rather than a per-slot lock, since by construction a slot is
+/// never contended (only the current owner ever touches it).
 class inproc_session : public session {
 public:
   inproc_session(std::shared_ptr<SessionRegistry> registry,
                  std::uint64_t decoder_id)
-      : registry_(std::move(registry)) {
+      : registry_(std::move(registry)),
+        ring_(std::make_unique<slot[]>(kRingSize)) {
     dec_ = registry_->find(decoder_id);
     assert(dec_ && "make_inproc_sessions() must only construct a session "
                    "for a decoder_id actually present in the config");
@@ -220,7 +226,7 @@ public:
 
   ~inproc_session() override {
     {
-      std::lock_guard<std::mutex> lock(mu_);
+      std::lock_guard<std::mutex> lock(queue_mu_);
       stop_ = true;
     }
     work_.notify_all();
@@ -232,7 +238,7 @@ public:
 
   bool wait_next_completion(std::uint32_t &request_id,
                             std::chrono::milliseconds timeout) override {
-    std::unique_lock<std::mutex> lock(mu_);
+    std::unique_lock<std::mutex> lock(completed_mu_);
     if (!completed_cv_.wait_for(lock, timeout,
                                 [&] { return !completed_.empty(); }))
       return false;
@@ -244,81 +250,71 @@ public:
   RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
                   std::size_t &reply_len) override {
     reply_len = 0;
-    std::shared_ptr<job> j;
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      auto it = pending_.find(request_id);
-      if (it == pending_.end())
-        return RpcStatus::INTERNAL_ERROR; // no such submission
-      j = it->second;
-      pending_.erase(it);
-    }
-    std::unique_lock<std::mutex> lock(j->mu);
-    j->done_cv.wait(lock, [&] { return j->done; });
-    reply_len = std::min(j->reply_len, reply.size());
-    std::copy_n(j->reply.begin(), reply_len, reply.begin());
-    return j->status;
+    slot &s = ring_[request_id % kRingSize];
+    while (!s.done.load(std::memory_order_acquire))
+      std::this_thread::yield();
+    reply_len = std::min(s.reply_len, reply.size());
+    std::copy_n(s.reply.begin(), reply_len, reply.begin());
+    const auto status = s.status;
+    s.rid.store(kNoRid, std::memory_order_release);
+    return status;
   }
 
 private:
-  /// A submitted request, from the caller's thread to the dispatcher's and
-  /// (for a reply) back. The frame is copied because the caller's buffer may
-  /// well be a local that dies the moment submit() returns.
-  struct job {
-    std::uint32_t rid = 0;
+  static constexpr std::size_t kRingSize = 1 << 17;
+  static constexpr std::uint32_t kNoRid = 0xffffffffu;
+
+  struct slot {
+    std::atomic<std::uint32_t> rid{kNoRid};
+    std::atomic<bool> done{false};
     std::vector<std::uint8_t> bytes;
     std::vector<std::uint8_t> reply;
     std::size_t reply_len = 0;
     RpcStatus status = RpcStatus::OK;
-    bool done = false;
-    std::mutex mu;
-    std::condition_variable done_cv;
   };
 
-  /// Publish one frame.
   std::uint32_t push(const frame &f) {
-    // Too short to carry a request_id -- see udp_session::submit for why
-    // this is rejected outright rather than keyed under a placeholder id.
     if (f.size < sizeof(cudaq::realtime::RPCHeader))
       throw std::invalid_argument(
           "inproc_session: frame is smaller than RPCHeader");
-    auto j = std::make_shared<job>();
-    j->rid = reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
-                 ->request_id;
-    j->bytes.assign(f.bytes, f.bytes + f.size);
-    j->reply.resize(reply_capacity_for(f.bytes, f.size));
+    const auto rid =
+        reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
+            ->request_id;
+    slot &s = ring_[rid % kRingSize];
+    while (s.rid.load(std::memory_order_acquire) != kNoRid)
+      std::this_thread::yield();
+    s.bytes.assign(f.bytes, f.bytes + f.size);
+    s.reply.resize(reply_capacity_for(f.bytes, f.size));
+    s.done.store(false, std::memory_order_relaxed);
+    s.rid.store(rid, std::memory_order_release);
     {
-      std::lock_guard<std::mutex> lock(mu_);
-      queue_.push_back(j);
-      pending_.emplace(j->rid, j);
+      std::lock_guard<std::mutex> lock(queue_mu_);
+      queue_.push_back(rid);
     }
     work_.notify_one();
-    return j->rid;
+    return rid;
   }
 
   void drain() {
     for (;;) {
-      std::shared_ptr<job> j;
+      std::uint32_t rid;
       {
-        std::unique_lock<std::mutex> lock(mu_);
+        std::unique_lock<std::mutex> lock(queue_mu_);
         work_.wait(lock, [&] { return stop_ || !queue_.empty(); });
         if (queue_.empty())
           return;
-        j = std::move(queue_.front());
+        rid = queue_.front();
         queue_.pop_front();
       }
-      const auto result = dispatch_rpc(*dec_, j->bytes.data(), j->bytes.size(),
-                                       j->reply.data(), j->reply.size());
+      slot &s = ring_[rid % kRingSize];
+      const auto result = dispatch_rpc(*dec_, s.bytes.data(), s.bytes.size(),
+                                       s.reply.data(), s.reply.size());
+      s.status = result.status;
+      s.reply_len = result.reply_len;
+      s.done.store(true, std::memory_order_release);
       {
-        std::lock_guard<std::mutex> lock(j->mu);
-        j->status = result.status;
-        j->reply_len = result.reply_len;
-        j->done = true;
-      }
-      j->done_cv.notify_all();
-      {
-        std::lock_guard<std::mutex> lock(mu_);
-        completed_.push_back(j->rid);
+        std::lock_guard<std::mutex> lock(completed_mu_);
+        completed_.push_back(rid);
       }
       completed_cv_.notify_one();
     }
@@ -326,14 +322,17 @@ private:
 
   std::shared_ptr<SessionRegistry> registry_; // keeps every decoder alive
   DecodingSession *dec_ = nullptr;
+  std::unique_ptr<slot[]> ring_;
 
-  std::mutex mu_;
+  std::mutex queue_mu_;
   std::condition_variable work_;
-  std::deque<std::shared_ptr<job>> queue_;
-  std::unordered_map<std::uint32_t, std::shared_ptr<job>> pending_;
+  std::deque<std::uint32_t> queue_;
+  bool stop_ = false;
+
+  std::mutex completed_mu_;
   std::condition_variable completed_cv_;
   std::deque<std::uint32_t> completed_;
-  bool stop_ = false;
+
   std::thread dispatcher_; // last, so drain() only sees initialized members
 };
 
