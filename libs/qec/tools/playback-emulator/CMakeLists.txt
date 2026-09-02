@@ -18,7 +18,6 @@ if(NOT TARGET cudaq-qec-decoding-server OR CUDAQ_QEC_DECODERS_ONLY)
 endif()
 
 add_subdirectory(lib)
-add_subdirectory(sifl)
 
 # The CLI entry point
 add_executable(playback-emulator
