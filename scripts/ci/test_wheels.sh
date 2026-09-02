@@ -119,9 +119,16 @@ fi
 # it is importable as the bare top-level `_qec_decoders_standalone` and must
 # decode without ever pulling in cudaq. Run in a fresh interpreter so the
 # sys.modules check is meaningful.
+#
+# The module links libcudart. Normally `import cudaq` puts the CUDA runtime on
+# the loader path, but this test (and any cudaq-free user) skips cudaq, so the
+# wheel does not bring cudart. Install the CUDA runtime wheel and add it to
+# LD_LIBRARY_PATH -- this is exactly what a cudaq-free user must do.
 # ======================================
 echo "Smoke testing standalone decoders module (_qec_decoders_standalone)"
-${python} - <<'EOF'
+${python} -m pip install "nvidia-cuda-runtime-cu${cuda_major}"
+cudart_libdir=$(${python} -c "import os, nvidia; print(os.path.join(list(nvidia.__path__)[0], 'cuda_runtime', 'lib'))")
+LD_LIBRARY_PATH="${cudart_libdir}:${LD_LIBRARY_PATH}" ${python} - <<'EOF'
 import sys
 import numpy as np
 import _qec_decoders_standalone as m
