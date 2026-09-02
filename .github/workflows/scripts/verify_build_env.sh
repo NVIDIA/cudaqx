@@ -1,6 +1,4 @@
 #!/bin/bash
-set -euo pipefail
-
 # ============================================================================ #
 # Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
 # All rights reserved.                                                         #
@@ -18,6 +16,8 @@ set -euo pipefail
 # Usage: verify_build_env.sh [install_tensorrt]
 #   install_tensorrt: on|off (default off) -- whether the image has TensorRT,
 #                     which decides whether the TRT decoder plugin must build.
+
+set -euo pipefail
 
 TRT="${1:-off}"
 BUILD_DIR="${BUILD_DIR:-/tmp/build_decoders_only}"
