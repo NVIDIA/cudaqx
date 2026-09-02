@@ -17,7 +17,12 @@ on:
         required: false
       cudaq_assets_tag:
         type: string
-        description: Retrieve CUDA-Q assets from this release (e.g. 0.11.0)
+        description: Retrieve CUDA-Q assets from this release (e.g. 0.11.0). Mutually exclusive with use_custom_cudaq_wheels.
+        required: false
+      use_custom_cudaq_wheels:
+        type: boolean
+        description: Instead of a CUDA-Q release, use the custom-built CUDA-Q wheels (cudaq-wheels-* artifacts) from the wheels_run_id run itself (requires that run to have been built with cudaq_wheels=Custom). Use when no CUDA-Q release exists yet to pull from. Mutually exclusive with cudaq_assets_tag.
+        default: false
         required: false
 
 jobs:
@@ -62,10 +67,21 @@ jobs:
           # gh release download -R NVIDIA/cudaq-private cuquantum-25.03 -p '*cu12*.whl'
           # Fetch the CUDA-Q wheels
           # gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
+          if [[ -n "${{ inputs.cudaq_assets_tag }}" ]] && [[ "${{ inputs.use_custom_cudaq_wheels }}" == "true" ]]; then
+            echo "::error::cudaq_assets_tag and use_custom_cudaq_wheels are mutually exclusive; provide only one CUDA-Q wheel source."
+            exit 1
+          fi
           if [[ -n "${{ inputs.cudaq_assets_tag }}" ]]; then
             gh release download -R ${{ inputs.cudaq_repo }} ${{ inputs.cudaq_assets_tag }} -p 'wheelhouse-*.zip'
             for f in wheelhouse-*.zip; do unzip $f; done
             mv wheelhouse-*/*.whl .
+          elif [[ "${{ inputs.use_custom_cudaq_wheels }}" == "true" ]]; then
+            # Use the custom-built CUDA-Q wheels (cudaq-wheels-<platform>-cu<major>
+            # artifacts) produced by the same "Build wheels" run as the CUDA-QX
+            # wheels, when no CUDA-Q release exists yet to pull from. The blanket
+            # `mv */*.whl .` below moves these into place along with the CUDA-QX
+            # wheels.
+            gh run download -R ${{ inputs.wheels_repo }} ${{ inputs.wheels_run_id }} -p 'cudaq-wheels-*'
           fi
 
           # Fetch the CUDA-QX wheels
