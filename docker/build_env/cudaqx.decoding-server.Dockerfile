@@ -156,6 +156,23 @@ RUN CUDA_DASH=$(echo "${cuda_version}" | tr '.' '-') \
        cuda-cudart-dev-${CUDA_DASH} \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Optional TensorRT for the cudaq-qec-trt-decoder plugin (opt-in; default off).
+# The plugin's CUDAQ_QEC_BUILD_TRT_DECODER option is AUTO by default, so simply
+# having libnvinfer + libnvonnxparser installed (in /usr/{include,lib}/<triple>,
+# where these dev packages land and where the plugin searches) makes the build
+# pick it up; pass -DCUDAQ_QEC_BUILD_TRT_DECODER=ON at configure time to
+# hard-require it. TensorRT comes from the same NVIDIA CUDA apt repo added
+# above; apt resolves the latest build, whose CUDA tag must line up with
+# cuda_version for the plugin to load at runtime.
+ARG install_tensorrt=off
+RUN case "${install_tensorrt}" in \
+      on|ON|1|true|TRUE|yes|YES) \
+        apt-get update && apt-get install -y --no-install-recommends \
+          libnvinfer-dev libnvonnxparsers-dev \
+        && apt-get clean && rm -rf /var/lib/apt/lists/* ;; \
+      *) echo "install_tensorrt=${install_tensorrt}: skipping TensorRT; the cudaq-qec-trt-decoder plugin will be auto-disabled." ;; \
+    esac
+
 # Pluck the cudaq-realtime install (headers + libs only) into a small prefix.
 COPY --from=cudaq_realtime \
        /opt/nvidia/cudaq/include/cudaq/realtime \
