@@ -115,6 +115,23 @@ if [ "$package_installed" != "$package_expected" ]; then
   exit 1
 fi
 
+# Smoke test the (undocumented) standalone decoders module shipped in the wheel:
+# it is importable as the bare top-level `_qec_decoders_standalone` and must
+# decode without ever pulling in cudaq. Run in a fresh interpreter so the
+# sys.modules check is meaningful.
+# ======================================
+echo "Smoke testing standalone decoders module (_qec_decoders_standalone)"
+${python} - <<'EOF'
+import sys
+import numpy as np
+import _qec_decoders_standalone as m
+assert "cudaq" not in sys.modules, "importing _qec_decoders_standalone pulled in cudaq"
+H = np.array([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.uint8)
+assert m.qecrt.get_decoder("pymatching", H).decode([1, 1, 0]).converged
+assert "cudaq" not in sys.modules, "using the standalone decoder pulled in cudaq"
+print("standalone decoders module OK (no cudaq import)")
+EOF
+
 # Test the libraries with examples
 # ======================================
 echo "Testing libraries with examples"
