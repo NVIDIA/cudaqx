@@ -18,13 +18,14 @@
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
-#include <deque>
+#include <ctime>
 #include <memory>
 #include <mutex>
 #include <netdb.h>
@@ -36,97 +37,22 @@
 
 namespace cudaq::qec::playback {
 
-// ─── null_session ──────────────────────────────────────────────────────────
-//
-// The `null` backend. It discards every frame, but touches every byte of it
-// through an atomic checksum so the optimizer cannot prove the frame is dead
-// and elide the serialization work the real backends would also have to pay
-// for.
-
 namespace {
 
-class null_session : public session {
-public:
-  // Echoes the frame's own request_id rather than inventing one, so a
-  // reader can key completions by id the same way every other backend does.
-  std::uint32_t submit(const frame &f) override {
-    checksum(f);
-    const std::uint32_t rid =
-        f.size >= sizeof(cudaq::realtime::RPCHeader)
-            ? reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
-                  ->request_id
-            : 0;
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      completed_.push_back(rid);
-    }
-    completed_cv_.notify_one();
-    return rid;
-  }
-
-  bool wait_next_completion(std::uint32_t &request_id,
-                            std::chrono::milliseconds timeout) override {
-    std::unique_lock<std::mutex> lock(mu_);
-    if (!completed_cv_.wait_for(lock, timeout,
-                                [&] { return !completed_.empty(); }))
-      return false;
-    request_id = completed_.front();
-    completed_.pop_front();
-    return true;
-  }
-
-  RpcStatus await(std::uint32_t, std::span<std::uint8_t> reply,
-                  std::size_t &reply_len) override {
-    std::fill(reply.begin(), reply.end(), std::uint8_t{0});
-    reply_len = reply.size();
-    return RpcStatus::OK;
-  }
-
-private:
-  // Folds every byte of the frame into an atomic accumulator so the compiler
-  // cannot elide the build/serialize step even though the result is unused.
-  void checksum(const frame &f) {
-    std::uint64_t acc = 0;
-    for (std::size_t i = 0; i < f.size; ++i)
-      acc ^= (std::uint64_t(f.bytes[i]) << (8 * (i & 7)));
-    checksum_.fetch_xor(acc, std::memory_order_relaxed);
-  }
-
-  std::atomic<std::uint64_t> checksum_{0};
-  std::mutex mu_;
-  std::condition_variable completed_cv_;
-  std::deque<std::uint32_t> completed_;
-};
+std::uint64_t now_ns() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ull +
+         static_cast<std::uint64_t>(ts.tv_nsec);
+}
 
 } // namespace
 
-std::unique_ptr<session> make_null_session() {
-  return std::make_unique<null_session>();
-}
-
-std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
-make_null_sessions(const std::vector<std::uint64_t> &decoder_ids) {
-  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> out;
-  out.reserve(decoder_ids.size());
-  for (auto id : decoder_ids)
-    out.emplace_back(id, make_null_session());
-  return out;
-}
-
-void route_sessions(
-    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
-        &sessions,
-    std::unordered_map<std::uint64_t, session *> &router) {
-  for (const auto &[id, s] : sessions)
-    router[id] = s.get();
-}
-
-// ─── inproc_session ────────────────────────────────────────────────────────
+// ─── dispatch_rpc / reply_capacity_for ─────────────────────────────────────
 //
-// One session per decoder, dispatching straight to that decoder's own
-// DecodingSession payload-level cores (skipping shared-memory rings and CUDA
-// graph dispatch). A thin, synchronous dispatcher to one already-resolved
-// DecodingSession -- any internal decode threading is that class's business.
+// Shared by the null and inproc backends: parses a raw request frame and
+// (for inproc) runs it against a DecodingSession, or (for null) just says how
+// big a reply it would have produced.
 
 namespace {
 
@@ -206,134 +132,287 @@ std::size_t reply_capacity_for(const std::uint8_t *bytes, std::size_t size) {
       static_cast<std::size_t>(std::max<std::int64_t>(view.return_size, 0)));
 }
 
-/// One decoder's input queue and the single thread that drains it, in
-/// submission order. Requests are held in a fixed ring of reusable slots
-/// indexed by request_id, so a submit/dispatch/await cycle touches no heap
-/// allocator and no hash map; slot ownership/completion is tracked with
-/// atomics rather than a per-slot lock, since by construction a slot is
-/// never contended (only the current owner ever touches it).
+} // namespace
+
+// ─── null_session ──────────────────────────────────────────────────────────
+//
+// The `null` backend. It discards every frame, but touches every byte of it
+// through an atomic checksum so the optimizer cannot prove the frame is dead
+// and elide the serialization work the real backends would also have to pay
+// for. Completes synchronously inside send(), on the timing thread: there is
+// no decoder and no payload, so there is nothing to hand off to a worker.
+
+namespace {
+
+class null_session : public session {
+public:
+  void start(run_ctx &collector) override { collector_ = &collector; }
+
+  void send(const frame &f, tag t) override {
+    checksum(f);
+    scratch_.assign(reply_capacity_for(f.bytes, f.size), 0);
+    handle_reply(*collector_, t, RpcStatus::OK, scratch_.data(),
+                scratch_.size(), now_ns());
+  }
+
+  void event_done(std::uint32_t event, std::uint32_t issued,
+                  std::int32_t term, bool has_term) override {
+    handle_event_done(*collector_, event, issued, term, has_term);
+  }
+
+  void stop(std::chrono::nanoseconds) override {}
+
+private:
+  // Folds every byte of the frame into an atomic accumulator so the compiler
+  // cannot elide the build/serialize step even though the result is unused.
+  void checksum(const frame &f) {
+    std::uint64_t acc = 0;
+    for (std::size_t i = 0; i < f.size; ++i)
+      acc ^= (std::uint64_t(f.bytes[i]) << (8 * (i & 7)));
+    checksum_.fetch_xor(acc, std::memory_order_relaxed);
+  }
+
+  std::atomic<std::uint64_t> checksum_{0};
+  run_ctx *collector_ = nullptr;
+  std::vector<std::uint8_t> scratch_;
+};
+
+} // namespace
+
+std::unique_ptr<session> make_null_session() {
+  return std::make_unique<null_session>();
+}
+
+std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+make_null_sessions(const std::vector<std::uint64_t> &decoder_ids) {
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> out;
+  out.reserve(decoder_ids.size());
+  for (auto id : decoder_ids)
+    out.emplace_back(id, make_null_session());
+  return out;
+}
+
+void route_sessions(
+    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+        &sessions,
+    std::unordered_map<std::uint64_t, session *> &router) {
+  for (const auto &[id, s] : sessions)
+    router[id] = s.get();
+}
+
+// ─── inproc_session ────────────────────────────────────────────────────────
+//
+// One session per decoder, dispatching straight to that decoder's own
+// DecodingSession payload-level cores (skipping shared-memory rings and CUDA
+// graph dispatch). The timing thread publishes requests into a single-
+// producer/single-consumer ring; one worker thread both runs the decoder and
+// reports the reply straight to handle_reply() -- no reader thread, no
+// request_id lookup.
+
+namespace {
+
+/// Single-producer/single-consumer ring, timing thread -> worker. Each side
+/// keeps a cached copy of the other's index and only re-reads the atomic
+/// when that cache says empty/full, so the hot path never touches the other
+/// core's cache line.
+class request_ring {
+public:
+  static constexpr std::size_t kCapacity = 4096; // comfortably above any
+                                                  // pipeline depth in use
+  static constexpr std::size_t kInlineBytes = 256;
+
+  struct entry {
+    enum kind_t : std::uint8_t { kRequest, kEventDone, kStop } kind = kStop;
+    tag t{};
+    std::uint32_t frame_len = 0;
+    std::array<std::uint8_t, kInlineBytes> inline_bytes{};
+    std::vector<std::uint8_t> overflow_bytes; // used when frame_len is large
+    std::uint32_t event = 0, issued = 0;
+    std::int32_t term = 0;
+    bool has_term = false;
+
+    const std::uint8_t *bytes() const {
+      return frame_len <= kInlineBytes ? inline_bytes.data()
+                                       : overflow_bytes.data();
+    }
+  };
+
+  request_ring() : buf_(kCapacity) {}
+
+  // Producer (timing thread) only: reserve the next slot, fill it in place,
+  // then publish(). Spins if the ring is full.
+  entry &reserve() {
+    while (tail_local_ - cached_head_ >= kCapacity) {
+      cached_head_ = head_.load(std::memory_order_acquire);
+      if (tail_local_ - cached_head_ >= kCapacity)
+        std::this_thread::yield();
+    }
+    return buf_[tail_local_ & kMask];
+  }
+  void publish() {
+    tail_.store(++tail_local_, std::memory_order_release);
+    if (parked_.load(std::memory_order_seq_cst)) {
+      std::lock_guard<std::mutex> lock(park_mu_);
+      park_cv_.notify_one();
+    }
+  }
+
+  // Consumer (worker thread) only.
+  entry *try_pop() {
+    if (head_local_ == cached_tail_) {
+      cached_tail_ = tail_.load(std::memory_order_acquire);
+      if (head_local_ == cached_tail_)
+        return nullptr;
+    }
+    return &buf_[head_local_ & kMask];
+  }
+  void pop_done() { head_.store(++head_local_, std::memory_order_release); }
+
+  // Idle-park protocol: the worker sets `parked_`, re-checks the ring, then
+  // waits; publish() checks `parked_` after publishing, closing the lost-
+  // wake window at the cost of one seq_cst load per push.
+  std::atomic<bool> parked_{false};
+  std::mutex park_mu_;
+  std::condition_variable park_cv_;
+
+private:
+  static constexpr std::size_t kMask = kCapacity - 1;
+  static_assert((kCapacity & kMask) == 0, "kCapacity must be a power of two");
+
+  alignas(64) std::atomic<std::size_t> head_{0};
+  alignas(64) std::atomic<std::size_t> tail_{0};
+  std::size_t tail_local_ = 0, cached_head_ = 0; // producer-owned
+  std::size_t head_local_ = 0, cached_tail_ = 0; // consumer-owned
+  std::vector<entry> buf_;
+};
+
+/// How long the worker spins on an empty ring before parking on a condvar.
+constexpr auto kIdleSpin = std::chrono::microseconds(50);
+
 class inproc_session : public session {
 public:
   inproc_session(std::shared_ptr<SessionRegistry> registry,
                  std::uint64_t decoder_id)
-      : registry_(std::move(registry)),
-        ring_(std::make_unique<slot[]>(kRingSize)) {
+      : registry_(std::move(registry)) {
     dec_ = registry_->find(decoder_id);
     assert(dec_ && "make_inproc_sessions() must only construct a session "
                    "for a decoder_id actually present in the config");
-    dispatcher_ = std::thread([this] { drain(); });
   }
 
   ~inproc_session() override {
-    {
-      std::lock_guard<std::mutex> lock(queue_mu_);
-      stop_ = true;
+    if (worker_.joinable()) {
+      ring_.reserve().kind = request_ring::entry::kStop;
+      ring_.publish();
+      worker_.join();
     }
-    work_.notify_all();
-    if (dispatcher_.joinable())
-      dispatcher_.join();
   }
 
-  std::uint32_t submit(const frame &f) override { return push(f); }
-
-  bool wait_next_completion(std::uint32_t &request_id,
-                            std::chrono::milliseconds timeout) override {
-    std::unique_lock<std::mutex> lock(completed_mu_);
-    if (!completed_cv_.wait_for(lock, timeout,
-                                [&] { return !completed_.empty(); }))
-      return false;
-    request_id = completed_.front();
-    completed_.pop_front();
-    return true;
+  void start(run_ctx &collector) override {
+    collector_ = &collector;
+    worker_ = std::thread([this] { drain(); });
   }
 
-  RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
-                  std::size_t &reply_len) override {
-    reply_len = 0;
-    slot &s = ring_[request_id % kRingSize];
-    while (!s.done.load(std::memory_order_acquire))
-      std::this_thread::yield();
-    reply_len = std::min(s.reply_len, reply.size());
-    std::copy_n(s.reply.begin(), reply_len, reply.begin());
-    const auto status = s.status;
-    s.rid.store(kNoRid, std::memory_order_release);
-    return status;
-  }
-
-private:
-  static constexpr std::size_t kRingSize = 1 << 17;
-  static constexpr std::uint32_t kNoRid = 0xffffffffu;
-
-  struct slot {
-    std::atomic<std::uint32_t> rid{kNoRid};
-    std::atomic<bool> done{false};
-    std::vector<std::uint8_t> bytes;
-    std::vector<std::uint8_t> reply;
-    std::size_t reply_len = 0;
-    RpcStatus status = RpcStatus::OK;
-  };
-
-  std::uint32_t push(const frame &f) {
+  void send(const frame &f, tag t) override {
     if (f.size < sizeof(cudaq::realtime::RPCHeader))
       throw std::invalid_argument(
           "inproc_session: frame is smaller than RPCHeader");
-    const auto rid =
-        reinterpret_cast<const cudaq::realtime::RPCHeader *>(f.bytes)
-            ->request_id;
-    slot &s = ring_[rid % kRingSize];
-    while (s.rid.load(std::memory_order_acquire) != kNoRid)
-      std::this_thread::yield();
-    s.bytes.assign(f.bytes, f.bytes + f.size);
-    s.reply.resize(reply_capacity_for(f.bytes, f.size));
-    s.done.store(false, std::memory_order_relaxed);
-    s.rid.store(rid, std::memory_order_release);
-    {
-      std::lock_guard<std::mutex> lock(queue_mu_);
-      queue_.push_back(rid);
-    }
-    work_.notify_one();
-    return rid;
+    auto &e = ring_.reserve();
+    e.kind = request_ring::entry::kRequest;
+    e.t = t;
+    e.frame_len = static_cast<std::uint32_t>(f.size);
+    if (f.size <= e.inline_bytes.size())
+      std::memcpy(e.inline_bytes.data(), f.bytes, f.size);
+    else
+      e.overflow_bytes.assign(f.bytes, f.bytes + f.size);
+    ring_.publish();
   }
 
+  void event_done(std::uint32_t event, std::uint32_t issued,
+                  std::int32_t term, bool has_term) override {
+    auto &e = ring_.reserve();
+    e.kind = request_ring::entry::kEventDone;
+    e.event = event;
+    e.issued = issued;
+    e.term = term;
+    e.has_term = has_term;
+    ring_.publish();
+  }
+
+  // Pushes the stop marker and joins; the worker drains everything ahead of
+  // it first, so `drain` only bounds a decoder that hangs -- which this
+  // backend, dispatching in-process code the caller controls, does not.
+  void stop(std::chrono::nanoseconds) override {
+    if (!worker_.joinable())
+      return;
+    ring_.reserve().kind = request_ring::entry::kStop;
+    ring_.publish();
+    worker_.join();
+  }
+
+private:
   void drain() {
+    using clock = std::chrono::steady_clock;
+    bool idling = false;
+    clock::time_point idle_since;
     for (;;) {
-      std::uint32_t rid;
-      {
-        std::unique_lock<std::mutex> lock(queue_mu_);
-        work_.wait(lock, [&] { return stop_ || !queue_.empty(); });
-        if (queue_.empty())
-          return;
-        rid = queue_.front();
-        queue_.pop_front();
+      auto *e = ring_.try_pop();
+      if (!e) {
+        if (!idling) {
+          idling = true;
+          idle_since = clock::now();
+        }
+        if (clock::now() - idle_since < kIdleSpin) {
+          std::this_thread::yield();
+          continue;
+        }
+        ring_.parked_.store(true, std::memory_order_seq_cst);
+        e = ring_.try_pop();
+        if (!e) {
+          std::unique_lock<std::mutex> lock(ring_.park_mu_);
+          ring_.park_cv_.wait_for(lock, std::chrono::milliseconds(1));
+        }
+        ring_.parked_.store(false, std::memory_order_relaxed);
+        if (!e)
+          continue;
       }
-      slot &s = ring_[rid % kRingSize];
-      const auto result = dispatch_rpc(*dec_, s.bytes.data(), s.bytes.size(),
-                                       s.reply.data(), s.reply.size());
-      s.status = result.status;
-      s.reply_len = result.reply_len;
-      s.done.store(true, std::memory_order_release);
-      {
-        std::lock_guard<std::mutex> lock(completed_mu_);
-        completed_.push_back(rid);
+      idling = false;
+
+      switch (e->kind) {
+      case request_ring::entry::kRequest: {
+        const tag t = e->t;
+        const auto *bytes = e->bytes();
+        const auto len = e->frame_len;
+        reply_scratch_.resize(reply_capacity_for(bytes, len));
+        const auto result = dispatch_rpc(*dec_, bytes, len,
+                                         reply_scratch_.data(),
+                                         reply_scratch_.size());
+        const auto ret_ns = now_ns();
+        ring_.pop_done();
+        handle_reply(*collector_, t, result.status, reply_scratch_.data(),
+                    result.reply_len, ret_ns);
+        break;
       }
-      completed_cv_.notify_one();
+      case request_ring::entry::kEventDone: {
+        const auto event = e->event, issued = e->issued;
+        const auto term = e->term;
+        const auto has_term = e->has_term;
+        ring_.pop_done();
+        handle_event_done(*collector_, event, issued, term, has_term);
+        break;
+      }
+      case request_ring::entry::kStop:
+        ring_.pop_done();
+        return;
+      }
     }
   }
 
   std::shared_ptr<SessionRegistry> registry_; // keeps every decoder alive
   DecodingSession *dec_ = nullptr;
-  std::unique_ptr<slot[]> ring_;
-
-  std::mutex queue_mu_;
-  std::condition_variable work_;
-  std::deque<std::uint32_t> queue_;
-  bool stop_ = false;
-
-  std::mutex completed_mu_;
-  std::condition_variable completed_cv_;
-  std::deque<std::uint32_t> completed_;
-
-  std::thread dispatcher_; // last, so drain() only sees initialized members
+  request_ring ring_;
+  run_ctx *collector_ = nullptr;
+  std::vector<std::uint8_t> reply_scratch_; // worker-owned
+  std::thread worker_;
 };
 
 } // namespace
@@ -356,9 +435,11 @@ make_inproc_sessions(
 // ─── udp_session ───────────────────────────────────────────────────────────
 //
 // Connected UDP socket(s) to a decoding server speaking decoder_rpc_wire_
-// format.h; replies are matched by request_id. Pure transport: this file
-// looks no further than the generic RPCHeader/RPCResponse framing and has
-// no notion of which RPC a frame holds.
+// format.h. Pure transport: this file looks no further than the generic
+// RPCHeader/RPCResponse framing and has no notion of which RPC a frame
+// holds. The receiver thread matches datagrams to the tag they were sent
+// under, sweeps timed-out requests, and delivers `event_done` notices --
+// the only thread that ever reports into the collector.
 
 namespace {
 
@@ -369,6 +450,11 @@ using cudaq::realtime::RPCResponse;
 // A UDP datagram is at most 65507 bytes of payload (65535 - 8-byte UDP
 // header - 20-byte IPv4 header); size scratch buffers to that.
 constexpr std::size_t kMaxDatagram = 65507;
+
+// How often the receiver wakes on its own (via SO_RCVTIMEO) to sweep expired
+// requests and drain `event_done` notices, independent of any one request's
+// own timeout.
+constexpr std::uint32_t kReceiveTickMs = 1;
 
 /// Splits "host:port" on the LAST ':'
 void split_endpoint(const std::string &endpoint, std::string &host,
@@ -381,8 +467,7 @@ void split_endpoint(const std::string &endpoint, std::string &host,
   port = endpoint.substr(pos + 1);
 }
 
-int make_connected_udp_socket(const std::string &endpoint,
-                              std::uint32_t timeout_ms) {
+int make_connected_udp_socket(const std::string &endpoint) {
   std::string host, port;
   split_endpoint(endpoint, host, port);
 
@@ -414,170 +499,155 @@ int make_connected_udp_socket(const std::string &endpoint,
   ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
   timeval tv{};
-  tv.tv_sec = timeout_ms / 1000;
-  tv.tv_usec = (timeout_ms % 1000) * 1000;
+  tv.tv_usec = static_cast<long>(kReceiveTickMs * 1000);
   ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
   return fd;
 }
 
 /// One connected UDP socket talks to one decoder on the decoding server.
-///
 /// Exactly one thread publishes on a session (see session.h).
 class udp_session : public session {
 public:
   udp_session(int fd, std::uint32_t timeout_ms)
       : fd_(fd), timeout_(std::chrono::milliseconds(timeout_ms)) {
     max_frame_bytes = static_cast<std::uint32_t>(kMaxDatagram);
-    receiver_ = std::thread([this] { receive_loop(); });
   }
 
   ~udp_session() override {
-    stop_.store(true, std::memory_order_release);
-    if (fd_ >= 0)
-      ::shutdown(fd_, SHUT_RDWR); // unblock a receiver parked in recv()
-    if (receiver_.joinable())
+    if (receiver_.joinable()) {
+      stop_.store(true, std::memory_order_release);
+      if (fd_ >= 0)
+        ::shutdown(fd_, SHUT_RDWR); // unblock a receiver parked in recv()
       receiver_.join();
+    }
     if (fd_ >= 0)
       ::close(fd_);
   }
 
-  std::uint32_t submit(const frame &f) override {
+  void start(run_ctx &collector) override {
+    collector_ = &collector;
+    receiver_ = std::thread([this] { receive_loop(); });
+  }
+
+  void send(const frame &f, tag t) override {
     if (f.size < sizeof(RPCHeader))
       throw std::invalid_argument(
-          "udp_session::submit: frame is smaller than RPCHeader");
+          "udp_session::send: frame is smaller than RPCHeader");
     const std::uint32_t request_id =
         reinterpret_cast<const RPCHeader *>(f.bytes)->request_id;
-    auto w = std::make_shared<waiter>();
-    w->deadline = std::chrono::steady_clock::now() + timeout_;
+    const auto deadline = std::chrono::steady_clock::now() + timeout_;
     {
       std::lock_guard<std::mutex> lock(mu_);
-      pending_[request_id] = w;
+      pending_[request_id] = {t, deadline};
     }
     if (::send(fd_, f.bytes, f.size, 0) < 0) {
+      // Nothing else will ever complete this request, since it never left
+      // the socket for the receiver to eventually time out on its own.
+      bool erased;
       {
         std::lock_guard<std::mutex> lock(mu_);
-        pending_.erase(request_id);
+        erased = pending_.erase(request_id) != 0;
       }
-      finish(request_id, *w, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+      if (erased)
+        complete(t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
     }
-    return request_id;
   }
 
-  bool wait_next_completion(std::uint32_t &request_id,
-                            std::chrono::milliseconds timeout) override {
-    std::unique_lock<std::mutex> lock(mu_);
-    if (!completed_cv_.wait_for(lock, timeout,
-                                [&] { return !completed_.empty(); }))
-      return false;
-    request_id = completed_.front();
-    completed_.pop_front();
-    return true;
+  void event_done(std::uint32_t event, std::uint32_t issued,
+                  std::int32_t term, bool has_term) override {
+    std::lock_guard<std::mutex> lock(notices_mu_);
+    notices_.push_back({event, issued, term, has_term});
   }
 
-  RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
-                  std::size_t &reply_len) override {
-    reply_len = 0;
-    std::shared_ptr<waiter> w;
+  /// Waits up to `drain` for `pending_` to empty (the receiver sweeps it),
+  /// force-completes whatever is left as INTERNAL_ERROR, then stops the
+  /// receiver.
+  void stop(std::chrono::nanoseconds drain) override {
+    const auto deadline = std::chrono::steady_clock::now() + drain;
+    while (!pending_empty() && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    std::vector<std::pair<std::uint32_t, pending>> leftover;
     {
       std::lock_guard<std::mutex> lock(mu_);
-      auto it = pending_.find(request_id);
-      if (it == pending_.end())
-        return RpcStatus::INTERNAL_ERROR; // never submitted, or already taken
-      w = it->second;
+      leftover.assign(pending_.begin(), pending_.end());
+      pending_.clear();
     }
-    // No self-timeout here: receive_loop's own periodic wake (bounded by
-    // SO_RCVTIMEO) sweeps a silent socket's stale requests on its own, so
-    // this always completes even if nobody else is watching this id.
-    std::unique_lock<std::mutex> lock(w->mu);
-    w->done_cv.wait(lock, [&] { return w->done; });
-    reply_len = std::min(w->reply.size(), reply.size());
-    std::copy_n(w->reply.begin(), reply_len, reply.begin());
-    const auto status = w->status;
-    lock.unlock();
-    // Only await() removes a completed entry -- a reply/sweep marks it done
-    // in place, so wait_next_completion() can report it and this call can
-    // still find and read it afterward.
-    std::lock_guard<std::mutex> lock2(mu_);
-    pending_.erase(request_id);
-    return status;
+    for (auto &[id, pe] : leftover)
+      complete(pe.t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+
+    if (receiver_.joinable()) {
+      stop_.store(true, std::memory_order_release);
+      ::shutdown(fd_, SHUT_RDWR);
+      receiver_.join();
+    }
   }
 
 private:
-  /// One outstanding request: filled in by the receiver, collected by await.
-  /// `deadline` is fixed at submission and never written again, so sweep_stale
-  /// can read it without locking.
-  struct waiter {
+  /// One outstanding request: where its reply must be tagged, and when it
+  /// gives up waiting. Only the receiver thread ever reads or writes an
+  /// entry once it exists.
+  struct pending {
+    tag t;
     std::chrono::steady_clock::time_point deadline;
-    std::mutex mu;
-    std::condition_variable done_cv;
-    std::vector<std::uint8_t> reply;
-    RpcStatus status = RpcStatus::OK;
-    bool done = false;
+  };
+  struct notice {
+    std::uint32_t event, issued;
+    std::int32_t term;
+    bool has_term;
   };
 
-  /// Finishes a request and makes it visible to wait_next_completion. A
-  /// genuine reply leaves `request_id` in `pending_` for await() to erase
-  /// once it has consumed the reply; a send failure or a sweep -- which
-  /// give up on a request rather than reporting a real reply -- erase it
-  /// first instead, since nothing else will.
-  void finish(std::uint32_t request_id, waiter &w, RpcStatus status,
-              const std::uint8_t *body, std::size_t len) {
+  bool pending_empty() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return pending_.empty();
+  }
+
+  void complete(tag t, RpcStatus status, const std::uint8_t *body,
+               std::size_t len) {
+    handle_reply(*collector_, t, status, body, len, now_ns());
+  }
+
+  void drain_notices() {
+    std::vector<notice> batch;
     {
-      std::lock_guard<std::mutex> lock(w.mu);
-      w.status = status;
-      w.reply.assign(body, body + len);
-      w.done = true;
+      std::lock_guard<std::mutex> lock(notices_mu_);
+      batch.swap(notices_);
     }
-    w.done_cv.notify_all();
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      completed_.push_back(request_id);
-    }
-    completed_cv_.notify_one();
+    for (auto &n : batch)
+      handle_event_done(*collector_, n.event, n.issued, n.term, n.has_term);
   }
 
   /// No dedicated "local timeout" status exists in RpcStatus; a client-side
   /// synthesized timeout/hard-error is reported as INTERNAL_ERROR. Each
-  /// request's own deadline (submission + timeout_) governs it, not overall
-  /// socket silence -- unrelated traffic (another request's reply, or ICMP
-  /// errors for a dead peer) must never mask one dead request forever.
+  /// request's own deadline (send + timeout_) governs it, not overall socket
+  /// silence -- unrelated traffic must never mask one dead request forever.
   void sweep_stale() {
-    std::vector<std::pair<std::uint32_t, std::shared_ptr<waiter>>> snapshot;
+    std::vector<std::pair<std::uint32_t, pending>> stale;
+    const auto now = std::chrono::steady_clock::now();
     {
       std::lock_guard<std::mutex> lock(mu_);
-      snapshot.assign(pending_.begin(), pending_.end());
-    }
-    const auto now = std::chrono::steady_clock::now();
-    for (auto &[id, w] : snapshot) {
-      if (now < w->deadline)
-        continue; // still within its own grace period
-      bool already_done = false;
-      {
-        std::lock_guard<std::mutex> lock(w->mu);
-        already_done = w->done;
+      for (auto it = pending_.begin(); it != pending_.end();) {
+        if (now < it->second.deadline) {
+          ++it;
+          continue;
+        }
+        stale.emplace_back(it->first, it->second);
+        it = pending_.erase(it);
       }
-      // A reply that landed but is not yet await()'d stays in `pending_` for
-      // that eventual await() to find; sweeping it here would clobber its
-      // real status with INTERNAL_ERROR.
-      if (already_done)
-        continue;
-      {
-        std::lock_guard<std::mutex> lock(mu_);
-        pending_.erase(id);
-      }
-      finish(id, *w, RpcStatus::INTERNAL_ERROR, nullptr, 0);
     }
+    for (auto &[id, pe] : stale)
+      complete(pe.t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
   }
 
   void receive_loop() {
     std::vector<std::uint8_t> scratch(kMaxDatagram);
     while (!stop_.load(std::memory_order_acquire)) {
-      // Runs every iteration -- including a tight run of async ICMP errors
-      // for a dead peer (e.g. one per rejected send), not just a genuine
-      // SO_RCVTIMEO silence -- since each request's own deadline is what
-      // actually gates whether sweep_stale() does anything.
+      // Runs every SO_RCVTIMEO tick (kReceiveTickMs) as well as after every
+      // datagram, so a notice or an expired request is never held up by a
+      // quiet -- or a noisy -- socket.
       sweep_stale();
+      drain_notices();
       const ssize_t n = ::recv(fd_, scratch.data(), scratch.size(), 0);
       if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
@@ -596,31 +666,36 @@ private:
       if (resp.magic != RPC_MAGIC_RESPONSE)
         continue; // garbage/truncated datagram
 
-      std::shared_ptr<waiter> w;
+      tag t;
+      bool found;
       {
         std::lock_guard<std::mutex> lock(mu_);
         auto it = pending_.find(resp.request_id);
-        if (it == pending_.end())
-          continue; // stale reply: nobody is waiting on this id any more
-        w = it->second;
+        found = it != pending_.end();
+        if (found) {
+          t = it->second.t;
+          pending_.erase(it);
+        }
       }
+      if (!found)
+        continue; // stale reply: nobody is waiting on this id any more
       const std::size_t avail =
           static_cast<std::size_t>(n) - sizeof(RPCResponse);
-      finish(resp.request_id, *w, static_cast<RpcStatus>(resp.status),
-             scratch.data() + sizeof(RPCResponse),
-             std::min<std::size_t>(resp.result_len, avail));
+      complete(t, static_cast<RpcStatus>(resp.status),
+              scratch.data() + sizeof(RPCResponse),
+              std::min<std::size_t>(resp.result_len, avail));
     }
   }
 
   int fd_ = -1;
   std::chrono::milliseconds timeout_;
-  std::condition_variable completed_cv_;
-  std::deque<std::uint32_t> completed_;
-  // Guards `pending_` and `completed_`
   std::mutex mu_;
-  std::unordered_map<std::uint32_t, std::shared_ptr<waiter>> pending_;
+  std::unordered_map<std::uint32_t, pending> pending_;
+  std::mutex notices_mu_;
+  std::vector<notice> notices_;
   std::atomic<bool> stop_{false};
-  std::thread receiver_; // last, so receive_loop() sees initialized members
+  run_ctx *collector_ = nullptr;
+  std::thread receiver_;
 };
 
 } // namespace
@@ -632,7 +707,7 @@ make_udp_sessions(
   std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> out;
   out.reserve(endpoints.size());
   for (const auto &[id, endpoint] : endpoints) {
-    int fd = make_connected_udp_socket(endpoint, timeout_ms);
+    int fd = make_connected_udp_socket(endpoint);
     out.emplace_back(id, std::make_unique<udp_session>(fd, timeout_ms));
   }
   return out;

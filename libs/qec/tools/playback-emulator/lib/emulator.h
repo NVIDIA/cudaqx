@@ -71,6 +71,9 @@ struct run_plan {
   std::unordered_map<std::uint64_t, session *> router;
   std::unordered_map<std::uint32_t, syndrome_source *> sources;
   run_params params;
+  // Upper bound on the number of requests run() can issue, so its per-request
+  // logs can be sized once, before t0, and appended to lock-free.
+  std::uint32_t max_requests = 0;
 };
 
 /// Validate `sched` against `router`'s session frame limits and pre-build
@@ -83,11 +86,10 @@ plan(const schedule &sched,
      const std::unordered_map<std::uint32_t, syndrome_source *> &sources,
      const run_params &params = {});
 
-/// Run the plan on one timing thread: wait_until(t0+deadline), submit,
-/// record, in schedule order -- every RPC submits and returns without
-/// waiting; a reader thread per session collects replies as they arrive and
-/// raises `signal=` once an event's are all in. A hard error aborts without
-/// truncating `result.records`; `record::dispatched` marks what actually ran.
+/// Run the plan on one timing thread, in schedule order: wait_until(t0+
+/// deadline), send, record -- every RPC sends and returns without waiting,
+/// while each session's own worker processes replies and raises `signal=`.
+/// A hard error aborts without truncating `result.records`.
 run_result run(std::shared_ptr<run_plan> plan);
 
 /// Downstream analysis writes CSV. One row per record: identity, timings,

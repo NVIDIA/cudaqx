@@ -18,21 +18,20 @@ flowchart TD
     end
 
     subgraph Runtime["run()"]
-        Timing["timing thread\nwait_until(deadline) -> expect -> submit -> record"]
-        Reader0["reader_thread (decoder 0)\nwait_next_completion() -> collect -> complete"]
-        Session0["session (decoder 0)\nnull / inproc / udp"]
+        Timing["timing thread\nwait_until(deadline) -> send -> event_done -> record"]
+        Session0["session (decoder 0): null / inproc / udp\nown worker thread produces AND processes replies"]
         Source0["syndrome_source\nstatic / stim_memory / cudaq_memory"]
-        RunState["run_state\naborted flag, signal flags,\nlogs_mu-guarded logs"]
+        RunState["run_state\naborted flag, signal flags, per-event collectors,\nspinlock-guarded correction_log/warnings"]
+        Collector["run_ctx (collector)\nhandle_reply() / handle_event_done()"]
 
         RunPlan --> Timing
-        Timing -- "expect(rid)\nbefore each submit" --> Reader0
-        Timing -- "finish_issuing()\nafter the last submit for an event" --> Reader0
-        Timing -- "submit(frame)" --> Session0
+        Timing -- "send(frame, tag)" --> Session0
+        Timing -- "event_done()\nafter the last send for an event" --> Session0
         Timing -- "draw next round" --> Source0
-        Reader0 -- "wait_next_completion()\n+ await(rid)" --> Session0
-        Reader0 -- "raise signal=NAME" --> RunState
+        Session0 -- "handle_reply() / handle_event_done()\ncalled directly by the session's own worker" --> Collector
+        Collector -- "raise signal=NAME" --> RunState
         Timing -- "check abort flag, block on signals" --> RunState
-        Reader0 -. "record fields\n(status, return_ns,\ncorrection bits)" .-> Result
+        Collector -. "record fields\n(status, return_ns,\ncorrection bits)" .-> Result
         Timing -. "record fields\n(deadline/call_ns,\nsyndrome bits)" .-> Result
         Result["run_result\n(records + syndrome_log +\ncorrection_log + request logs)"]
     end
@@ -75,41 +74,46 @@ backing data the schedule asked for:
 ## `session`
 
 An abstraction for a transport target for RPCs, one session per decoder id.
-A session carries a pre-serialized RPC frame to a decoder and brings a reply
-back; it should not need to know what's inside that frame -- `null`, `inproc`,
-and `udp` all treat it as an opaque byte span. The one exception is
-`inproc`, which dispatches directly to a `DecodingSession` in this process
-and has to interpret the frame to call the right handler.
+A session carries a pre-serialized RPC frame to a decoder and reports its
+reply back through `handle_reply()`/`handle_event_done()`, called directly
+by the session's own worker thread -- never by blocking the caller. `udp`
+never looks past the generic RPCHeader/RPCResponse framing; `inproc`
+dispatches directly to a `DecodingSession` in this process and has to
+interpret the frame to call the right handler; `null` interprets a frame
+only far enough to size a `get_corrections` reply correctly.
 
 ## `emulator`
 
 The orchestrator and controller. It owns the timeline and splits the work
-of running it across two kinds of thread:
+of running it across two roles:
 
 - **Timing thread** (one, shared across every session): responsible for
-  the schedule's real-time behavior -- `wait_until(deadline)`, `submit()`,
-  and logging the dispatch side of each request. Kept to as little else as
-  possible so nothing it does can perturb the timing it's trying to hold,
-  with one necessary exception: JIT syndrome streaming (`stim_memory_source`/
-  `cudaq_memory_source`) draws its round on this thread, since the round has
-  to exist before the frame carrying it can be built.
-- **Reader thread** (one per session/decoder): responsible for routing and
-  recording each session's replies -- `wait_next_completion()` to learn a
-  reply landed, `await()` to collect it, then writing that request's result
-  fields and raising `signal=` once an event's replies are all in.
+  the schedule's real-time behavior -- `wait_until(deadline)`, `send()`,
+  `event_done()`, and logging the dispatch side of each request. Kept to as
+  little else as possible so nothing it does can perturb the timing it's
+  trying to hold, with one necessary exception: JIT syndrome streaming
+  (`stim_memory_source`/`cudaq_memory_source`) draws its round on this
+  thread, since the round has to exist before the frame carrying it can be
+  built.
+- **Session worker** (one per session/decoder, owned by the session
+  itself): runs the decoder (`inproc`) or talks to the wire (`udp`), and
+  reports each reply/event_done straight into the run() collector from that
+  same thread -- there is no separate reader thread or request lookup.
 
 ## Logging
 
 Every run accumulates its output in one `run_result`, appended to from both
-kinds of thread: the timing thread writes each request's dispatch-side
-fields (`deadline_ns`/`call_ns`, syndrome bits) as it submits; each reader
-thread writes that request's collected-side fields (`status`, `return_ns`,
-correction bits) as replies land. Both sides append to the same shared
-per-request logs and `result.warnings`, guarded by one `run_state::logs_mu`
--- the only lock any of this takes, and never held while calling a session
-method, so a slow/stuck session can't block logging on another decoder.
-`warn()` is the single append point for `result.warnings` (e.g. an abort
-reason, or a reader giving up on an unanswered request at shutdown).
+the timing thread and every session's worker: the timing thread writes each
+request's dispatch-side fields (`deadline_ns`/`call_ns`, syndrome bits) as
+it sends; each session's worker writes that request's collected-side fields
+(`status`, `return_ns`, correction bits) as replies land, through
+`handle_reply()`/`handle_event_done()`. Only `correction_log` and
+`warnings` are actually shared across workers (for a multi-decoder
+schedule), guarded by a spinlock (`run_state::logs_lock`) held only around
+that one append -- never while calling a session method, so a slow/stuck
+session can't block logging on another decoder. `warn()` is the single
+append point for `result.warnings` (e.g. an abort reason, or an event whose
+collector never settled by the time its session stopped).
 
 ## Signals
 

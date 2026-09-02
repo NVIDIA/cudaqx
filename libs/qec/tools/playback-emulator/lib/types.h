@@ -186,8 +186,8 @@ struct run_result {
                                              // in the order it issued them.
   // Per-request timing/outcome, parallel to request_id_log entry-for-entry.
   // dispatch_ns is stamped by the timing thread when the request was put on
-  // the wire; return_ns and status are stamped by the reader thread when
-  // that request's own reply landed (0/kNoStatus if never collected).
+  // the wire; return_ns and status are stamped by the session's own worker
+  // when that request's own reply landed (0/kNoStatus if never collected).
   std::vector<std::uint64_t> request_dispatch_ns_log;
   std::vector<std::uint64_t> request_return_ns_log;
   std::vector<std::int32_t> request_status_log;

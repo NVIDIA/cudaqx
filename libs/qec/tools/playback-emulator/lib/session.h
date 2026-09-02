@@ -57,35 +57,57 @@ struct frame {
   std::size_t size = 0;
 };
 
+/// Identifies a reply without going through a request_id lookup: an index
+/// into `schedule::events` and into `run_result::request_*_log`.
+struct tag {
+  std::uint32_t event = 0;
+  std::uint32_t log_index = 0;
+};
+
+/// Owns every request's outcome for one run() call: emulator.cpp defines it
+/// and is the only thing that ever constructs one. Opaque here -- a session
+/// only ever hands one back to handle_reply()/handle_event_done() below, the
+/// one collector every session backend reports to.
+struct run_ctx;
+
+/// `run()`'s reply/event_done handlers (emulator.cpp), called directly by a
+/// session's worker thread, never concurrently with each other for the same
+/// session -- see session::start. `return_ns` is a CLOCK_MONOTONIC absolute
+/// timestamp; `reply`/`reply_len` are only valid for the duration of the call.
+void handle_reply(run_ctx &collector, tag t, RpcStatus status,
+                  const std::uint8_t *reply, std::size_t reply_len,
+                  std::uint64_t return_ns);
+void handle_event_done(run_ctx &collector, std::uint32_t event,
+                       std::uint32_t issued, std::int32_t term,
+                       bool has_term);
+
 /// Anything that can carry an RPC frame to a decoder and bring a reply back.
-/// Every RPC gets a reply -- there is no fire-and-forget case. SINGLE
-/// PUBLISHER: `submit` from one thread only, so program order is wire order;
-/// `await` alone is safe from other threads, one per distinct request_id.
-/// SINGLE COLLECTOR: at most one thread may call `wait_next_completion` at a
-/// time -- the reader owns it exclusively (one reader per session). LIFETIME:
-/// no thread may be inside any method when the session is destroyed.
+/// The timing thread calls `send`/`event_done`; a session's own worker
+/// produces and processes every reply, reporting it to `collector`.
+/// LIFETIME: no thread may be inside any method when destroyed.
 class session {
 public:
   virtual ~session() = default;
 
-  /// Publish a frame and return the request_id its reply will come back
-  /// under. Returns as soon as the frame is published: never waits on the
-  /// decoder. Call from the publishing thread only.
-  virtual std::uint32_t submit(const frame &f) = 0;
+  /// Records `collector` and starts the session's worker. Called once,
+  /// before t0; `collector` outlives every session used in the same run().
+  virtual void start(run_ctx &collector) = 0;
 
-  /// Block until some submitted request's reply is ready to `await()`, and
-  /// report its id. False on timeout, with `request_id` untouched. Does not
-  /// consume the reply -- a later `await()` for that id still works.
-  virtual bool wait_next_completion(std::uint32_t &request_id,
-                                    std::chrono::milliseconds timeout) = 0;
+  /// Publish a frame. Returns as soon as it is queued/sent -- never waits on
+  /// the decoder. Timing thread only. `f.bytes` may be freed once this
+  /// returns.
+  virtual void send(const frame &f, tag t) = 0;
 
-  /// Collect `request_id`'s reply, blocking the caller. Returns the
-  /// RpcStatus. On OK with a result body, copies the (still bit-packed) reply
-  /// into `reply`. Safe to call from a thread other than the publisher, and
-  /// from two threads at once so long as they name different request_ids.
-  virtual RpcStatus await(std::uint32_t request_id,
-                          std::span<std::uint8_t> reply,
-                          std::size_t &reply_len) = 0;
+  /// The event named by `event` has issued its last request (`issued`
+  /// requests total). `term`/`has_term` carry a stream's termination reason,
+  /// for handle_event_done() to forward. Timing thread only.
+  virtual void event_done(std::uint32_t event, std::uint32_t issued,
+                          std::int32_t term, bool has_term) = 0;
+
+  /// Waits up to `drain` for outstanding replies (reporting the rest via
+  /// handle_reply() with INTERNAL_ERROR), then stops the worker. No call into
+  /// the collector happens after this returns.
+  virtual void stop(std::chrono::nanoseconds drain) = 0;
 
   /// The largest frame this session can carry, or 0 for unbounded. Set once
   /// at construction and validated against the schedule before t0, so a

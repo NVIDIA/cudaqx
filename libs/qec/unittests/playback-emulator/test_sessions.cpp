@@ -23,6 +23,7 @@
 #include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 using namespace cudaq::qec::playback;
@@ -37,8 +38,6 @@ using namespace cudaq::qec::playback;
 
 namespace {
 
-using cudaq::qec::decoding::rpc::EnqueueRequestPayload;
-using cudaq::qec::decoding::rpc::GetCorrectionsRequestPayload;
 using cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
 using cudaq::qec::decoding::rpc::kGetCorrectionsFunctionId;
 using cudaq::realtime::RPCHeader;
@@ -129,74 +128,35 @@ private:
   std::thread thread_;
 };
 
-std::vector<std::uint8_t> make_read_frame(std::uint32_t request_id) {
-  std::vector<std::uint8_t> buf(sizeof(RPCHeader) +
-                                sizeof(GetCorrectionsRequestPayload));
-  RPCHeader hdr{};
-  hdr.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
-  hdr.function_id = kGetCorrectionsFunctionId;
-  hdr.arg_len = sizeof(GetCorrectionsRequestPayload);
-  hdr.request_id = request_id;
-  std::memcpy(buf.data(), &hdr, sizeof(hdr));
-  GetCorrectionsRequestPayload payload{0, 1, 1};
-  std::memcpy(buf.data() + sizeof(hdr), &payload, sizeof(payload));
-  return buf;
-}
-
-std::vector<std::uint8_t> make_enqueue_frame(std::uint32_t request_id) {
-  std::vector<std::uint8_t> buf(sizeof(RPCHeader) +
-                                sizeof(EnqueueRequestPayload) + 1);
-  RPCHeader hdr{};
-  hdr.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
-  hdr.function_id = kEnqueueSyndromesFunctionId;
-  hdr.arg_len = sizeof(EnqueueRequestPayload) + 1;
-  hdr.request_id = request_id;
-  std::memcpy(buf.data(), &hdr, sizeof(hdr));
-  EnqueueRequestPayload payload{0, 0, 0, 8};
-  std::memcpy(buf.data() + sizeof(hdr), &payload, sizeof(payload));
-  return buf;
-}
-
-std::unique_ptr<session> connect(const recording_server &server) {
-  auto sessions = make_udp_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      /*timeout_ms=*/5000);
-  return std::move(sessions[0].second);
-}
-
-long long ms_since(std::chrono::steady_clock::time_point t0) {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(
-             std::chrono::steady_clock::now() - t0)
-      .count();
-}
-
 } // namespace
 
 TEST(SessionOrdering, AWaitingCallerDoesNotHoldBackTheNextSend) {
-  // The regression: with the reply collected inside the send, syndromes
-  // meant to follow a read went out while it was still in flight, so the
-  // decoder saw them the wrong way round.
+  // If send() collected the reply itself instead of just publishing the
+  // frame, syndromes meant to follow this read would go out while it was
+  // still in flight, and the decoder would see them in the wrong order.
   recording_server server;
-  auto s = connect(server);
+  auto sessions = make_udp_sessions(
+      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
+      /*timeout_ms=*/5000);
+  std::unordered_map<std::uint64_t, session *> router{
+      {0, sessions[0].second.get()}};
 
-  const auto read = make_read_frame(1);
-  const auto enqueue = make_enqueue_frame(2);
+  auto sched = parse("0 get_corrections return_size=1\n"
+                     "+0 enqueue source=0b1\n",
+                     {0}, 1000);
+  auto result = run(plan(sched, router, {}, {}));
 
-  const auto t0 = std::chrono::steady_clock::now();
-  const std::uint32_t t = s->submit({read.data(), read.size()});
-  const auto after_submit = ms_since(t0);
-  s->submit({enqueue.data(), enqueue.size()});
-  const auto after_enqueue = ms_since(t0);
-
-  EXPECT_LT(after_submit, kDecodeTime.count() / 2)
-      << "submit() waited for the reply instead of just publishing the frame";
-  EXPECT_LT(after_enqueue, kDecodeTime.count() / 2)
-      << "the next frame was held back by a read that had not answered yet";
-
-  std::vector<std::uint8_t> reply(1);
-  std::size_t reply_len = 0;
-  EXPECT_EQ(s->await(t, reply, reply_len), RpcStatus::OK);
-  EXPECT_GE(ms_since(t0), kDecodeTime.count()); // it really did have to wait
+  ASSERT_EQ(result.records.size(), 2u);
+  const auto &read = result.records[0];
+  const auto &enqueue = result.records[1];
+  EXPECT_LT(enqueue.call_ns - read.call_ns,
+            static_cast<std::uint64_t>(kDecodeTime.count()) * 1'000'000 / 2)
+      << "dispatch waited for the read's reply instead of moving straight to "
+         "the next event";
+  EXPECT_GE(read.return_ns - read.call_ns,
+            static_cast<std::uint64_t>(kDecodeTime.count()) * 1'000'000)
+      << "the record should still span the whole read";
+  EXPECT_EQ(read.status, static_cast<std::int32_t>(RpcStatus::OK));
 
   EXPECT_EQ(server.arrivals(),
             (std::vector<std::uint32_t>{kGetCorrectionsFunctionId,
@@ -205,23 +165,24 @@ TEST(SessionOrdering, AWaitingCallerDoesNotHoldBackTheNextSend) {
 
 TEST(SessionOrdering, ConcurrentSubmissionsEachGetTheirOwnReply) {
   // Two outstanding reads at once must both work: matching replies by
-  // request_id, not by arrival order, is what makes that safe.
+  // request_id, not by arrival order, is what makes that safe. Both dispatch
+  // well before either's reply lands (a 120ms decode vs. an immediate
+  // `+0`), so both are genuinely in flight together.
   recording_server server;
-  auto s = connect(server);
+  auto sessions = make_udp_sessions(
+      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
+      /*timeout_ms=*/5000);
+  std::unordered_map<std::uint64_t, session *> router{
+      {0, sessions[0].second.get()}};
 
-  const auto first = make_read_frame(11);
-  const auto second = make_read_frame(22);
-  const std::uint32_t a = s->submit({first.data(), first.size()});
-  const std::uint32_t b = s->submit({second.data(), second.size()});
-  EXPECT_EQ(a, 11u);
-  EXPECT_EQ(b, 22u);
+  auto sched = parse("0 get_corrections return_size=1\n"
+                     "+0 get_corrections return_size=1\n",
+                     {0}, 1000);
+  auto result = run(plan(sched, router, {}, {}));
 
-  // Collected in the opposite order to make the point that a request id, not
-  // arrival order, is what says which reply belongs to whom.
-  std::vector<std::uint8_t> reply(1);
-  std::size_t reply_len = 0;
-  EXPECT_EQ(s->await(b, reply, reply_len), RpcStatus::OK);
-  EXPECT_EQ(s->await(a, reply, reply_len), RpcStatus::OK);
+  ASSERT_EQ(result.records.size(), 2u);
+  EXPECT_EQ(result.records[0].status, static_cast<std::int32_t>(RpcStatus::OK));
+  EXPECT_EQ(result.records[1].status, static_cast<std::int32_t>(RpcStatus::OK));
   EXPECT_EQ(server.arrivals().size(), 2u);
 }
 
@@ -254,7 +215,7 @@ TEST(SessionOrdering, AnUnblockingReadKeepsItsPlaceInTheSyndromeStream) {
   EXPECT_LT(next_round.call_ns - read.call_ns,
             static_cast<std::uint64_t>(kDecodeTime.count()) * 1'000'000 / 2)
       << "the timeline stopped to wait for the answer instead of moving on";
-  EXPECT_TRUE(read.read_completed); // filled in by the reader thread
+  EXPECT_TRUE(read.read_completed); // filled in by the session's own worker
   EXPECT_EQ(read.correction_count, 1u);
   EXPECT_GE(read.return_ns - read.call_ns,
             static_cast<std::uint64_t>(kDecodeTime.count()) * 1'000'000)
@@ -291,80 +252,48 @@ TEST(SessionOrdering, ParserAndPlanRejectAnUncollectableRead) {
 
 TEST(NullBackendAdvanced,
      FramesOfEverySizeAreDiscardedWithoutCrashingOrReplying) {
-  // 0 is the interesting end (a null pointer with no bytes to checksum) and
-  // the odd sizes either side of a power of two are the other: the checksum
-  // loop is per-byte, so a partial trailing word is where it would run off.
-  auto s = make_null_session();
-  for (std::size_t size : {0u, 1u, 3u, 7u, 63u, 65u, 4095u, 4097u, 8192u}) {
-    SCOPED_TRACE(size);
-    std::vector<std::uint8_t> buf(size);
-    for (std::size_t i = 0; i < size; ++i)
-      buf[i] = static_cast<std::uint8_t>(i * 37 + 1);
-    const frame f{size ? buf.data() : nullptr, size};
+  // 0 bits and the odd widths either side of a power of two are the edges
+  // that would show up first if the per-byte checksum loop, or the reply's
+  // bit-packing, ran off a partial trailing byte. Driven through
+  // get_corrections' return_size, since that is what actually varies the
+  // request/reply size null_session sees on a real run.
+  for (std::uint32_t bits : {0u, 1u, 3u, 7u, 63u, 65u, 4095u, 4097u, 8192u}) {
+    SCOPED_TRACE(bits);
+    auto s = make_null_session();
+    std::unordered_map<std::uint64_t, session *> router{{0, s.get()}};
+    auto sched =
+        parse("0 get_corrections return_size=" + std::to_string(bits) + "\n",
+             {0}, 1000);
+    run_result result;
+    EXPECT_NO_THROW(result = run(plan(sched, router, {}, {})));
 
-    EXPECT_NO_THROW(s->submit(f));
-
-    // Sentinel-filled, so a reply that is never written cannot be mistaken
-    // for one that was written with zeros.
-    std::vector<std::uint8_t> reply(16, 0xAB);
-    std::size_t reply_len = 999;
-    RpcStatus status = RpcStatus::BUSY;
-    EXPECT_NO_THROW(status = s->await(s->submit(f), reply, reply_len));
-    EXPECT_EQ(status, RpcStatus::OK);
-    EXPECT_EQ(reply_len, reply.size());
-    for (auto b : reply)
-      EXPECT_EQ(b, 0u) << "null zero-fills the reply it discards";
+    ASSERT_EQ(result.records.size(), 1u);
+    EXPECT_EQ(result.records[0].status, static_cast<std::int32_t>(RpcStatus::OK))
+        << "null always answers OK";
+    EXPECT_TRUE(result.records[0].read_completed);
+    EXPECT_EQ(result.records[0].correction_count, bits);
   }
-}
-
-TEST(NullBackendAdvanced, AwaitNeverWritesPastTheSuppliedReplySpan) {
-  // Canary bytes surround a small reply buffer inside one contiguous
-  // allocation; await must only ever touch the span it was given.
-  struct Canaried {
-    std::uint8_t before[32];
-    std::uint8_t reply[8];
-    std::uint8_t after[32];
-  } buf;
-  std::memset(buf.before, 0xCC, sizeof(buf.before));
-  std::memset(buf.reply, 0xAB, sizeof(buf.reply));
-  std::memset(buf.after, 0xCC, sizeof(buf.after));
-
-  auto s = make_null_session();
-  std::vector<std::uint8_t> req(16, 0x11);
-  frame f{req.data(), req.size()};
-  std::span<std::uint8_t> reply_span(buf.reply, sizeof(buf.reply));
-  std::size_t reply_len = 999;
-  RpcStatus status = s->await(s->submit(f), reply_span, reply_len);
-
-  EXPECT_EQ(status, RpcStatus::OK);
-  EXPECT_EQ(reply_len, sizeof(buf.reply)); // the whole zero-filled span.
-  for (auto b : buf.reply)
-    EXPECT_EQ(b, 0u); // reply itself is zero-filled by null_session
-  for (auto b : buf.before)
-    EXPECT_EQ(b, 0xCC) << "await wrote before the reply span";
-  for (auto b : buf.after)
-    EXPECT_EQ(b, 0xCC) << "await wrote past the reply span";
 }
 
 TEST(NullBackendAdvanced, MaxFrameBytesIsUnboundedAndStaysThatWayUnderLoad) {
-  // 0 = unbounded, per session.h's comment. Interleaving hundreds of
-  // submit calls, some never awaited, with varying frame contents must not
-  // disturb it: nothing mutable is shared between calls except the internal
-  // checksum accumulator.
+  // 0 = unbounded, per session.h's comment. A long run of varying-width
+  // enqueues must not disturb it: nothing mutable is shared between
+  // requests except the internal checksum accumulator.
   auto s = make_null_session();
   EXPECT_EQ(s->max_frame_bytes, 0u);
+  std::unordered_map<std::uint64_t, session *> router{{0, s.get()}};
+  std::string text;
   for (int i = 0; i < 500; ++i) {
-    std::vector<std::uint8_t> buf(static_cast<std::size_t>(1 + (i % 37)),
-                                  static_cast<std::uint8_t>(i));
-    frame f{buf.data(), buf.size()};
-    if (i % 2 == 0) {
-      s->submit(f);
-    } else {
-      std::vector<std::uint8_t> reply(4);
-      std::size_t reply_len = 0;
-      EXPECT_EQ(s->await(s->submit(f), reply, reply_len), RpcStatus::OK);
-    }
+    const auto width = static_cast<std::size_t>(1 + (i % 37));
+    text += std::to_string(i) + " enqueue source=0b" +
+            std::string(width, '1') + "\n";
   }
+  auto sched = parse(text, {0}, 1000);
+  auto result = run(plan(sched, router, {}, {}));
+
+  ASSERT_EQ(result.records.size(), 500u);
+  for (const auto &r : result.records)
+    EXPECT_EQ(r.status, static_cast<std::int32_t>(stream_terminate::OK));
   EXPECT_EQ(s->max_frame_bytes, 0u);
 }
 
@@ -376,32 +305,6 @@ TEST(NullBackendAdvanced, MaxFrameBytesIsUnboundedAndStaysThatWayUnderLoad) {
 // plan()'s oversized-enqueue rejection trusting that number.
 
 namespace {
-
-/// Hand-builds a raw [RPCHeader][ResetRequestPayload] frame -- RpcSlot.h's
-/// parse_reset layout -- so tests can drive udp_session::submit()/await()
-/// directly, without plan()/run(), for precise control over call count and
-/// wall-clock timing.
-std::vector<std::uint8_t> make_reset_frame(std::uint64_t decoder_id,
-                                           std::uint32_t request_id) {
-  using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
-  using cudaq::qec::decoding::rpc::ResetRequestPayload;
-  using cudaq::realtime::RPCHeader;
-
-  std::vector<std::uint8_t> buf(sizeof(RPCHeader) +
-                                sizeof(ResetRequestPayload));
-  RPCHeader hdr{};
-  hdr.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
-  hdr.function_id = kResetDecoderFunctionId;
-  hdr.arg_len = sizeof(ResetRequestPayload);
-  hdr.request_id = request_id;
-  hdr.ptp_timestamp = 0;
-  std::memcpy(buf.data(), &hdr, sizeof(hdr));
-
-  ResetRequestPayload payload{};
-  payload.decoder_id = static_cast<std::int64_t>(decoder_id);
-  std::memcpy(buf.data() + sizeof(hdr), &payload, sizeof(payload));
-  return buf;
-}
 
 /// Binds and immediately closes a loopback UDP socket to obtain a port
 /// number that is (at the moment of the check) genuinely unbound -- more
@@ -430,26 +333,25 @@ TEST(UdpBackendAdvanced,
       std::unordered_map<std::uint64_t, std::string>{{0, endpoint}},
       kTimeoutMs);
   ASSERT_EQ(sessions.size(), 1u);
-  auto &sess = sessions[0].second;
+  std::unordered_map<std::uint64_t, session *> router{
+      {0, sessions[0].second.get()}};
 
-  auto req = make_reset_frame(0, /*request_id=*/1);
-  frame f{req.data(), req.size()};
-  std::vector<std::uint8_t> reply(64);
-  std::size_t reply_len = 0;
-
+  auto sched = parse("0 reset\n", {0}, 1000);
   auto t0 = std::chrono::steady_clock::now();
-  RpcStatus status = sess->await(sess->submit(f), reply, reply_len);
-  auto elapsed = std::chrono::steady_clock::now() - t0;
-  auto elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+  auto result = run(plan(sched, router, {}, {}));
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
 
-  // session_udp.cpp: a socket that has stayed silent for longer than the
+  // session.cpp: a socket that has stayed silent for longer than the
   // timeout is synthesized as RpcStatus::INTERNAL_ERROR -- there is no
   // dedicated "local timeout" status. Must NOT be OK, and must return in
-  // bounded time, not hang.
-  EXPECT_NE(status, RpcStatus::OK);
-  EXPECT_EQ(status, RpcStatus::INTERNAL_ERROR);
-  EXPECT_LT(elapsed_ms, 2 * static_cast<long long>(kTimeoutMs));
+  // bounded time (well under the 1s default drain, so it is genuinely the
+  // per-request sweep that resolved this, not stop()'s fallback), not hang.
+  ASSERT_EQ(result.records.size(), 1u);
+  EXPECT_EQ(result.records[0].status,
+            static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR));
+  EXPECT_LT(elapsed_ms, static_cast<long long>(kTimeoutMs) + 500);
 }
 
 TEST(UdpBackendAdvanced,
@@ -460,51 +362,57 @@ TEST(UdpBackendAdvanced,
       std::unordered_map<std::uint64_t, std::string>{{0, endpoint}},
       kTimeoutMs);
   ASSERT_EQ(sessions.size(), 1u);
-  auto &sess = sessions[0].second;
-
-  auto first = make_reset_frame(0, 1);
-  frame f1{first.data(), first.size()};
-  std::vector<std::uint8_t> reply(64);
-  std::size_t reply_len = 0;
-  ASSERT_EQ(sess->await(sess->submit(f1), reply, reply_len),
-            RpcStatus::INTERNAL_ERROR);
+  std::unordered_map<std::uint64_t, session *> router{
+      {0, sessions[0].second.get()}};
 
   const auto port = endpoint.substr(endpoint.rfind(':') + 1);
-  int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = htons(static_cast<std::uint16_t>(std::stoi(port)));
-  ASSERT_EQ(::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
-
-  std::thread server([fd] {
+  // Binds the real listener well after the first reset has already timed
+  // out against the closed port, so the one receiver thread the session
+  // starts for this whole run has to shake off that transient error and
+  // still answer the second reset -- not get restarted in between.
+  std::thread late_server([port] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(static_cast<std::uint16_t>(std::stoi(port)));
+    if (::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+      ::close(fd);
+      return;
+    }
     std::vector<std::uint8_t> buf(256);
     sockaddr_in from{};
     socklen_t from_len = sizeof(from);
     const ssize_t n =
         ::recvfrom(fd, buf.data(), buf.size(), 0,
                    reinterpret_cast<sockaddr *>(&from), &from_len);
-    if (n < static_cast<ssize_t>(sizeof(RPCHeader)))
-      return;
-    RPCHeader hdr{};
-    std::memcpy(&hdr, buf.data(), sizeof(hdr));
-    RPCResponse resp{};
-    resp.magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
-    resp.status = 0;
-    resp.result_len = 0;
-    resp.request_id = hdr.request_id;
-    ::sendto(fd, &resp, sizeof(resp), 0, reinterpret_cast<sockaddr *>(&from),
-             from_len);
+    if (n >= static_cast<ssize_t>(sizeof(RPCHeader))) {
+      RPCHeader hdr{};
+      std::memcpy(&hdr, buf.data(), sizeof(hdr));
+      RPCResponse resp{};
+      resp.magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
+      resp.status = 0;
+      resp.result_len = 0;
+      resp.request_id = hdr.request_id;
+      ::sendto(fd, &resp, sizeof(resp), 0, reinterpret_cast<sockaddr *>(&from),
+               from_len);
+    }
+    ::close(fd);
   });
 
-  auto second = make_reset_frame(0, 2);
-  frame f2{second.data(), second.size()};
-  const auto request_id = sess->submit(f2);
-  server.join();
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  ::close(fd);
-  const auto status = sess->await(request_id, reply, reply_len);
-  EXPECT_EQ(status, RpcStatus::OK);
+  // event 0 times out (~150ms) against the closed port; event 1, 500ms
+  // later, dispatches well after late_server has bound and is listening.
+  auto sched = parse("0 reset\n"
+                     "500 reset\n",
+                     {0}, 1'000'000);
+  auto result = run(plan(sched, router, {}, {}));
+  late_server.join();
+
+  ASSERT_EQ(result.records.size(), 2u);
+  EXPECT_EQ(result.records[0].status,
+            static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR));
+  EXPECT_EQ(result.records[1].status, static_cast<std::int32_t>(RpcStatus::OK));
 }
 
 TEST(UdpBackendAdvanced,
@@ -554,5 +462,5 @@ TEST(UdpBackendAdvanced, SubmitRejectsAFrameShorterThanAnRPCHeader) {
 
   std::vector<std::uint8_t> short_frame(sizeof(RPCHeader) - 1, 0);
   frame f{short_frame.data(), short_frame.size()};
-  EXPECT_THROW(sess->submit(f), std::invalid_argument);
+  EXPECT_THROW(sess->send(f, {}), std::invalid_argument);
 }

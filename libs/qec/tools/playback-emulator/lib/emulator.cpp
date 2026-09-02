@@ -16,13 +16,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstring>
 #include <ctime>
-#include <deque>
-#include <functional>
 #include <mutex>
-#include <optional>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
@@ -61,10 +57,9 @@ void sleep_until(std::uint64_t target_ns) {
 constexpr std::uint64_t kSpinSlackNs = 200'000;
 
 /// The floor between rounds of an unpaced (every==0) stream waiting on
-/// `until=`. Without this, nothing bounds how far ahead of a slow collector
-/// the send loop can get -- a bare yield is only a scheduling hint, not real
-/// backpressure, and an unthrottled sender can pile up a backlog the reader
-/// then takes far longer to drain than the run itself took to build up.
+/// `until=`. Without this, nothing bounds how far ahead of a slow session
+/// worker the send loop can get -- a bare yield is only a scheduling hint,
+/// not real backpressure.
 constexpr std::uint64_t kUnpacedStreamFloorNs = 50'000;
 
 /// Saturating add. A deadline far enough out to overflow the clock is
@@ -361,200 +356,78 @@ plan(const schedule &sched_in,
     }
   }
 
+  // -- Upper bound on how many requests run() can issue, so it can size its
+  // per-request logs once and append to them without a lock. reset/
+  // get_corrections issue exactly one; a pre-built stream issues exactly as
+  // many as it was given; anything else is bounded by stream_max_rounds
+  // (the parser always sets this, defaulting an unbounded `until=` stream to
+  // kDefaultUntilMaxRounds).
+  for (std::size_t i = 0; i < sched.events.size(); ++i) {
+    const auto &e = sched.events[i];
+    switch (e.op) {
+    case operation::reset:
+    case operation::get_corrections:
+      impl->max_requests += 1;
+      break;
+    case operation::stream:
+    case operation::enqueue_data:
+      impl->max_requests += impl->event_plans[i].empty()
+                                ? e.stream_max_rounds
+                                : static_cast<std::uint32_t>(
+                                      impl->event_plans[i].size());
+      break;
+    }
+  }
+
   return impl;
 }
 
-namespace {
-
-/// How long a reader parks in wait_next_completion between checks of its own
-/// close()/deadline state -- the heartbeat that lets close() notice progress
-/// without a dedicated wake channel.
-constexpr auto kCompletionPollMs = std::chrono::milliseconds(20);
-
-/// One collected reply: its status and when it landed (ns since t0).
-struct collected {
-  RpcStatus status = RpcStatus::OK;
-  std::uint64_t return_ns = 0;
-};
-
-/// Collects every RPC's reply, one thread per session.
-/// Completion is arrival order: `wait_next_completion`
-/// reports whichever request finished first.
-class reader_thread {
+/// Trivial test-and-set spinlock. Guards `correction_log` and `warnings`,
+/// which more than one session's worker may append to concurrently for a
+/// multi-decoder schedule; hold times are sub-microsecond, so this costs
+/// nothing in the common (uncontended, single-decoder) case.
+class spinlock {
 public:
-  struct pending {
-    std::uint32_t request_id = 0;
-    std::uint32_t event_index = 0;
-    std::uint32_t log_index =
-        0; // into request_return_ns_log/request_status_log
-  };
-
-  /// One event's requests, as they land. `term` is the stream/enqueue_data
-  /// termination reason (nullopt for reset/get_corrections, which read
-  /// `last_status` directly instead).
-  struct progress {
-    std::uint32_t issued = 0, collected = 0;
-    bool issuing_finished = false;
-    std::optional<std::int32_t> term;
-    std::uint64_t last_return_ns = 0;
-    RpcStatus last_status = RpcStatus::OK;
-    bool any_error = false;
-  };
-
-  using collect_fn = std::function<collected(session &, const pending &)>;
-  using complete_fn =
-      std::function<void(std::uint32_t event_index, const progress &)>;
-
-  /// `collect` awaits and records one reply; `complete` runs once an event's
-  /// requests are all collected, and owns writing that event's record.
-  reader_thread(session &s, collect_fn collect, complete_fn complete,
-                std::chrono::nanoseconds drain_timeout)
-      : session_(s), collect_(std::move(collect)),
-        complete_(std::move(complete)), drain_timeout_(drain_timeout),
-        thread_([this] { loop(); }) {}
-
-  ~reader_thread() { close(); }
-
-  /// Registers a reply expected under `p.request_id`. Must be called before
-  /// the frame carrying that id is submitted, or a fast reply can land
-  /// before anyone is watching for it.
-  void expect(pending p) {
-    std::lock_guard<std::mutex> lock(mu_);
-    outstanding_[p.request_id] = p;
-    ++progress_[p.event_index].issued;
+  void lock() {
+    while (flag_.test_and_set(std::memory_order_acquire))
+      std::this_thread::yield();
   }
-
-  /// No more requests are coming for this event.
-  void finish_issuing(std::uint32_t event_index,
-                      std::optional<std::int32_t> term = std::nullopt) {
-    std::optional<progress> done;
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      auto &prog = progress_[event_index];
-      prog.issuing_finished = true;
-      prog.term = term;
-      if (prog.collected == prog.issued)
-        done = extract_locked(event_index, prog);
-    }
-    if (done)
-      complete_(event_index, *done);
-  }
-
-  /// Drain what is outstanding, up to drain_timeout, and stop. Called before
-  /// run() returns, so every record a reader owns is settled by the time
-  /// anyone reads it.
-  void close() {
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      if (closed_)
-        return;
-      closed_ = true;
-    }
-    if (thread_.joinable())
-      thread_.join();
-  }
+  void unlock() { flag_.clear(std::memory_order_release); }
 
 private:
-  // Caller holds mu_; erases the event's progress and hands the caller its
-  // final value.
-  progress extract_locked(std::uint32_t event_index, progress &prog) {
-    progress out = prog;
-    progress_.erase(event_index);
-    return out;
-  }
-
-  void loop() {
-    std::optional<std::chrono::steady_clock::time_point> drain_deadline;
-    for (;;) {
-      std::uint32_t rid;
-      if (session_.wait_next_completion(rid, kCompletionPollMs)) {
-        pending p;
-        bool found;
-        {
-          std::lock_guard<std::mutex> lock(mu_);
-          auto it = outstanding_.find(rid);
-          found = it != outstanding_.end();
-          if (found) {
-            p = it->second;
-            outstanding_.erase(it);
-          }
-        }
-        if (!found)
-          continue; // not one of ours, or already swept by close()
-        const collected result = collect_(session_, p);
-        std::optional<progress> done;
-        {
-          std::lock_guard<std::mutex> lock(mu_);
-          auto &prog = progress_[p.event_index];
-          ++prog.collected;
-          prog.last_return_ns = std::max(prog.last_return_ns, result.return_ns);
-          prog.last_status = result.status;
-          prog.any_error |= result.status != RpcStatus::OK &&
-                            result.status != RpcStatus::NOT_READY;
-          if (prog.issuing_finished && prog.collected == prog.issued)
-            done = extract_locked(p.event_index, prog);
-        }
-        if (done)
-          complete_(p.event_index, *done);
-        continue;
-      }
-
-      std::unique_lock<std::mutex> lock(mu_);
-      if (!closed_)
-        continue;
-      if (outstanding_.empty() && progress_.empty())
-        return;
-      if (!drain_deadline)
-        drain_deadline = std::chrono::steady_clock::now() + drain_timeout_;
-      if (std::chrono::steady_clock::now() < *drain_deadline)
-        continue;
-      std::vector<std::pair<std::uint32_t, progress>> leftover(
-          progress_.begin(), progress_.end());
-      progress_.clear();
-      outstanding_.clear();
-      lock.unlock();
-      for (auto &[event_index, prog] : leftover)
-        complete_(event_index, prog);
-      return;
-    }
-  }
-
-  session &session_;
-  collect_fn collect_;
-  complete_fn complete_;
-  std::chrono::nanoseconds drain_timeout_;
-  std::mutex mu_;
-  std::unordered_map<std::uint32_t, pending> outstanding_; // by request_id
-  std::unordered_map<std::uint32_t, progress> progress_;   // by event_index
-  bool closed_ = false;
-  std::thread thread_; // last, so loop() only ever sees initialized members
+  std::atomic_flag flag_ = ATOMIC_FLAG_INIT;
 };
 
-/// Everything the timing thread and the reader threads share, in one place
-/// Built on run()'s stack.
-struct run_state {
-  // One global request_id space
-  std::atomic<std::uint32_t> next_request_id{1};
-  std::atomic<bool> aborted{false};
-  /// Guards the shared syndrome/correction logs and the per-request timing
-  /// logs, which the timing thread and any reader thread both append to.
-  std::mutex logs_mu;
+/// Per-event bookkeeping for the reply/event_done callbacks: touched only by
+/// the one session worker that owns the event's decoder_id, so it needs no
+/// synchronization of its own.
+struct collector_entry {
+  std::uint32_t collected = 0;
+  std::uint32_t expected = 0; // 0 until on_event_done sets it
+  bool has_term = false;
+  std::int32_t term = 0;
+  std::uint64_t last_return_ns = 0;
+  RpcStatus last_status = RpcStatus::OK;
+  bool any_error = false;
+  bool completed = false;
+};
 
-  /// One flag per signal name in the schedule, raised by a reader thread
+/// Everything the timing thread and the session workers share, built on
+/// run()'s stack.
+struct run_state {
+  std::uint32_t next_request_id = 1; // timing thread only
+  std::uint32_t n_requests = 0;      // timing thread only; indexes the logs
+  std::atomic<bool> aborted{false};
+
+  spinlock logs_lock; // guards correction_log and warnings only
+
+  /// One flag per signal name in the schedule, raised by a session worker
   /// once a `signal=` event's reply/acks are all collected, and read at a
   /// stream's round boundaries (`until=`) or before an `after=` dispatch.
-  /// Plain atomics suffice for `until=` -- nothing there ever needs to sleep
-  /// until a raise, because a waiting stream always has rounds to send
-  /// meanwhile; `after=` does sleep, in a short bounded poll (see
-  /// dispatch_event), rather than adding a wake channel for a rare case.
   std::vector<std::atomic<bool>> signals;
 
-  /// One reader per decoder present in the schedule.
-  std::unordered_map<std::uint64_t, std::unique_ptr<reader_thread>> readers;
-
-  reader_thread &reader(std::uint64_t decoder_id) {
-    return *readers.at(decoder_id);
-  }
+  /// One entry per event, indexed the same way as `run_result::records`.
+  std::vector<collector_entry> collectors;
 
   bool signal_raised(std::uint32_t id) const {
     return signals[id].load(std::memory_order_acquire);
@@ -577,7 +450,7 @@ struct run_ctx {
 
 /// Appends one line to `result.warnings`.
 void warn(const run_ctx &c, const std::string &message) {
-  std::lock_guard<std::mutex> lock(c.st.logs_mu);
+  std::lock_guard<spinlock> lock(c.st.logs_lock);
   c.result.warnings.push_back(message);
 }
 
@@ -613,24 +486,18 @@ struct issued_request {
   std::uint32_t log_index;
 };
 
-/// Take the next request_id, open its per-request log slots, and (for a
-/// stream round) record the bits it is about to send. Every RPC the run puts
-/// on the wire goes through here, so `request_id_log` (and the parallel
-/// dispatch/return/status logs) end up holding all of them in issue order,
-/// and each record's slice of it is what that event sent.
+/// Take the next request_id and open its per-request log slots (pre-sized to
+/// `run_plan::max_requests`, so this is a plain indexed write -- the timing
+/// thread is their only writer). For a stream round, also records the bits
+/// it is about to send. Every RPC the run puts on the wire goes through here.
 issued_request begin_request(const run_ctx &c, record &rec,
                              const std::uint8_t *bits = nullptr,
                              std::size_t n_bits = 0, bool first_round = false) {
-  const std::uint32_t rid =
-      c.st.next_request_id.fetch_add(1, std::memory_order_relaxed);
-  std::lock_guard<std::mutex> lock(c.st.logs_mu);
-  const auto idx = static_cast<std::uint32_t>(c.result.request_id_log.size());
+  const std::uint32_t rid = c.st.next_request_id++;
+  const std::uint32_t idx = c.st.n_requests++;
   if (rec.request_id_count == 0)
     rec.request_id_offset = idx;
-  c.result.request_id_log.push_back(rid);
-  c.result.request_dispatch_ns_log.push_back(0);
-  c.result.request_return_ns_log.push_back(0);
-  c.result.request_status_log.push_back(kNoStatus);
+  c.result.request_id_log[idx] = rid;
   ++rec.request_id_count;
   if (bits) {
     if (first_round)
@@ -646,6 +513,95 @@ issued_request begin_request(const run_ctx &c, record &rec,
 /// Timing-thread-only element write, right after the frame is on the wire
 void stamp_dispatch(const run_ctx &c, std::uint32_t log_index) {
   c.result.request_dispatch_ns_log[log_index] = now_ns() - c.t0;
+}
+
+/// Settles one event's record once its reply count has reached what
+/// on_event_done said to expect. Idempotent, though by construction each
+/// caller only reaches this once, right when collected == expected.
+void settle(const run_ctx &c, std::uint32_t event_index, collector_entry &e) {
+  if (e.completed)
+    return;
+  e.completed = true;
+  record &rec = c.rec(event_index);
+  rec.return_ns = e.collected ? e.last_return_ns : now_ns() - c.t0;
+  rec.status = e.has_term
+                   ? (e.any_error
+                          ? static_cast<std::int32_t>(stream_terminate::ERROR)
+                          : e.term)
+                   : static_cast<std::int32_t>(e.last_status);
+  const auto signal_id = c.ev(event_index).signal_id;
+  if (signal_id != kNoSignal)
+    c.st.raise_signal(signal_id);
+}
+
+/// Declared in session.h; called directly by whichever thread the owning
+/// session completes replies on. Stamps the per-request log, folds the
+/// reply into the event's record (unpacking a get_corrections payload), and
+/// settles the event once every reply it is owed has arrived.
+void handle_reply(run_ctx &c, tag t, RpcStatus status,
+                  const std::uint8_t *reply, std::size_t reply_len,
+                  std::uint64_t return_ns) {
+  const std::uint32_t i = t.event;
+  const event &e = c.ev(i);
+  RpcStatus final_status = status;
+
+  if (e.op == operation::get_corrections) {
+    const std::uint32_t return_size = return_size_for(e);
+    final_status = reject_truncated_reply(status, reply_len, return_size);
+    if (final_status == RpcStatus::OK) {
+      record &rec = c.rec(i);
+      rec.read_completed = true;
+      rec.correction_count = return_size;
+      {
+        std::lock_guard<spinlock> lock(c.st.logs_lock);
+        rec.correction_offset =
+            static_cast<std::uint32_t>(c.result.correction_log.size());
+        append_unpacked_bits(c.result.correction_log, reply, return_size);
+      }
+      rec.correction_mismatch =
+          mismatches_expected(c.plan.sched, e,
+                              c.result.correction_log.data() +
+                                  rec.correction_offset,
+                              return_size);
+    }
+  }
+
+  c.result.request_return_ns_log[t.log_index] = return_ns - c.t0;
+  c.result.request_status_log[t.log_index] =
+      static_cast<std::int32_t>(final_status);
+
+  switch (e.op) {
+  case operation::reset:
+  case operation::get_corrections:
+    abort_on_hard_error(c, final_status, i);
+    break;
+  case operation::stream:
+  case operation::enqueue_data:
+    if (c.plan.params.collect_enqueue_acks)
+      abort_on_hard_error(c, final_status, i);
+    break;
+  }
+
+  collector_entry &col = c.st.collectors[i];
+  col.last_return_ns = std::max(col.last_return_ns, return_ns - c.t0);
+  col.last_status = final_status;
+  col.any_error |= final_status != RpcStatus::OK &&
+                   final_status != RpcStatus::NOT_READY;
+  ++col.collected;
+  if (col.expected != 0 && col.collected == col.expected)
+    settle(c, i, col);
+}
+
+/// Declared in session.h; called directly by the owning session. The event
+/// named by `event` has issued its last request.
+void handle_event_done(run_ctx &c, std::uint32_t event, std::uint32_t issued,
+                       std::int32_t term, bool has_term) {
+  collector_entry &col = c.st.collectors[event];
+  col.expected = issued;
+  col.has_term = has_term;
+  col.term = term;
+  if (col.collected == col.expected)
+    settle(c, event, col);
 }
 
 /// One `stream` or `enqueue_data` event: draw a round, send it, decide
@@ -725,16 +681,14 @@ void run_stream(const run_ctx &c, std::uint32_t i,
     const std::size_t n_bits = prebuilt ? ep[rounds].bits_count : drawn.size();
     const auto [rid, log_index] =
         begin_request(c, rec, bits, n_bits, rounds == 0);
-    reader_thread::pending p{rid, i, log_index};
+    const tag t{i, log_index};
     if (prebuilt) {
       const round_plan &rp = ep[rounds];
       set_request_id(plan.frame_arena.data() + rp.frame_offset, rid);
-      st.reader(e.decoder_id).expect(p);
-      s.submit(frame_of(plan, rp));
+      s.send(frame_of(plan, rp), t);
     } else {
       set_request_id(built.data(), rid);
-      st.reader(e.decoder_id).expect(p);
-      s.submit({built.data(), built.size()});
+      s.send({built.data(), built.size()}, t);
     }
     stamp_dispatch(c, log_index);
     ++rounds;
@@ -746,7 +700,7 @@ void run_stream(const run_ctx &c, std::uint32_t i,
       break;
 
     // Unpaced (every==0): this is the loop's only yield point, and the only
-    // thing capping how far ahead of the reader it can get. Paced (every>0)
+    // thing capping how far ahead of the worker it can get. Paced (every>0)
     // doesn't need this -- wait_until() above already spaced the rounds out.
     if (e.stream_every_ticks == 0)
       std::this_thread::sleep_for(
@@ -754,85 +708,13 @@ void run_stream(const run_ctx &c, std::uint32_t i,
   }
 
   rec.rounds_streamed = rounds;
-  st.reader(e.decoder_id).finish_issuing(i, static_cast<std::int32_t>(term));
+  s.event_done(i, rounds, static_cast<std::int32_t>(term), /*has_term=*/true);
 }
-
-/// Stamps one request's timing-log slot with its outcome. Reads the clock
-/// before taking the lock, so lock contention never inflates the measurement.
-collected stamp_request_result(const run_ctx &c, std::uint32_t log_index,
-                               RpcStatus status) {
-  const collected result{status, now_ns() - c.t0};
-  std::lock_guard<std::mutex> lock(c.st.logs_mu);
-  c.result.request_return_ns_log[log_index] = result.return_ns;
-  c.result.request_status_log[log_index] = static_cast<std::int32_t>(status);
-  return result;
-}
-
-/// Collect one submitted request's bare acknowledgement (reset, or one
-/// stream/enqueue_data round). `abort_on_bad_status` gates whether a
-/// non-OK/NOT_READY status aborts the run.
-collected collect_ack(const run_ctx &c, const reader_thread::pending &p,
-                      session &s, bool abort_on_bad_status) {
-  std::size_t reply_len = 0;
-  const auto status = s.await(p.request_id, {}, reply_len);
-  if (abort_on_bad_status)
-    abort_on_hard_error(c, status, p.event_index);
-  return stamp_request_result(c, p.log_index, status);
-}
-
-/// Collect one submitted read's answer into its record and the run's
-/// correction log. get_corrections is always exactly one request per record,
-/// so (unlike collect_ack) it is safe to write the record here directly.
-collected collect_corrections(const run_ctx &c, const reader_thread::pending &p,
-                              session &s) {
-  const std::uint32_t i = p.event_index;
-  const event &e = c.ev(i);
-  record &rec = c.rec(i);
-  const std::uint32_t return_size = return_size_for(e);
-  std::vector<std::uint8_t> reply(wire::bit_packed_bytes(return_size));
-  std::size_t reply_len = 0;
-  const auto raw_status = s.await(p.request_id, reply, reply_len);
-  const RpcStatus status =
-      reject_truncated_reply(raw_status, reply_len, return_size);
-  if (status != RpcStatus::OK) {
-    abort_on_hard_error(c, status, i);
-    return stamp_request_result(c, p.log_index, status);
-  }
-  rec.read_completed = true;
-  rec.correction_count = return_size;
-  {
-    std::lock_guard<std::mutex> lock(c.st.logs_mu);
-    rec.correction_offset =
-        static_cast<std::uint32_t>(c.result.correction_log.size());
-    append_unpacked_bits(c.result.correction_log, reply.data(), return_size);
-  }
-  rec.correction_mismatch = mismatches_expected(
-      c.plan.sched, e, c.result.correction_log.data() + rec.correction_offset,
-      return_size);
-  return stamp_request_result(c, p.log_index, status);
-}
-
-/// Collect one submitted request's answer, by op.
-collected collect_reply(const run_ctx &c, const reader_thread::pending &p,
-                        session &s) {
-  switch (c.ev(p.event_index).op) {
-  case operation::get_corrections:
-    return collect_corrections(c, p, s);
-  case operation::reset:
-    return collect_ack(c, p, s, /*abort_on_bad_status=*/true);
-  case operation::stream:
-  case operation::enqueue_data:
-    return collect_ack(c, p, s, c.plan.params.collect_enqueue_acks);
-  }
-  return collect_ack(c, p, s, true); // unreachable
-}
-
-} // namespace
 
 /// One event, dispatched on run()'s single timing thread. `prev_return_ns`
 /// is when the previous event finished being dispatched here. Every op
-/// submits and returns without waiting -- a reader thread collects the
-/// reply/acks and owns writing `rec.return_ns`/`rec.status`.
+/// sends and returns without waiting -- the session's own worker processes
+/// the reply/acks and owns writing `rec.return_ns`/`rec.status`.
 void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
                     std::uint64_t &prev_return_ns) {
   auto &plan = c.plan;
@@ -840,7 +722,6 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
   const auto &e = c.ev(i);
   const auto &ep = plan.event_plans[i];
   auto &rec = c.rec(i);
-  const auto decoder_id = e.decoder_id;
   const std::uint64_t t0 = c.t0;
 
   const std::uint64_t deadline_ns =
@@ -850,10 +731,17 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
 
   wait_until(add_sat(t0, deadline_ns));
   if (e.after_signal_id != kNoSignal) {
+    // Busy-spin for the first 2ms (the common case: the signal is already
+    // raised or arrives almost immediately), then fall back to yielding
+    // between checks -- never sleep_for, which would blow well past a
+    // signal that arrives right after a check.
+    const auto spin_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
     while (!st.signal_raised(e.after_signal_id)) {
       if (st.aborted.load(std::memory_order_relaxed))
         return; // aborted while waiting on `after=`; never dispatched
-      std::this_thread::sleep_for(std::chrono::nanoseconds(kSpinSlackNs));
+      if (std::chrono::steady_clock::now() >= spin_deadline)
+        std::this_thread::yield();
     }
   }
   rec.call_ns = now_ns() - t0;
@@ -865,10 +753,9 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
     const auto &rp = ep[0];
     const auto [rid, log_index] = begin_request(c, rec);
     set_request_id(plan.frame_arena.data() + rp.frame_offset, rid);
-    st.reader(decoder_id).expect({rid, i, log_index});
-    s.submit(frame_of(plan, rp));
+    s.send(frame_of(plan, rp), {i, log_index});
     stamp_dispatch(c, log_index);
-    st.reader(decoder_id).finish_issuing(i);
+    s.event_done(i, /*issued=*/1, /*term=*/0, /*has_term=*/false);
     break;
   }
   case operation::stream:
@@ -898,50 +785,35 @@ run_result run(std::shared_ptr<run_plan> p) {
   }
   result.syndrome_log.reserve(sched.syndrome_arena.size());
   result.correction_log.reserve(sched.expected_arena.size());
+  // Sized once, before t0, to plan()'s upper bound: the timing thread then
+  // appends request_id/dispatch_ns by index, and each session's worker
+  // writes its own request's return_ns/status by index, with no lock and no
+  // reallocation racing either side.
+  result.request_id_log.resize(plan.max_requests);
+  result.request_dispatch_ns_log.resize(plan.max_requests, 0);
+  result.request_return_ns_log.resize(plan.max_requests, 0);
+  result.request_status_log.resize(plan.max_requests, kNoStatus);
 
   const std::uint64_t t0 = now_ns() + plan.params.lead_in_ns;
-  wait_until(t0);
 
-  // Everything the timing thread and the readers share. Populated in full
-  // here.
   run_state st;
   st.signals = std::vector<std::atomic<bool>>(sched.signal_names.size());
+  st.collectors.resize(sched.events.size());
 
-  const run_ctx c{plan, result, st, t0};
-  const std::chrono::nanoseconds ack_drain_timeout(
-      plan.params.ack_drain_timeout_ns);
+  run_ctx c{plan, result, st, t0};
 
-  // One reader per decoder present in the schedule.
+  // One session per decoder present in the schedule; start every worker
+  // during the lead-in, so thread creation never eats into the timed run.
+  std::vector<std::uint64_t> decoder_ids;
   for (const auto &e : sched.events) {
-    if (st.readers.count(e.decoder_id))
+    if (std::find(decoder_ids.begin(), decoder_ids.end(), e.decoder_id) !=
+        decoder_ids.end())
       continue;
-    st.readers.emplace(
-        e.decoder_id,
-        std::make_unique<reader_thread>(
-            *plan.router.at(e.decoder_id),
-            [c](session &s, const reader_thread::pending &p) {
-              return collect_reply(c, p, s);
-            },
-            [c](std::uint32_t event_index,
-                const reader_thread::progress &prog) {
-              if (prog.collected < prog.issued)
-                warn(c, event_label(c, event_index) + ": " +
-                            std::to_string(prog.issued - prog.collected) +
-                            " request(s) never got a reply; giving up on them");
-              record &rec = c.rec(event_index);
-              rec.return_ns =
-                  prog.collected ? prog.last_return_ns : now_ns() - c.t0;
-              rec.status = prog.term
-                               ? (prog.any_error ? static_cast<std::int32_t>(
-                                                       stream_terminate::ERROR)
-                                                 : *prog.term)
-                               : static_cast<std::int32_t>(prog.last_status);
-              const auto signal_id = c.ev(event_index).signal_id;
-              if (signal_id != kNoSignal)
-                c.st.raise_signal(signal_id);
-            },
-            ack_drain_timeout));
+    decoder_ids.push_back(e.decoder_id);
+    plan.router.at(e.decoder_id)->start(c);
   }
+
+  wait_until(t0);
 
   // The whole dispatch model: one thread, schedule order.
   std::uint64_t prev_return_ns = 0;
@@ -951,10 +823,33 @@ run_result run(std::shared_ptr<run_plan> p) {
     dispatch_event(c, static_cast<std::uint32_t>(i),
                    *plan.router.at(sched.events[i].decoder_id), prev_return_ns);
 
-  // Dispatch is done, so no more reads can be issued; drain the ones still
-  // in flight before anybody looks at their records.
-  for (auto &[id, reader] : st.readers)
-    reader->close();
+  // Dispatch is done, so no more requests can be issued; stop every session
+  // (each drains what is still in flight through on_reply) before anybody
+  // looks at the records they own.
+  const std::chrono::nanoseconds ack_drain_timeout(
+      plan.params.ack_drain_timeout_ns);
+  for (auto decoder_id : decoder_ids)
+    plan.router.at(decoder_id)->stop(ack_drain_timeout);
+
+  // A dispatched event whose collector never settled -- only reachable if a
+  // session failed to deliver every reply/event_done it owed -- keeps its
+  // default record, same as an event the abort pre-empted before dispatch.
+  for (std::size_t i = 0; i < sched.events.size(); ++i) {
+    if (!result.records[i].dispatched)
+      continue;
+    const collector_entry &col = st.collectors[i];
+    if (col.completed)
+      continue;
+    if (col.collected < col.expected)
+      warn(c, event_label(c, static_cast<std::uint32_t>(i)) + ": " +
+                  std::to_string(col.expected - col.collected) +
+                  " request(s) never got a reply; giving up on them");
+  }
+
+  result.request_id_log.resize(st.n_requests);
+  result.request_dispatch_ns_log.resize(st.n_requests);
+  result.request_return_ns_log.resize(st.n_requests);
+  result.request_status_log.resize(st.n_requests);
 
   result.t0_ns = t0;
   result.tick_ns = sched.tick_ns;

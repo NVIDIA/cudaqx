@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <gtest/gtest.h>
 #include <numeric>
 #include <sstream>
@@ -498,25 +499,42 @@ TEST(Capabilities, AStreamedRoundTooBigForItsSessionFailsLoudlyAtRunTime) {
 
 namespace {
 
-/// A session whose first call blocks for `delay` before answering OK,
-/// simulating a slow dispatch that overruns the next event's deadline --
-/// everything else behaves like the null backend.
-struct SlowFirstResetSession : blocking_session {
+std::uint64_t now_ns() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ull +
+         static_cast<std::uint64_t>(ts.tv_nsec);
+}
+
+/// A session whose first call blocks the *caller* for `delay` before
+/// answering OK, simulating a dispatch so slow it overruns the next event's
+/// deadline -- a session's `send` is only ever supposed to publish and
+/// return, but nothing stops a misbehaving one from blocking anyway, and the
+/// timing thread must still record the truth when that happens.
+struct SlowFirstResetSession : session {
   explicit SlowFirstResetSession(std::chrono::milliseconds delay)
       : delay_(delay) {}
 
-  RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
-                      std::size_t &reply_len) override {
+  void start(run_ctx &collector) override { collector_ = &collector; }
+
+  void send(const frame &, tag t) override {
     if (!fired_once_) {
       fired_once_ = true;
       std::this_thread::sleep_for(delay_);
     }
-    reply_len = 0;
-    return RpcStatus::OK;
+    handle_reply(*collector_, t, RpcStatus::OK, nullptr, 0, now_ns());
   }
+
+  void event_done(std::uint32_t event, std::uint32_t issued,
+                  std::int32_t term, bool has_term) override {
+    handle_event_done(*collector_, event, issued, term, has_term);
+  }
+
+  void stop(std::chrono::nanoseconds) override {}
 
   std::chrono::milliseconds delay_;
   bool fired_once_ = false;
+  run_ctx *collector_ = nullptr;
 };
 
 run_result run_text(const std::string &text, std::uint64_t tick_ns, session &s,
@@ -529,12 +547,6 @@ run_result run_text(const std::string &text, std::uint64_t tick_ns, session &s,
 std::int64_t lateness_of(const record &r) {
   return static_cast<std::int64_t>(r.call_ns) -
          static_cast<std::int64_t>(r.deadline_ns);
-}
-
-/// True for the ops whose record is finished by a reader thread rather than
-/// the timing thread that dispatched them.
-bool is_collected_off_thread(operation op) {
-  return op == operation::reset || op == operation::get_corrections;
 }
 
 } // namespace
@@ -583,14 +595,10 @@ TEST(Timing, EveryEventFiresInOrderAtOrAfterItsOwnDeadlineWithoutDrifting) {
       EXPECT_GE(r.return_ns, r.call_ns) << "event " << i;
       if (i > 0) {
         EXPECT_GE(r.call_ns, result.records[i - 1].call_ns) << "event " << i;
-        // return_ns is only ordered across events that are both collected
-        // on the timing thread itself; `reset`/`get_corrections` always
-        // finish on a reader thread instead, so neither is ordered against
-        // a sibling event's return_ns.
-        if (!is_collected_off_thread(r.op) &&
-            !is_collected_off_thread(result.records[i - 1].op))
-          EXPECT_GE(r.return_ns, result.records[i - 1].return_ns)
-              << "event " << i;
+        // The null backend completes every reply synchronously, inline on
+        // the timing thread, so return_ns is ordered the same way call_ns is.
+        EXPECT_GE(r.return_ns, result.records[i - 1].return_ns)
+            << "event " << i;
       }
     }
     // No cumulative drift: the last event's lateness must not have ballooned
@@ -604,13 +612,13 @@ TEST(Timing, EveryEventFiresInOrderAtOrAfterItsOwnDeadlineWithoutDrifting) {
 }
 
 TEST(Timing, AnOverrunIsRecordedRatherThanAbsorbedOrRealigned) {
-  // The first reset's submit() blocks for 30ms against a schedule whose
+  // The first reset's send() blocks for 30ms against a schedule whose
   // second event is due at 5ms. Three things have to hold at once: the
   // second event's recorded deadline is still the schedule's 5ms (not
   // shifted to "the first event's dispatch + 5ms"), the overrun is visible
   // as lateness rather than being swallowed, and the second event fires as
-  // soon as the first event's dispatch finishes submitting instead of
-  // waiting out another tick.
+  // soon as the first event's send() returns instead of waiting out another
+  // tick.
   SlowFirstResetSession s(std::chrono::milliseconds(30));
   auto result = run_text("0 reset\n5 reset\n", 1'000'000, s);
 
@@ -620,26 +628,21 @@ TEST(Timing, AnOverrunIsRecordedRatherThanAbsorbedOrRealigned) {
 
   EXPECT_EQ(second.deadline_ns, 5'000'000u);
   // One serial timing thread, so event 1 cannot be dispatched until event
-  // 0's dispatch (blocked in submit(), here) finishes -- which is exactly
-  // what drags its call_ns past its own 5ms deadline. `reset` is always
-  // collected off the timing thread, so this is measured against
-  // first.call_ns rather than first.return_ns, which a reader thread stamps
-  // independently.
+  // 0's send() (blocked here) returns -- which is exactly what drags its
+  // call_ns past its own 5ms deadline.
   EXPECT_GE(second.call_ns, first.call_ns + 29'000'000u);
   EXPECT_GT(lateness_of(second), 20'000'000)
       << "expected event 0's ~30ms delay to show up as event 1's lateness";
   EXPECT_LT(second.call_ns - first.call_ns, 35'000'000u)
-      << "event 1 should fire as soon as event 0's dispatch finishes "
-         "submitting";
+      << "event 1 should fire as soon as event 0's send() returns";
 }
 
 TEST(Timing, ARelativeDeadlineResolvesAgainstThePreviousDispatchOrT0) {
-  // "+2" is 2 ticks after event 0's dispatch actually finished submitting on
-  // the timing thread, not after the tick its file position would imply,
-  // and not the instant its (independently, asynchronously stamped)
-  // return_ns lands. Unlike an absolute deadline placed at a guessed tick,
-  // it therefore tracks an overrun instead of being blown past the instant
-  // it is reached.
+  // "+2" is 2 ticks after event 0's send() actually returned on the timing
+  // thread, not after the tick its file position would imply, and not the
+  // instant its (independently, asynchronously stamped) return_ns lands.
+  // Unlike an absolute deadline placed at a guessed tick, it therefore
+  // tracks an overrun instead of being blown past the instant it is reached.
   SlowFirstResetSession s(std::chrono::milliseconds(30));
   auto result = run_text("0 reset\n+2 reset\n", 1'000'000, s);
   ASSERT_EQ(result.records.size(), 2u);
@@ -732,9 +735,9 @@ using cudaq::qec::decoding_server::slot::parse_get_corrections;
 const std::vector<std::uint64_t> kTwoDecoders = {0, 1};
 
 /// Counts enqueues and answers get_corrections OK, with the answer landing
-/// `delay` after it was asked for. The wait belongs in `await` rather than
-/// `send_sync`: `submit` runs on the timing thread, so sleeping there would
-/// stall the very stream whose overlap with the decode is under test.
+/// `delay` after it was asked for. The wait belongs in `before_reply` rather
+/// than `send_sync`: `send` runs on the timing thread, so sleeping there
+/// would stall the very stream whose overlap with the decode is under test.
 class DelayedCountingSession : public blocking_session {
 public:
   explicit DelayedCountingSession(std::chrono::milliseconds delay = {})
@@ -754,14 +757,13 @@ public:
     return RpcStatus::OK;
   }
 
-  RpcStatus await(std::uint32_t request_id, std::span<std::uint8_t> reply,
-                  std::size_t &reply_len) override {
+  std::atomic<int> enqueues_{0};
+
+protected:
+  void before_reply() override {
     if (delay_.count() > 0)
       std::this_thread::sleep_for(delay_);
-    return blocking_session::await(request_id, reply, reply_len);
   }
-
-  std::atomic<int> enqueues_{0};
 
 private:
   std::chrono::milliseconds delay_;
@@ -1026,10 +1028,11 @@ TEST(RequestIds, EveryOpRecordsExactlyTheIdsItActuallySent) {
 
 TEST(RequestIds, AnUndispatchedEventRecordsNoIdsAndTheLogStopsAtTheAbort) {
   // A hard error leaves the later records present but default, so their
-  // slices must be empty rather than pointing at somebody else's ids.
-  // `reset` is always collected off the timing thread, so the abort is not
-  // guaranteed to land before the very next dispatch -- a long tail turns
-  // that race into a formality (see AbortOnHardError for the same pattern).
+  // slices must be empty rather than pointing at somebody else's ids. The
+  // abort is collected asynchronously on the session's own worker, so it is
+  // not guaranteed to land before the very next dispatch -- a long tail of
+  // events, spaced far apart relative to that async completion, turns that
+  // race into a formality (see AbortOnHardError for the same pattern).
   struct FailOnSecond : blocking_session {
     int calls = 0;
     RpcStatus send_sync(const frame &, std::span<std::uint8_t>,
@@ -1042,7 +1045,7 @@ TEST(RequestIds, AnUndispatchedEventRecordsNoIdsAndTheLogStopsAtTheAbort) {
   std::string text = "0 reset\n1 reset\n";
   for (int tick = 2; tick <= 1000; ++tick)
     text += std::to_string(tick) + " reset\n";
-  auto sched = parse(text, kOneDecoder, 1000);
+  auto sched = parse(text, kOneDecoder, 500'000);
   auto result = run(plan(sched, router, {}));
 
   ASSERT_EQ(result.records.size(), 1001u);
@@ -1120,12 +1123,13 @@ struct FailOnCallSession : blocking_session {
 } // namespace
 
 TEST(AbortOnHardError, AHardErrorEventuallyStopsTheRun) {
-  // `reset` and `get_corrections` are both always collected off the timing
-  // thread, so the abort is not guaranteed to land before the very next
-  // dispatch -- it lands whenever the reader thread gets to it, which races
-  // the timing thread racing ahead through cheap, instantly answered
-  // events. A long tail of trailing events turns that race into a
-  // formality: the reader only has to win once, not on its very first try.
+  // `reset` and `get_corrections` are both always collected asynchronously,
+  // on the session's own worker, so the abort is not guaranteed to land
+  // before the very next dispatch -- it lands whenever that worker gets to
+  // it, which races the timing thread racing ahead through cheap, instantly
+  // answered events. Spacing the 1000 trailing events 500us apart (versus a
+  // sub-microsecond async completion even under load) turns that race into
+  // a formality.
   const struct {
     const char *op;
     RpcStatus status;
@@ -1142,7 +1146,7 @@ TEST(AbortOnHardError, AHardErrorEventuallyStopsTheRun) {
     std::string text = std::string("0 ") + c.op + "\n";
     for (int tick = 1; tick <= 1000; ++tick)
       text += std::to_string(tick) + " " + c.op + "\n";
-    auto sched = parse(text, {0}, 1000);
+    auto sched = parse(text, {0}, 500'000);
     std::unordered_map<std::uint64_t, session *> router{{0, &s}};
     auto result = run(plan(sched, router, {}));
 
@@ -1233,12 +1237,14 @@ TEST(MultiDecoderAdversarial,
   // Decoder 0 fails at tick 0; decoder 1's long tail of events sits behind
   // it on the one timeline. `reset` is always collected off the timing
   // thread, so the abort is not guaranteed to land before the very next
-  // dispatch -- a long tail turns that race into a formality (see
-  // AbortOnHardError for the same pattern).
+  // dispatch -- spacing the tail's 1000 ticks 500us apart (500ms total)
+  // gives decoder 0's async failure, which lands in well under a
+  // millisecond even under load, a wide margin to turn that race into a
+  // formality (see AbortOnHardError for the same pattern).
   std::string text = "0 reset\n";
   for (int tick = 1; tick <= 1000; ++tick)
     text += std::to_string(tick) + " reset session=1\n";
-  auto sched = parse(text, {0, 1}, 1000);
+  auto sched = parse(text, {0, 1}, 500'000);
   std::unordered_map<std::uint64_t, session *> router;
   router[0] = &bad;
   router[1] = &ok;
