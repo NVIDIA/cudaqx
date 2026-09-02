@@ -263,12 +263,13 @@ TEST(NullBackendAdvanced,
     std::unordered_map<std::uint64_t, session *> router{{0, s.get()}};
     auto sched =
         parse("0 get_corrections return_size=" + std::to_string(bits) + "\n",
-             {0}, 1000);
+              {0}, 1000);
     run_result result;
     EXPECT_NO_THROW(result = run(plan(sched, router, {}, {})));
 
     ASSERT_EQ(result.records.size(), 1u);
-    EXPECT_EQ(result.records[0].status, static_cast<std::int32_t>(RpcStatus::OK))
+    EXPECT_EQ(result.records[0].status,
+              static_cast<std::int32_t>(RpcStatus::OK))
         << "null always answers OK";
     EXPECT_TRUE(result.records[0].read_completed);
     EXPECT_EQ(result.records[0].correction_count, bits);
@@ -285,8 +286,8 @@ TEST(NullBackendAdvanced, MaxFrameBytesIsUnboundedAndStaysThatWayUnderLoad) {
   std::string text;
   for (int i = 0; i < 500; ++i) {
     const auto width = static_cast<std::size_t>(1 + (i % 37));
-    text += std::to_string(i) + " enqueue source=0b" +
-            std::string(width, '1') + "\n";
+    text += std::to_string(i) + " enqueue source=0b" + std::string(width, '1') +
+            "\n";
   }
   auto sched = parse(text, {0}, 1000);
   auto result = run(plan(sched, router, {}, {}));

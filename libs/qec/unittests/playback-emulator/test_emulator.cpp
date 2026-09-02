@@ -525,8 +525,8 @@ struct SlowFirstResetSession : session {
     handle_reply(*collector_, t, RpcStatus::OK, nullptr, 0, now_ns());
   }
 
-  void event_done(std::uint32_t event, std::uint32_t issued,
-                  std::int32_t term, bool has_term) override {
+  void event_done(std::uint32_t event, std::uint32_t issued, std::int32_t term,
+                  bool has_term) override {
     handle_event_done(*collector_, event, issued, term, has_term);
   }
 

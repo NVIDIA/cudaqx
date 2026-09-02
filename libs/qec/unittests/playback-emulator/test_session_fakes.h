@@ -47,8 +47,8 @@ public:
     push(std::move(e));
   }
 
-  void event_done(std::uint32_t event, std::uint32_t issued,
-                  std::int32_t term, bool has_term) override {
+  void event_done(std::uint32_t event, std::uint32_t issued, std::int32_t term,
+                  bool has_term) override {
     entry e;
     e.kind = entry::kEventDone;
     e.event = event;

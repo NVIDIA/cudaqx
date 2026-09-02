@@ -371,10 +371,10 @@ plan(const schedule &sched_in,
       break;
     case operation::stream:
     case operation::enqueue_data:
-      impl->max_requests += impl->event_plans[i].empty()
-                                ? e.stream_max_rounds
-                                : static_cast<std::uint32_t>(
-                                      impl->event_plans[i].size());
+      impl->max_requests +=
+          impl->event_plans[i].empty()
+              ? e.stream_max_rounds
+              : static_cast<std::uint32_t>(impl->event_plans[i].size());
       break;
     }
   }
@@ -524,11 +524,11 @@ void settle(const run_ctx &c, std::uint32_t event_index, collector_entry &e) {
   e.completed = true;
   record &rec = c.rec(event_index);
   rec.return_ns = e.collected ? e.last_return_ns : now_ns() - c.t0;
-  rec.status = e.has_term
-                   ? (e.any_error
-                          ? static_cast<std::int32_t>(stream_terminate::ERROR)
-                          : e.term)
-                   : static_cast<std::int32_t>(e.last_status);
+  rec.status =
+      e.has_term
+          ? (e.any_error ? static_cast<std::int32_t>(stream_terminate::ERROR)
+                         : e.term)
+          : static_cast<std::int32_t>(e.last_status);
   const auto signal_id = c.ev(event_index).signal_id;
   if (signal_id != kNoSignal)
     c.st.raise_signal(signal_id);
@@ -558,11 +558,9 @@ void handle_reply(run_ctx &c, tag t, RpcStatus status,
             static_cast<std::uint32_t>(c.result.correction_log.size());
         append_unpacked_bits(c.result.correction_log, reply, return_size);
       }
-      rec.correction_mismatch =
-          mismatches_expected(c.plan.sched, e,
-                              c.result.correction_log.data() +
-                                  rec.correction_offset,
-                              return_size);
+      rec.correction_mismatch = mismatches_expected(
+          c.plan.sched, e,
+          c.result.correction_log.data() + rec.correction_offset, return_size);
     }
   }
 
@@ -585,8 +583,8 @@ void handle_reply(run_ctx &c, tag t, RpcStatus status,
   collector_entry &col = c.st.collectors[i];
   col.last_return_ns = std::max(col.last_return_ns, return_ns - c.t0);
   col.last_status = final_status;
-  col.any_error |= final_status != RpcStatus::OK &&
-                   final_status != RpcStatus::NOT_READY;
+  col.any_error |=
+      final_status != RpcStatus::OK && final_status != RpcStatus::NOT_READY;
   ++col.collected;
   if (col.expected != 0 && col.collected == col.expected)
     settle(c, i, col);

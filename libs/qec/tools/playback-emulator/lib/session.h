@@ -78,8 +78,7 @@ void handle_reply(run_ctx &collector, tag t, RpcStatus status,
                   const std::uint8_t *reply, std::size_t reply_len,
                   std::uint64_t return_ns);
 void handle_event_done(run_ctx &collector, std::uint32_t event,
-                       std::uint32_t issued, std::int32_t term,
-                       bool has_term);
+                       std::uint32_t issued, std::int32_t term, bool has_term);
 
 /// Anything that can carry an RPC frame to a decoder and bring a reply back.
 /// The timing thread calls `send`/`event_done`; a session's own worker

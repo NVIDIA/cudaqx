@@ -152,11 +152,11 @@ public:
     checksum(f);
     scratch_.assign(reply_capacity_for(f.bytes, f.size), 0);
     handle_reply(*collector_, t, RpcStatus::OK, scratch_.data(),
-                scratch_.size(), now_ns());
+                 scratch_.size(), now_ns());
   }
 
-  void event_done(std::uint32_t event, std::uint32_t issued,
-                  std::int32_t term, bool has_term) override {
+  void event_done(std::uint32_t event, std::uint32_t issued, std::int32_t term,
+                  bool has_term) override {
     handle_event_done(*collector_, event, issued, term, has_term);
   }
 
@@ -218,7 +218,7 @@ namespace {
 class request_ring {
 public:
   static constexpr std::size_t kCapacity = 4096; // comfortably above any
-                                                  // pipeline depth in use
+                                                 // pipeline depth in use
   static constexpr std::size_t kInlineBytes = 256;
 
   struct entry {
@@ -327,8 +327,8 @@ public:
     ring_.publish();
   }
 
-  void event_done(std::uint32_t event, std::uint32_t issued,
-                  std::int32_t term, bool has_term) override {
+  void event_done(std::uint32_t event, std::uint32_t issued, std::int32_t term,
+                  bool has_term) override {
     auto &e = ring_.reserve();
     e.kind = request_ring::entry::kEventDone;
     e.event = event;
@@ -383,13 +383,12 @@ private:
         const auto *bytes = e->bytes();
         const auto len = e->frame_len;
         reply_scratch_.resize(reply_capacity_for(bytes, len));
-        const auto result = dispatch_rpc(*dec_, bytes, len,
-                                         reply_scratch_.data(),
-                                         reply_scratch_.size());
+        const auto result = dispatch_rpc(
+            *dec_, bytes, len, reply_scratch_.data(), reply_scratch_.size());
         const auto ret_ns = now_ns();
         ring_.pop_done();
         handle_reply(*collector_, t, result.status, reply_scratch_.data(),
-                    result.reply_len, ret_ns);
+                     result.reply_len, ret_ns);
         break;
       }
       case request_ring::entry::kEventDone: {
@@ -554,8 +553,8 @@ public:
     }
   }
 
-  void event_done(std::uint32_t event, std::uint32_t issued,
-                  std::int32_t term, bool has_term) override {
+  void event_done(std::uint32_t event, std::uint32_t issued, std::int32_t term,
+                  bool has_term) override {
     std::lock_guard<std::mutex> lock(notices_mu_);
     notices_.push_back({event, issued, term, has_term});
   }
@@ -604,7 +603,7 @@ private:
   }
 
   void complete(tag t, RpcStatus status, const std::uint8_t *body,
-               std::size_t len) {
+                std::size_t len) {
     handle_reply(*collector_, t, status, body, len, now_ns());
   }
 
@@ -682,8 +681,8 @@ private:
       const std::size_t avail =
           static_cast<std::size_t>(n) - sizeof(RPCResponse);
       complete(t, static_cast<RpcStatus>(resp.status),
-              scratch.data() + sizeof(RPCResponse),
-              std::min<std::size_t>(resp.result_len, avail));
+               scratch.data() + sizeof(RPCResponse),
+               std::min<std::size_t>(resp.result_len, avail));
     }
   }
 
