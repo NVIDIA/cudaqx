@@ -102,7 +102,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pip \
       python3-numpy \
       libopenblas-dev \
-      liblapack-dev \
       libzstd-dev \
       zlib1g-dev \
       libz3-dev \

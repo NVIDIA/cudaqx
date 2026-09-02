@@ -22,7 +22,9 @@
 #     decoders-only mode) but it is installed so find_package(CUDAToolkit)
 #     resolves the toolkit robustly.
 #   * BLAS/LAPACK: libcudaqx-core (whole-archived into the decoders .so) uses
-#     xtensor-blas (xlinalg.hpp), which links BLAS + LAPACK.
+#     xtensor-blas (xlinalg.hpp), which links BLAS + LAPACK. libopenblas-dev
+#     supplies both (it provides the libblas.so and liblapack.so alternatives),
+#     so a separate liblapack-dev is not needed.
 #   * Python dev headers + nanobind (fetched) for the optional
 #     CUDAQX_QEC_BINDINGS_PYTHON module; numpy is only for the smoke test.
 #
@@ -50,7 +52,7 @@ ARG cuda_version=12.6
 
 LABEL org.opencontainers.image.description="Ubuntu 24.04 build env for the CUDA-QX QEC decoders-only build (no CUDA-Q, no LLVM)"
 LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
-LABEL org.opencontainers.image.title="cudaqx-decoders-build"
+LABEL org.opencontainers.image.title="cudaq-decoders-build"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -73,7 +75,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pip \
       python3-numpy \
       libopenblas-dev \
-      liblapack-dev \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # CUDA cudart (+ nvcc for robust toolkit discovery) from the NVIDIA apt repo.
