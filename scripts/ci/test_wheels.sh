@@ -133,19 +133,15 @@ if [ "$cuda_major" = "12" ]; then
 else
   ${python} -m pip install "nvidia-cuda-runtime" || true
 fi
-${python} - <<'EOF'
-import ctypes, glob, os, sys
-# Preload libcudart if the CUDA runtime wheel is present (its layout varies by
-# CUDA major: nvidia/cuda_runtime/lib for cu12, nvidia/cu13/lib for cu13), so
-# the module's DT_NEEDED libcudart resolves; otherwise fall back to a system
-# cudart already on the loader path.
-try:
-    import nvidia
-    for base in list(nvidia.__path__):
-        for so in sorted(glob.glob(os.path.join(base, "**", "libcudart.so*"), recursive=True)):
-            ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
-except Exception:
-    pass
+# libcudart's location in the CUDA runtime wheel differs by CUDA major
+# (nvidia/cuda_runtime/lib for cu12, nvidia/cu13/lib for cu13), so discover it
+# rather than hard-coding, and put it on LD_LIBRARY_PATH. Images that already
+# ship a system cudart leave this empty and rely on the default loader path.
+cudart_so=$(${python} -c "import glob, os, nvidia; print(next(iter(glob.glob(os.path.join(list(nvidia.__path__)[0], '**', 'libcudart.so*'), recursive=True)), ''))" 2>/dev/null || true)
+cudart_dir=""
+if [ -n "$cudart_so" ]; then cudart_dir=$(dirname "$cudart_so"); fi
+LD_LIBRARY_PATH="${cudart_dir}${cudart_dir:+:}${LD_LIBRARY_PATH}" ${python} - <<'EOF'
+import sys
 import numpy as np
 import _qec_decoders_standalone as m
 assert "cudaq" not in sys.modules, "importing _qec_decoders_standalone pulled in cudaq"
