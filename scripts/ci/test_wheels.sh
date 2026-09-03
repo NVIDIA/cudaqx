@@ -121,15 +121,31 @@ fi
 # sys.modules check is meaningful.
 #
 # The module links libcudart. Normally `import cudaq` puts the CUDA runtime on
-# the loader path, but this test (and any cudaq-free user) skips cudaq, so the
-# wheel does not bring cudart. Install the CUDA runtime wheel and add it to
-# LD_LIBRARY_PATH -- this is exactly what a cudaq-free user must do.
+# the loader path, but this test (and any cudaq-free user) skips cudaq, so
+# provide cudart from the CUDA runtime wheel -- what a cudaq-free user must do.
+# The package name differs by CUDA major (cu12 keeps the -cu12 suffix; cu13+
+# uses the unsuffixed nvidia-cuda-runtime), and installing is best-effort since
+# some images already ship a system cudart.
 # ======================================
 echo "Smoke testing standalone decoders module (_qec_decoders_standalone)"
-${python} -m pip install "nvidia-cuda-runtime-cu${cuda_major}"
-cudart_libdir=$(${python} -c "import os, nvidia; print(os.path.join(list(nvidia.__path__)[0], 'cuda_runtime', 'lib'))")
-LD_LIBRARY_PATH="${cudart_libdir}:${LD_LIBRARY_PATH}" ${python} - <<'EOF'
-import sys
+if [ "$cuda_major" = "12" ]; then
+  ${python} -m pip install "nvidia-cuda-runtime-cu12" || true
+else
+  ${python} -m pip install "nvidia-cuda-runtime" || true
+fi
+${python} - <<'EOF'
+import ctypes, glob, os, sys
+# Preload libcudart if the CUDA runtime wheel is present (its layout varies by
+# CUDA major: nvidia/cuda_runtime/lib for cu12, nvidia/cu13/lib for cu13), so
+# the module's DT_NEEDED libcudart resolves; otherwise fall back to a system
+# cudart already on the loader path.
+try:
+    import nvidia
+    for base in list(nvidia.__path__):
+        for so in sorted(glob.glob(os.path.join(base, "**", "libcudart.so*"), recursive=True)):
+            ctypes.CDLL(so, mode=ctypes.RTLD_GLOBAL)
+except Exception:
+    pass
 import numpy as np
 import _qec_decoders_standalone as m
 assert "cudaq" not in sys.modules, "importing _qec_decoders_standalone pulled in cudaq"
