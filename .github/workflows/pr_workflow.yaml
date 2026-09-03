@@ -66,6 +66,8 @@ jobs:
               - '.github/actions/build-lib/build_qec.sh'
               - '.github/actions/build-lib/setup_custabilizer.sh'
               - '.github/workflows/lib_qec.yaml'
+              - '.github/workflows/scripts/verify_build_env.sh'
+              - 'docker/build_env/cudaqx.decoders.Dockerfile'
               - 'cmake/Modules/**'
               - 'libs/core/**/*.cpp'
               - 'libs/core/**/*.h'
