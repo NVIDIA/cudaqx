@@ -43,6 +43,10 @@ contributing to the CUDA-QX platform, please take a look at
 
 ## License
 
+This project will download and install additional third-party open source
+software projects. Review the license terms of these open source projects
+before use.
+
 The code in this repository is licensed under [Apache License 2.0](./LICENSE).
 
 When distributed via PyPI, GHCR, or NGC, the binaries generated from this source

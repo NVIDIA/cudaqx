@@ -2,6 +2,8 @@ CUDA-QX
 
 This product includes software developed by NVIDIA corporation and affiliates and includes material from third parties. It includes work released under the following licenses:
 
+This project will download and install additional third-party open source software projects. Review the license terms of these open source projects before use.
+
 PyBind11 - BSD-style license
 <https://github.com/pybind/pybind11>
 
