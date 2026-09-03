@@ -6,12 +6,6 @@ Installation Methods
 
 CUDA-QX provides multiple installation methods to suit your needs:
 
-.. note::
-
-    This project will download and install additional third-party open
-    source software projects. Review the license terms of these open
-    source projects before use.
-
 pip install
 ^^^^^^^^^^^^
 
