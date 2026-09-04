@@ -310,15 +310,22 @@ void check_return_width(const event &e, const std::string &op_name) {
 /// contradict each other or the stream's stop condition.
 void read_round_bounds(operands &ops, event &e) {
   bool have_min = false, have_max = false;
-  if (const auto *rounds = ops.value("rounds")) {
+  const auto *rounds = ops.value("rounds");
+  if (rounds) {
     e.stream_min_rounds = e.stream_max_rounds = parse_u32(*rounds, "rounds");
     have_min = have_max = true;
   }
   if (const auto *min = ops.value("min_rounds")) {
+    if (rounds)
+      throw std::invalid_argument(
+          "'stream' cannot combine 'rounds=' with 'min_rounds='");
     e.stream_min_rounds = parse_u32(*min, "min_rounds");
     have_min = true;
   }
   if (const auto *max = ops.value("max_rounds")) {
+    if (rounds)
+      throw std::invalid_argument(
+          "'stream' cannot combine 'rounds=' with 'max_rounds='");
     e.stream_max_rounds = parse_u32(*max, "max_rounds");
     have_max = true;
   }

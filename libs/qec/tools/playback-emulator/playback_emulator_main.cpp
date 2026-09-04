@@ -76,16 +76,24 @@ std::uint64_t parse_duration_ns(const std::string &s) {
   while (split > 0 && !std::isdigit(static_cast<unsigned char>(s[split - 1])))
     --split;
   const std::uint64_t value = std::stoull(s.substr(0, split));
+  if (value == 0)
+    throw std::runtime_error("duration '" + s + "' must be positive");
   const std::string unit = s.substr(split);
+  std::uint64_t scale = 1;
   if (unit.empty() || unit == "ns")
-    return value;
-  if (unit == "us")
-    return value * 1'000;
-  if (unit == "ms")
-    return value * 1'000'000;
-  if (unit == "s")
-    return value * 1'000'000'000;
-  throw std::runtime_error("unknown duration unit in '" + s + "'");
+    scale = 1;
+  else if (unit == "us")
+    scale = 1'000;
+  else if (unit == "ms")
+    scale = 1'000'000;
+  else if (unit == "s")
+    scale = 1'000'000'000;
+  else
+    throw std::runtime_error("unknown duration unit in '" + s + "'");
+  std::uint64_t ns;
+  if (__builtin_mul_overflow(value, scale, &ns))
+    throw std::runtime_error("duration '" + s + "' overflows nanoseconds");
+  return ns;
 }
 
 /// Everything one `--stim-source=ID:...` needs besides its source_id: the

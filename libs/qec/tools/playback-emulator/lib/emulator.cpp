@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -362,22 +363,33 @@ plan(const schedule &sched_in,
   // many as it was given; anything else is bounded by stream_max_rounds
   // (the parser always sets this, defaulting an unbounded `until=` stream to
   // kDefaultUntilMaxRounds).
+  std::uint64_t total_requests = 0;
   for (std::size_t i = 0; i < sched.events.size(); ++i) {
     const auto &e = sched.events[i];
     switch (e.op) {
     case operation::reset:
     case operation::get_corrections:
-      impl->max_requests += 1;
+      total_requests += 1;
       break;
     case operation::stream:
     case operation::enqueue_data:
-      impl->max_requests +=
-          impl->event_plans[i].empty()
-              ? e.stream_max_rounds
-              : static_cast<std::uint32_t>(impl->event_plans[i].size());
+      total_requests += impl->event_plans[i].empty()
+                            ? e.stream_max_rounds
+                            : impl->event_plans[i].size();
       break;
     }
   }
+  // n_requests (and every log it indexes) is uint32_t, so a schedule whose
+  // worst-case request count doesn't fit would silently wrap and undersize
+  // the logs -- reject it here instead.
+  if (total_requests > std::numeric_limits<std::uint32_t>::max())
+    throw std::invalid_argument(
+        "schedule's worst-case request count (" +
+        std::to_string(total_requests) +
+        ") exceeds what a single run can "
+        "index (" +
+        std::to_string(std::numeric_limits<std::uint32_t>::max()) + ")");
+  impl->max_requests = static_cast<std::uint32_t>(total_requests);
 
   return impl;
 }
