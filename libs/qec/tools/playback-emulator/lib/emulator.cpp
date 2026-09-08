@@ -522,7 +522,7 @@ issued_request begin_request(const run_ctx &c, record &rec,
   return {rid, idx};
 }
 
-/// Timing-thread-only element write, right after the frame is on the wire
+/// Timing-thread-only element write, right before the frame is sent on the wire
 void stamp_dispatch(const run_ctx &c, std::uint32_t log_index) {
   c.result.request_dispatch_ns_log[log_index] = now_ns() - c.t0;
 }
@@ -564,15 +564,21 @@ void handle_reply(run_ctx &c, tag t, RpcStatus status,
       record &rec = c.rec(i);
       rec.read_completed = true;
       rec.correction_count = return_size;
+      // Unpack and compare in a local buffer: another decoder's thread may
+      // append to correction_log (reallocating it) at any time, so the
+      // shared vector can only be touched under logs_lock
+      std::vector<std::uint8_t> unpacked;
+      unpacked.reserve(return_size);
+      append_unpacked_bits(unpacked, reply, return_size);
+      rec.correction_mismatch =
+          mismatches_expected(c.plan.sched, e, unpacked.data(), return_size);
       {
         std::lock_guard<spinlock> lock(c.st.logs_lock);
         rec.correction_offset =
             static_cast<std::uint32_t>(c.result.correction_log.size());
-        append_unpacked_bits(c.result.correction_log, reply, return_size);
+        c.result.correction_log.insert(c.result.correction_log.end(),
+                                       unpacked.begin(), unpacked.end());
       }
-      rec.correction_mismatch = mismatches_expected(
-          c.plan.sched, e,
-          c.result.correction_log.data() + rec.correction_offset, return_size);
     }
   }
 
@@ -692,6 +698,7 @@ void run_stream(const run_ctx &c, std::uint32_t i,
     const auto [rid, log_index] =
         begin_request(c, rec, bits, n_bits, rounds == 0);
     const tag t{i, log_index};
+    stamp_dispatch(c, log_index);
     if (prebuilt) {
       const round_plan &rp = ep[rounds];
       set_request_id(plan.frame_arena.data() + rp.frame_offset, rid);
@@ -700,7 +707,6 @@ void run_stream(const run_ctx &c, std::uint32_t i,
       set_request_id(built.data(), rid);
       s.send({built.data(), built.size()}, t);
     }
-    stamp_dispatch(c, log_index);
     ++rounds;
 
     if (rounds < e.stream_min_rounds)
@@ -763,8 +769,8 @@ void dispatch_event(const run_ctx &c, std::uint32_t i, session &s,
     const auto &rp = ep[0];
     const auto [rid, log_index] = begin_request(c, rec);
     set_request_id(plan.frame_arena.data() + rp.frame_offset, rid);
-    s.send(frame_of(plan, rp), {i, log_index});
     stamp_dispatch(c, log_index);
+    s.send(frame_of(plan, rp), {i, log_index});
     s.event_done(i, /*issued=*/1, /*term=*/0, /*has_term=*/false);
     break;
   }

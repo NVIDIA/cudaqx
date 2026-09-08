@@ -581,6 +581,7 @@ public:
       ::shutdown(fd_, SHUT_RDWR);
       receiver_.join();
     }
+    drain_notices();
   }
 
 private:
