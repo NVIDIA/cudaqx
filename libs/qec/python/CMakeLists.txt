@@ -73,6 +73,18 @@ target_link_libraries(${MODULE_NAME}
     cudaq::cudaq-mlir-runtime
 )
 
+if(TARGET cudaq-qec-playback-emulator)
+  target_sources(${MODULE_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python/py_playback_emulator.cpp
+  )
+  target_include_directories(${MODULE_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python
+    ${CMAKE_CURRENT_SOURCE_DIR}/bindings
+  )
+  target_link_libraries(${MODULE_NAME} PRIVATE cudaq-qec-playback-emulator)
+  target_compile_definitions(${MODULE_NAME} PRIVATE CUDAQX_QEC_HAS_PLAYBACK)
+endif()
+
 find_package(CUDAToolkit REQUIRED)
 target_link_libraries(${MODULE_NAME} PRIVATE CUDA::cudart)
 target_include_directories(${MODULE_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
