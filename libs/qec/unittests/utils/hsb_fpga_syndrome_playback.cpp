@@ -66,6 +66,7 @@ constexpr std::uint32_t LOOP_STATS_RESPONSES_HI = 0xE000'0014;
 constexpr std::uint32_t LOOP_STATS_ERRORS = 0xE000'0018;
 constexpr std::uint32_t LOOP_STATS_TIMEOUTS = 0xE000'001C;
 constexpr std::uint32_t LOOP_STATS_ACK = 0xE000'0020;
+constexpr std::uint32_t LOOP_STATS_RESPONSE_FAILURES = 0xE000'0024;
 constexpr std::uint32_t LOOP_STATS_MAGIC_VALUE = 0x4853'4245;
 constexpr std::uint32_t LOOP_STATS_COMPLETE = 2;
 constexpr int kLoopStatsMaxRetries = 100;
@@ -463,7 +464,7 @@ void print_usage(const char *argv0) {
          "disable the player cleanly; requires --control-port\n"
       << "                        and --verify first checks one pass\n"
       << "  --min-loop-shots <n> Require at least n completed decoding "
-         "measurements in emulator loop mode\n"
+         "measurements in emulator loop mode; requires --loop\n"
       << "  --per-round           Per-round protocol (device-graph scheduler): "
          "send\n"
       << "                        N enqueue_syndromes frames (one per "
@@ -521,7 +522,11 @@ Options parse_args(int argc, char **argv) {
       options.loop = true;
       options.loop_seconds = static_cast<std::uint32_t>(seconds);
     } else if (arg == "--min-loop-shots" && i + 1 < argc) {
-      options.min_loop_shots = std::stoull(argv[++i]);
+      const auto min_loop_shots = std::stoull(argv[++i]);
+      if (min_loop_shots == 0)
+        throw std::invalid_argument(
+            "--min-loop-shots must be a positive integer");
+      options.min_loop_shots = min_loop_shots;
     } else if (arg == "--per-round") {
       options.per_round = true;
     } else if (arg == "--qp-number" && i + 1 < argc) {
@@ -1081,6 +1086,7 @@ struct LoopStats {
   std::uint64_t responses = 0;
   std::uint32_t errors = 0;
   std::uint32_t timeouts = 0;
+  std::uint32_t response_failures = 0;
 };
 
 struct MeasurementRunSummary {
@@ -1090,6 +1096,7 @@ struct MeasurementRunSummary {
   bool all_responses_received = false;
   std::uint32_t transport_errors = 0;
   std::uint32_t transport_timeouts = 0;
+  std::uint32_t response_failures = 0;
   std::optional<std::size_t> requested_measurements;
 };
 
@@ -1107,7 +1114,8 @@ std::optional<LoopStats> read_loop_stats(hololink::Hololink &hsb) {
           read_u64(hsb, LOOP_STATS_WINDOWS_LO, LOOP_STATS_WINDOWS_HI),
           read_u64(hsb, LOOP_STATS_RESPONSES_LO, LOOP_STATS_RESPONSES_HI),
           hsb.read_uint32(LOOP_STATS_ERRORS),
-          hsb.read_uint32(LOOP_STATS_TIMEOUTS)};
+          hsb.read_uint32(LOOP_STATS_TIMEOUTS),
+          hsb.read_uint32(LOOP_STATS_RESPONSE_FAILURES)};
       // The software emulator keeps its control-plane session alive until the
       // client has consumed this final snapshot. This acknowledgement is
       // outside the playback/RDMA hot path.
@@ -1130,13 +1138,14 @@ MeasurementRunSummary make_measurement_run_summary(
       .all_responses_received = stats.responses == stats.frames,
       .transport_errors = stats.errors,
       .transport_timeouts = stats.timeouts,
+      .response_failures = stats.response_failures,
       .requested_measurements = requested_measurements,
   };
 }
 
 bool measurement_run_passed(const MeasurementRunSummary &summary) {
   return summary.all_responses_received && summary.transport_errors == 0 &&
-         summary.transport_timeouts == 0 &&
+         summary.transport_timeouts == 0 && summary.response_failures == 0 &&
          (!summary.requested_measurements ||
           summary.completed_measurements >= *summary.requested_measurements);
 }
@@ -1172,7 +1181,9 @@ void print_verification_summary(const VerifyResult &result,
               << "  Transport errors:       "
               << measurement_run->transport_errors << "\n"
               << "  Transport timeouts:     "
-              << measurement_run->transport_timeouts << "\n";
+              << measurement_run->transport_timeouts << "\n"
+              << "  RPC status failures:    "
+              << measurement_run->response_failures << "\n";
   }
   if (!result.latency_samples.empty()) {
     int64_t lat_min = std::numeric_limits<int64_t>::max();
@@ -1248,6 +1259,9 @@ void print_verification_summary(const VerifyResult &result,
 
 int main(int argc, char **argv) {
   Options options = parse_args(argc, argv);
+  if (options.min_loop_shots && !options.loop) {
+    throw std::invalid_argument("--min-loop-shots requires --loop");
+  }
   if ((options.loop_seconds || options.min_loop_shots) &&
       !options.control_port) {
     throw std::invalid_argument(
