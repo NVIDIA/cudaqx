@@ -52,8 +52,8 @@ constexpr std::uint32_t RAM_DEPTH = 512;
 
 constexpr std::uint32_t PLAYER_ENABLE_SINGLE_PASS =
     0x0000'000D; // enable + single-pass + ptp_bram_ena
-// Matches the HSB GPU-RoCE loopback example's continuous-player setting.
-constexpr std::uint32_t PLAYER_ENABLE_LOOP = 0x0000'0003;
+// ram_ena | ptp_bram_ena: continuously replay the programmed BRAM payload.
+constexpr std::uint32_t PLAYER_ENABLE_LOOP = 0x0000'0009;
 constexpr std::uint32_t PLAYER_DISABLE = 0x0000'0000;
 // LOOP_STATS register map — must match hsb_fpga_emulator.cpp in the
 // cuda-quantum repository.
@@ -1715,9 +1715,15 @@ int main(int argc, char **argv) {
     if (!hsb->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET, PLAYER_DISABLE))
       throw std::runtime_error("Failed to disable loop player");
     // The real FPGA exposes no equivalent final-counter register map. Its
-    // manual loop contract ends cleanly when the player is disabled.
-    if (!options.control_port)
+    // manual loop contract ends cleanly when the player is disabled. Preserve
+    // the finite ILA verification result even though loop statistics are not
+    // available on hardware.
+    if (!options.control_port) {
+      if (verified_result)
+        print_verification_summary(*verified_result, verified_sample_count,
+                                   num_shots, options.per_round);
       return 0;
+    }
     const auto loop_stats = read_loop_stats(*hsb);
     if (!loop_stats)
       throw std::runtime_error(
