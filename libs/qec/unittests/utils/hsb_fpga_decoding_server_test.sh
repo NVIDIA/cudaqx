@@ -1470,9 +1470,29 @@ finish_loop_run() {
         _err "Decoding server exited with an error"
         return 1
     fi
-    if [[ -n "$emulator_pid" ]] && ! wait "$emulator_pid"; then
-        _err "FPGA emulator exited with an error"
-        return 1
+    # The server writes through a background tee process substitution. Wait for
+    # its final CPU decoder statistics to reach the log before parsing them.
+    # This is post-shutdown test bookkeeping, outside the playback and decode
+    # paths.
+    if [[ "$TRANSPORT" == "cpu_roce" ]]; then
+        wait_for_pattern "$server_log" \
+            '^QEC_DECODING_SERVER_DECODER_STATS id=0 ' 5 >/dev/null || {
+            _err "Decoding server statistics were not flushed after shutdown"
+            return 1
+        }
+    fi
+    if [[ -n "$emulator_pid" ]]; then
+        if ! wait "$emulator_pid"; then
+            _err "FPGA emulator exited with an error"
+            return 1
+        fi
+        # The emulator also writes through a tee process substitution. Its
+        # final marker follows the results block parsed below, so waiting for
+        # it makes that parse deterministic.
+        wait_for_pattern "$emulator_log" '^\*\*\* EMULATOR: ' 5 >/dev/null || {
+            _err "FPGA emulator results were not flushed after exit"
+            return 1
+        }
     fi
     verify_loop_statistics "$server_log" "$emulator_log"
 }
