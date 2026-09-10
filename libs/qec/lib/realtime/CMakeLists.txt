@@ -6,7 +6,17 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-find_package(LLVM 22.1.4 EXACT REQUIRED CONFIG)
+# The realtime decoding config parser (config.cpp) uses only llvm::yaml,
+# llvm::json and llvm::raw_ostream from LLVMSupport, whose API is stable across
+# LLVM versions.  The top-level qec project already locates LLVM (honoring
+# LLVM_DIR / LLVM_VERSION_MAJOR / LLVM_VERSION_MINOR) before descending here, so
+# reuse that result rather than pinning an exact version -- any LLVM providing
+# the Support component works, e.g. a distro `llvm-dev`, with no NVIDIA LLVM
+# toolchain required.  Only fall back to a fresh lookup if LLVM was not already
+# found (e.g. this directory configured on its own).
+if(NOT LLVM_FOUND)
+  find_package(LLVM REQUIRED CONFIG)
+endif()
 
 # Enable CUDA for device code
 if(CMAKE_CUDA_COMPILER)
