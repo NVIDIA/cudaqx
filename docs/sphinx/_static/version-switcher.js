@@ -1,3 +1,11 @@
+/*******************************************************************************
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.
+ * All rights reserved.
+ *
+ * This source code and the accompanying materials are made available under
+ * the terms of the Apache License 2.0 which accompanies this distribution.
+ ******************************************************************************/
+
 // Version selector for the docs sidebar, rendered as the Read the Docs
 // style flyout panel. sphinx_rtd_theme ships the CSS (.rst-versions et al.)
 // and the expand/collapse handling for it even when not hosted on
