@@ -54,7 +54,6 @@
 #     --build-arg CUDA_VERSION=13.0 \
 #     --build-arg cuda_native_arch=90 \
 #     --build-context artifacts=./path/to/artifacts \
-#     --build-context ising_bundle=./path/to/ising-bundle \
 #     -t cudaqx-decoding-server:prod .
 #
 # If overriding CUDA_VERSION (e.g. to 12.6), also pass matching
@@ -62,8 +61,8 @@
 # and --build-arg cuda_runtime_image_tag=12.6.3-runtime-ubuntu24.04 (these
 # aren't derived from each other -- see the args' definitions below).
 #
-# Both --build-context flags may be omitted; the image still builds (minus
-# whichever pieces they would have supplied).
+# The --build-context flag may be omitted; the image still builds (minus
+# the pieces it would have supplied).
 
 # syntax=docker/dockerfile:1.7
 
@@ -96,13 +95,11 @@ ARG devcontainer_tag_suffix=gcc12-main
 # derive one from the other; update both together when bumping either.
 ARG cuda_runtime_image_tag=13.0.3-runtime-ubuntu24.04
 
-# Empty placeholders for the two optional build contexts. Naming a stage the
-# same as a `--build-context NAME=path` flag lets that flag override the
-# stage entirely; when a flag is omitted, the matching empty scratch image
-# is used instead, so the COPY/mount below sees zero files rather than
-# erroring.
+# Empty placeholder for the optional artifacts build context. Naming a stage
+# the same as a `--build-context NAME=path` flag lets that flag override the
+# stage entirely; when the flag is omitted, this empty scratch image is used
+# instead, so the mount below sees zero files rather than erroring.
 FROM scratch AS artifacts
-FROM scratch AS ising_bundle
 
 # The official CUDA-Q container, pulled so its /opt/nvidia/cudaq
 # install can be COPY'd into the builder and runtime stages.
@@ -415,19 +412,9 @@ COPY --from=builder \
     /usr/local/lib/python3.12/dist-packages/cuquantum/lib/libcustabilizer.so.0 \
     /usr/local/lib/python3.12/dist-packages/cuquantum/lib/libcustabilizer.so.0
 
-# Ising decoder model bundle for the trt_decoder plugin: the model is
-# gated behind a Hugging Face license click-through, so it is NOT fetched
-# inside this Dockerfile -- generate the bundle out of band (see
-# docs/sphinx/examples/qec/realtime_decoding_demo/prepare_ising_artifacts.py)
-# and pass it via --build-context ising_bundle=<dir>. Optional and empty by
-# default; if omitted, trt_decoder has no model to load unless
-# QEC_ISING_ARTIFACTS_DIR is bind-mounted in at `docker run` time instead.
-COPY --from=ising_bundle . /opt/nvidia/ising-bundle
-
 ENV CUDAQX_INSTALL_DIR=/opt/nvidia/cudaqx \
     CUDA_QUANTUM_PATH=/opt/nvidia/cudaq \
     CUDAQ_REALTIME_DIR=/opt/nvidia/cudaq-realtime \
-    QEC_ISING_ARTIFACTS_DIR=/opt/nvidia/ising-bundle \
     PATH=/opt/nvidia/cudaqx/bin:${PATH}
 
 WORKDIR /opt/nvidia/cudaqx/bin
