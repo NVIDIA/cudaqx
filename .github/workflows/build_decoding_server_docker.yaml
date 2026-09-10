@@ -8,13 +8,20 @@ on:
         description: GHCR image name, without a tag
         default: ghcr.io/nvidia/private/cudaq-decoders
         required: true
-      dev_base_image_version:
+      cudaq_image_name:
         type: string
         description: >-
-          Version segment of the ghcr.io/nvidia/cuda-quantum-dev base image
-          tag. Upstream currently only retains "latest" (versioned tags are
-          not kept -- pinning release builds needs coordination with the
-          cuda-quantum team on tag retention).
+          Official CUDA-Q container to consume, without a tag. Use
+          nvcr.io/nvidia/quantum/cuda-quantum for release builds (versioned
+          tags are retained there) once a realtime-enabled release exists.
+        default: nvcr.io/nvidia/nightly/cuda-quantum
+        required: false
+      cudaq_image_version:
+        type: string
+        description: >-
+          Version segment of the CUDA-Q container tag (full tag becomes
+          cu<major>-<version>): "latest" for nightly, or a release version
+          like "0.15.2".
         default: latest
         required: false
       assets_repo:
@@ -117,9 +124,8 @@ jobs:
             artifacts=./artifacts
           build-args: |
             CUDA_VERSION=${{ matrix.cuda_version }}
-            cuda_major=${{ matrix.cuda_major }}
             cuda_runtime_image_tag=${{ matrix.cuda_runtime_image_tag }}
-            dev_base_image_version=${{ inputs.dev_base_image_version }}
+            cudaq_image=${{ inputs.cudaq_image_name }}:cu${{ matrix.cuda_major }}-${{ inputs.cudaq_image_version }}
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
