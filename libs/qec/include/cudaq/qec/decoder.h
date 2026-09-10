@@ -199,6 +199,30 @@ public:
   virtual std::vector<decoder_result>
   decode_batch(const std::vector<std::vector<float_t>> &syndrome);
 
+  /// @brief Decode multiple independent syndromes, additionally returning
+  /// results that describe the batch as a whole rather than any single shot.
+  ///
+  /// Per-shot data belongs in `decoder_result::opt_results`. This overload
+  /// exists for data that is naturally batch-wide: returning it once as flat
+  /// batch-indexed arrays is more efficient to produce and to consume than
+  /// splitting it into one small map entry per shot.
+  ///
+  /// The default implementation forwards to the single-argument overload and
+  /// leaves @p batch_opt_results empty, so decoders that have no batch-level
+  /// data need not override this. Decoders that override either overload
+  /// should pull both into scope with `using decoder::decode_batch;` to avoid
+  /// overload hiding.
+  ///
+  /// @param syndrome A vector of `N` syndrome measurements where the floating
+  /// point value is the probability that the syndrome measurement is a |1>.
+  /// @param batch_opt_results Output parameter receiving batch-level results,
+  /// or left unset if the decoder produces none.
+  /// @returns 2-D vector of size `N` x `block_size` with soft probabilities of
+  /// errors in each index.
+  virtual std::vector<decoder_result>
+  decode_batch(const std::vector<std::vector<float_t>> &syndrome,
+               std::optional<cudaqx::heterogeneous_map> &batch_opt_results);
+
   /// @brief Construct a registered decoder by name.
   /// @param name The registered decoder name.
   /// @param init A parity-check matrix or raw Stim DEM string.

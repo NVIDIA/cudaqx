@@ -179,6 +179,41 @@
             iterations. Introduced in 0.4.0. Note: Not supported for `composition=1`.
           - `num_iter` (bool): If true, return the number of BP iterations run.
             Introduced in 0.5.0.
+          - `relay_solutions` (bool or int): Record every relay convergence
+            ("solution"), not just the winning one. `True` records all of
+            them; a positive integer caps the number of records kept per shot
+            (convergences beyond the cap still increment the per-shot total
+            but are not stored). Requires `composition=1` (sequential relay)
+            on the sparse GPU path (`use_sparsity=True`); other backends
+            reject the option at construction. Not yet supported with
+            `gamma_ensemble_size > 1`. Compatible with `use_osd=True` (OSD
+            post-processes non-converged shots and does not affect the
+            records). Introduced in 0.8.0.
+
+            Each record holds the cumulative BP iteration count at which the
+            convergence occurred, the LLR weight of its hard decision (the sum
+            of error-rate LLRs over bits decoded as 1), and the hard decision
+            itself, bit-packed 32 bits per little-endian word. The hard
+            decision is the correction vector, or its observable flips when
+            the decoder was constructed with `O`.
+
+            The records describe a batch as a whole, so `decode_batch()`
+            returns them through its batch-level results (the
+            `BatchDecoderResult.batch_opt_results` attribute in Python; the
+            optional `batch_opt_results` output parameter in C++) as flat
+            arrays under the keys `relay_solutions_width`,
+            `relay_solutions_max_records`, `relay_solutions_counts`,
+            `relay_solutions_totals`, `relay_solutions_iters`,
+            `relay_solutions_weight`, and `relay_solutions_result`.
+            (`decode()` returns the same keys through
+            `DecoderResult.opt_results`, with scalar `relay_solutions_count` /
+            `relay_solutions_total`.) The `cudaq_qec.relay_solutions` Python
+            module post-processes the records: `unpack()` reconstructs the
+            per-shot record axes, and `stop_nconv_sweep()` replays an entire
+            RelayBP-N `stop_nconv` sweep — logical error rate, mean
+            iterations, and iteration percentiles for every N — from a single
+            recording run. See :ref:`relay_solutions_user_guide` for a usage
+            and performance walkthrough.
         - `gamma_ensemble_size` (int): Number of parallel gamma trajectories
           ("lanes") run per sequential-relay BP iteration. Allowed values are
           1, 2, 4, and 8 (defaults to 1, which disables the ensemble). Each

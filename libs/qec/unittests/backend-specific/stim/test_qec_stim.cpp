@@ -11,6 +11,7 @@
 #include <deque>
 #include <gtest/gtest.h>
 #include <limits>
+#include <random>
 
 #include "cudaq.h"
 #include "cudaq/algorithms/dem.h"
@@ -650,6 +651,101 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
   // No errors were injected, so every observable correction is trivially zero.
   for (std::size_t k = 0; k < decoder->get_num_observables(); ++k)
     EXPECT_EQ(decoder->get_obs_corrections()[k], 0);
+}
+
+namespace {
+// Records the detector vector the realtime path hands down, so a test can check
+// the measurement-to-detector reduction directly rather than inferring it from
+// a decode result.
+class detector_recording_decoder : public cudaq::qec::decoder {
+public:
+  std::vector<std::vector<uint8_t>> seen;
+
+  using cudaq::qec::decoder::decoder;
+
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &syndrome) override {
+    // enqueue_syndrome() converts the detector bits to soft values on the way
+    // in, so undo that with the same threshold to recover what it computed.
+    std::vector<uint8_t> hard;
+    cudaq::qec::convert_vec_soft_to_hard(syndrome, hard);
+    seen.push_back(std::move(hard));
+    return trivial_result();
+  }
+
+private:
+  cudaq::qec::decoder_result trivial_result() {
+    cudaq::qec::decoder_result result;
+    result.converged = true;
+    result.result.assign(block_size, 0.0);
+    return result;
+  }
+};
+} // namespace
+
+// Stream a measurement window a round at a time and require the detector vector
+// enqueue_syndrome() hands to the decoder to match a direct reduction of m2d
+// against the same measurements, over many random records. Steane's boundary
+// layer is narrower than its interior rounds, so the window has non-uniform
+// round widths.
+//
+// Scope: decode() only runs once the window is complete, so this pins the
+// measurement-to-detector reduction and the point at which a decode fires. It
+// does not pin the order in which individual detectors are folded in, which is
+// not observable through decode() -- reducing the whole buffer on the final
+// round yields the same vector.
+TEST(QECCodeTester, checkRealtimeStreamedDetectorReduction) {
+  auto steane = cudaq::qec::get_code("steane");
+  const std::size_t nRounds = 3;
+  const std::size_t numCols =
+      steane->get_num_ancilla_z_qubits() + steane->get_num_ancilla_x_qubits();
+  const std::size_t numData = steane->get_num_data_qubits();
+  cudaq::noise_model noise;
+  noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.05),
+                              1);
+
+  auto ctx = cudaq::qec::decoder_context_from_memory_circuit(
+      *steane, cudaq::qec::operation::prep0, nRounds, noise);
+  auto [dem, m2d, m2o] = ctx.full_component();
+  const std::size_t numMeas = ctx.num_measurements();
+  ASSERT_EQ(numMeas, nRounds * numCols + numData);
+
+  detector_recording_decoder dec(dem.detector_error_matrix);
+  dec.set_O_sparse(cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix));
+  dec.set_D_sparse(cudaq::qec::d_sparse(m2d));
+  ASSERT_EQ(dec.get_num_msyn_per_decode(), numMeas);
+
+  std::mt19937 rng(17);
+  std::size_t total_fired = 0;
+  for (std::size_t shot = 0; shot < 100; shot++) {
+    std::vector<uint8_t> meas(numMeas);
+    for (auto &m : meas)
+      m = rng() & 1;
+
+    std::vector<uint8_t> expected(m2d.rows.size(), 0);
+    for (std::size_t d = 0; d < m2d.rows.size(); d++) {
+      uint8_t v = 0;
+      for (const auto c : m2d.rows[d])
+        v ^= meas[c];
+      expected[d] = v;
+      total_fired += v;
+    }
+
+    dec.reset_decoder();
+    dec.seen.clear();
+    std::size_t off = 0;
+    for (std::size_t r = 0; r < nRounds; r++) {
+      EXPECT_FALSE(dec.enqueue_syndrome(std::vector<uint8_t>(
+          meas.begin() + off, meas.begin() + off + numCols)))
+          << "decoded early after round " << r << " of shot " << shot;
+      off += numCols;
+    }
+    ASSERT_TRUE(dec.enqueue_syndrome(
+        std::vector<uint8_t>(meas.begin() + off, meas.end())));
+    ASSERT_EQ(dec.seen.size(), 1u);
+    EXPECT_EQ(dec.seen.front(), expected) << "shot " << shot;
+  }
+  EXPECT_GT(total_fired, 0u); // guard against an all-zero pass
 }
 
 namespace {

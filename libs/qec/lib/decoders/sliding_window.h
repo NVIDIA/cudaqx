@@ -115,6 +115,7 @@ public:
   /// @brief Decode multiple syndromes in batch
   /// @param syndromes Multiple syndrome measurements to decode
   /// @return The decoded error corrections
+  using decoder::decode_batch; // keep the batch_opt_results overload visible
   std::vector<decoder_result>
   decode_batch(const std::vector<std::vector<float_t>> &syndromes) override;
 

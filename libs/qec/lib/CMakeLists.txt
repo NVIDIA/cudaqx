@@ -279,6 +279,8 @@ install(DIRECTORY ${CUDAQX_QEC_INCLUDE_DIR}/cudaq
   FILES_MATCHING PATTERN "*.h"
 )
 
-if(NOT CUDAQ_QEC_DECODERS_ONLY)
+# realtime/ carries the decoding server's libraries. In decoders-only mode it
+# is built only when cudaq-realtime was found (CUDAQ_QEC_BUILD_DECODING_SERVER).
+if(NOT CUDAQ_QEC_DECODERS_ONLY OR CUDAQ_QEC_BUILD_DECODING_SERVER)
   add_subdirectory(realtime)
 endif()

@@ -39,12 +39,29 @@ jobs:
           set-safe-directory: true
 
       - name: Configure and build (decoders only)
+        shell: bash
         run: |
+          set -o pipefail
           cmake -S libs/qec -B build_decoders_only \
             -DCMAKE_BUILD_TYPE=Release \
             -DCUDAQ_QEC_DECODERS_ONLY=ON \
-            -DCUDAQX_QEC_BINDINGS_PYTHON=ON
+            -DCUDAQX_QEC_BINDINGS_PYTHON=ON 2>&1 | tee configure.log
           cmake --build build_decoders_only -j$(nproc)
+
+      # This image has no cudaq-realtime, so this run also covers the
+      # not-found half of the decoding-server gate: warn, and build the
+      # decoders anyway.
+      - name: Check the decoding server was skipped, not fatal
+        run: |
+          grep -q "cudaq-realtime not found" configure.log || {
+            echo "ERROR: expected a warning that cudaq-realtime was not found"
+            exit 1
+          }
+          if [ -e build_decoders_only/bin/decoding_server ]; then
+            echo "ERROR: decoding_server was built without cudaq-realtime"
+            exit 1
+          fi
+          test -e build_decoders_only/lib/libcudaq-qec-decoders.so
 
       - name: Smoke test (pymatching decode, no cudaq import)
         run: |
@@ -185,6 +202,56 @@ jobs:
 
       - name: Run example tests
         run: bash scripts/ci/test_examples.sh qec
+
+      # ========================================================================
+      # Decoders-only build of the decoding server
+      #
+      # The decoders-only job above has no cudaq-realtime and so covers only
+      # the not-found half of the gate. This job has one (the CUDA-Q install
+      # is built with realtime), so use it for the found half: build the
+      # server with CUDAQ_QEC_DECODERS_ONLY=ON and assert the dependency
+      # contract that makes the mode worth having -- cudaq-realtime is a
+      # separate product from CUDA-Q, so no CUDA-Q library may appear in the
+      # binary. Run on one matrix entry only: the check is about link shape,
+      # which does not vary by platform or CUDA version.
+      # ========================================================================
+      - name: Build the decoding server without CUDA-Q
+        if: matrix.platform == 'amd64' && matrix.cuda_version == '13.0'
+        run: |
+          cmake -S libs/qec -B build_decoders_only_server \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCUDAQ_QEC_DECODERS_ONLY=ON \
+            -DCUDAQ_REALTIME_ROOT=/cudaq-install
+          cmake --build build_decoders_only_server --target decoding_server -j$(nproc)
+
+      - name: Check it links no CUDA-Q library, and starts
+        if: matrix.platform == 'amd64' && matrix.cuda_version == '13.0'
+        shell: bash
+        run: |
+          set -o pipefail
+          server=build_decoders_only_server/bin/decoding_server
+          needed=$(readelf -d "$server" | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p')
+          echo "$needed"
+          # libcudaq-realtime is the point of the exercise; libcudaq-qec-* are
+          # built right here. Anything else starting with libcudaq is CUDA-Q
+          # leaking back in. Collect into a variable rather than piping into
+          # `grep -q`: that short-circuits, and the pipeline then reports the
+          # upstream status instead of the match, which makes the check
+          # silently vacuous.
+          offenders=$(echo "$needed" | grep '^libcudaq' \
+            | grep -vE '^libcudaq-realtime\.so$|^libcudaq-qec-' || true)
+          if [ -n "$offenders" ]; then
+            echo "ERROR: decoding_server pulled in a CUDA-Q library:"
+            echo "$offenders"
+            exit 1
+          fi
+          cd build_decoders_only_server/bin
+          ./decoding_server --config=decoding_server_config.yaml \
+            --transport=udp --timeout=5 2>&1 | tee server.log
+          grep -q QEC_DECODING_SERVER_READY server.log || {
+            echo "ERROR: server never reported ready"
+            exit 1
+          }
 
       # ========================================================================
       # Realtime decoding demo example

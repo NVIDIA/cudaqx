@@ -197,6 +197,18 @@ NVIDIA QLDPC Decoder
 
 .. include:: nv_qldpc_decoder_api.rst
 
+Relay Solutions Post-Processing
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. automodule:: cudaq_qec.relay_solutions
+
+.. autofunction:: cudaq_qec.relay_solutions.unpack
+.. autofunction:: cudaq_qec.relay_solutions.stop_nconv_sweep
+.. autoclass:: cudaq_qec.relay_solutions.RelaySolutionRecords
+    :members:
+.. autoclass:: cudaq_qec.relay_solutions.StopNConvSweep
+    :members:
+
 Sliding Window Decoder
 ----------------------
 

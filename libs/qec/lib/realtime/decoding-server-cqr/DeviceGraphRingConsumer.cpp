@@ -147,8 +147,8 @@ DeviceGraphRingConsumer::DeviceGraphRingConsumer(const cudaq_ringbuffer_t &ring,
 
   // Resolve the dispatch graph API via dlsym; cudaq-realtime-dispatch is
   // linked into the process (not this library) to keep the CUDA module in
-  // one copy.  Signatures must match create/launch/destroy_dispatch_graph_
-  // fn_t in qec_realtime_session.cpp/.h exactly.
+  // one copy.  Signatures must match cudaq-realtime's
+  // create/launch/destroy_dispatch_graph exports exactly.
   using create_fn_t = cudaError_t (*)(
       volatile std::uint64_t *, volatile std::uint64_t *, std::uint8_t *,
       std::uint8_t *, std::size_t, std::size_t, cudaq_function_entry_t *,

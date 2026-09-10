@@ -33,11 +33,12 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
-#include "cudaq/realtime/device_call_service.h"
 
 #include <iostream>
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
@@ -59,11 +60,6 @@ using cudaq::qec::decoding::rpc::RpcStatus;
 using cudaq::qec::decoding_server::DecodingSession;
 using cudaq::qec::decoding_server::SessionRegistry;
 namespace slot = cudaq::qec::decoding_server::slot;
-using cudaq::realtime::DeviceCallDispatchMode;
-using cudaq::realtime::DeviceCallDispatchTable;
-using cudaq::realtime::DeviceCallService;
-using cudaq::realtime::DeviceCallServicePluginInfo;
-using cudaq::realtime::DeviceCallServiceSession;
 
 // The registry of decoder sessions this plugin serves.  Requests execute
 // INLINE on the CUDAQ dispatcher thread that delivered them (no worker
@@ -315,68 +311,48 @@ make_entries() {
   return entries;
 }
 
-class QecDeviceCallSession : public DeviceCallServiceSession {
-public:
-  QecDeviceCallSession() {
-    table_.mode = DeviceCallDispatchMode::Host;
-    table_.entries = entries_.data();
-    table_.count = entries_.size();
-    table_.deviceId = kHostDispatchDeviceId;
-    table_.mailbox = nullptr;
-  }
-
-  const DeviceCallDispatchTable &dispatchTable() const noexcept override {
-    return table_;
-  }
-
-private:
-  std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries_ =
-      make_entries();
-  DeviceCallDispatchTable table_;
-};
-
-class QecDeviceCallService : public DeviceCallService {
-public:
-  std::unique_ptr<DeviceCallServiceSession>
-  createDispatchSession(DeviceCallDispatchMode mode) override {
-    if (mode != DeviceCallDispatchMode::Host)
-      return nullptr;
-    // Server path: the config path is in the environment, so build the
-    // decoder sessions NOW (before the server's READY line). The in-process
-    // application path has not called configure_decoders yet at this point;
-    // it initializes lazily on the first RPC (see dispatch_rpc).
-    if (const char *cfg = std::getenv("CUDAQ_QEC_DECODER_CONFIG");
-        cfg && cfg[0] != '\0') {
-      try {
-        std::call_once(g_init_flag, init_server);
-      } catch (const std::exception &e) {
-        // CUDAQ core does not expect plugin session creation to throw; a
-        // propagating exception would escape the channel-setup path and
-        // terminate. Report the config/decoder failure and decline the
-        // session instead.
-        cudaq::qec::error(
-            "decoding-server init failed (CUDAQ_QEC_DECODER_CONFIG={}): {}",
-            cfg, e.what());
-        return nullptr;
-      }
-    }
-    return std::make_unique<QecDeviceCallSession>();
-  }
-};
-
-QecDeviceCallService g_service;
-DeviceCallService *get_service() { return &g_service; }
-
 } // namespace
 
-extern "C" __attribute__((visibility("default")))
-cudaq::realtime::DeviceCallServicePluginInfo
-cudaqGetDeviceCallServicePluginInfo() {
-  return {"cudaq-qec-realtime-device-call", &get_service};
-}
+/// The HOST_CALL function table this service serves: the three default-route
+/// RPCs (enqueue_syndromes / get_corrections / reset_decoder) registered as
+/// CUDAQ_DISPATCH_HOST_CALL entries.  `count` receives the entry count.
+/// Returns nullptr (count 0) when the decoder sessions could not be built.
+///
+/// This is the single construction path for the table, reached two ways: the
+/// standalone decoding_server process calls it directly, and the in-process
+/// DeviceCallService shim (decoding_server_cqr_device_call_service.cpp) wraps
+/// it in the virtual interface CUDA-Q discovers.  It deliberately names no
+/// CUDA-Q type -- only cudaq-realtime's cudaq_function_entry_t -- so a server
+/// built without a CUDA-Q install can reach it.
+extern "C" __attribute__((visibility("default"))) const cudaq_function_entry_t *
+cudaqx_qec_decoding_server_host_call_table(std::uint32_t *count) {
+  // Process-lifetime storage: the dispatcher reads these entries in place for
+  // as long as the channel is up.
+  static std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries =
+      make_entries();
 
-extern "C" __attribute__((visibility("default"))) void
-cudaqx_qec_realtime_device_call_service_force_link() {}
+  // Server path: the config path is in the environment, so build the decoder
+  // sessions NOW (before the server's READY line).  The in-process
+  // application path has not called configure_decoders() yet at this point;
+  // it initializes lazily on the first RPC (see dispatch_rpc).
+  if (const char *cfg = std::getenv("CUDAQ_QEC_DECODER_CONFIG");
+      cfg && cfg[0] != '\0') {
+    try {
+      std::call_once(g_init_flag, init_server);
+    } catch (const std::exception &e) {
+      cudaq::qec::error(
+          "decoding-server init failed (CUDAQ_QEC_DECODER_CONFIG={}): {}", cfg,
+          e.what());
+      if (count)
+        *count = 0;
+      return nullptr;
+    }
+  }
+
+  if (count)
+    *count = static_cast<std::uint32_t>(entries.size());
+  return entries.data();
+}
 
 extern "C" __attribute__((visibility("default"))) uint64_t
 cudaqx_qec_device_call_dispatch_count() {

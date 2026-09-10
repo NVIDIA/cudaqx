@@ -146,6 +146,7 @@ role_to_str = qecrt.role_to_str
 sc_orientation = qecrt.sc_orientation
 
 from .dem_sampling import dem_sampling
+from . import relay_solutions
 
 from .plugins import decoders, codes
 import pkgutil, importlib

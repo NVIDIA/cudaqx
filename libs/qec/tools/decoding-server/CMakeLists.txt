@@ -44,13 +44,18 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
     )
     target_link_directories(decoding_server
       PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+    # No CUDA-Q libraries: the server is a decoder process driven by
+    # libcudaq-realtime, which is a separate product from CUDA-Q.  It uses only
+    # the decoder interface (cudaq-qec-decoders, via the two targets below),
+    # the realtime decoding config, and the CQR function table -- never the
+    # heavy cudaq-qec (codes, experiments, DEM sampling), the CUDA-Q runtime,
+    # or the simulators.  Those were link-only leftovers: none of their symbols
+    # is referenced, and they were reaching DT_NEEDED through the
+    # `-Wl,--no-as-needed` that cudaq-qec applies to its consumers.
     target_link_libraries(decoding_server PRIVATE
-      cudaq-qec
       cudaq-qec-realtime-decoding
       cudaq-qec-realtime-decoding-server-cqr
       ${QEC_UDP_REALTIME_LIBRARY}
-      cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
-      nvqir nvqir-stim
       CUDA::cudart
     )
     # Where --transport=<name> resolves provider libraries

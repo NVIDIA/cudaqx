@@ -203,6 +203,33 @@ TEST(SampleDecoder, checkAPI) {
       ASSERT_EQ(x, 0.0f);
 }
 
+// A decoder that overrides only the single-argument decode_batch (i.e. every
+// decoder written before the overload existed) must still work through the
+// two-argument one, and must report no batch-level results.
+TEST(SampleDecoder, BatchOptResultsDefaultsToEmpty) {
+  constexpr std::size_t block_size = 10;
+  constexpr std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto d = cudaq::qec::decoder::get("sample_decoder", H);
+  ASSERT_NE(d, nullptr);
+
+  std::vector<cudaq::qec::float_t> syndromes(syndrome_size, 0.0);
+  std::optional<cudaqx::heterogeneous_map> batch_opt_results;
+  auto dec_results = d->decode_batch({syndromes, syndromes}, batch_opt_results);
+
+  EXPECT_EQ(dec_results.size(), 2);
+  EXPECT_FALSE(batch_opt_results.has_value());
+  for (auto &m : dec_results)
+    EXPECT_EQ(m.result.size(), block_size);
+
+  // A stale value in the out-param must be cleared, not left for the caller to
+  // mistake for decoder output.
+  batch_opt_results = cudaqx::heterogeneous_map();
+  batch_opt_results->insert("stale", 1);
+  d->decode_batch({syndromes}, batch_opt_results);
+  EXPECT_FALSE(batch_opt_results.has_value());
+}
+
 TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
   // CUDAQ_QEC_DEBUG_DECODER enables the base decoder's printf logging paths.
   ScopedEnv debugEnv("CUDAQ_QEC_DEBUG_DECODER", "1");
