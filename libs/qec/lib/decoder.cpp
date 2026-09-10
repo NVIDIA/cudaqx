@@ -12,7 +12,9 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
+#include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <cuda_runtime_api.h>
 #include <dlfcn.h>
 #include <filesystem>
@@ -46,6 +48,18 @@ struct decoder::rt_impl {
   /// Persistent buffers to avoid dynamic memory allocation.
   std::vector<uint8_t> persistent_detector_buffer;
   std::vector<float_t> persistent_soft_detector_buffer;
+
+  /// Detector rows paired with the number of leading msyn_buffer columns they
+  /// need, i.e. one past the last column they read, sorted by that count. A
+  /// detector is resolvable once msyn_buffer_index reaches its count, so
+  /// enqueue_syndrome() can fold detectors in as their measurements arrive
+  /// instead of reducing the whole buffer on the final round. Only used when
+  /// !is_sliding_window; the sliding window path emits a layer per round and
+  /// is already incremental.
+  std::vector<std::pair<uint32_t, uint32_t>> detector_ready_order;
+
+  /// How far through detector_ready_order the current shot has progressed.
+  std::size_t detector_ready_cursor = 0;
 
   /// Whether to log decoder stats.
   bool should_log = false;
@@ -352,7 +366,25 @@ void set_D_sparse_common(decoder *decoder,
           fmt::format("D_sparse row count ({}) must match syndrome_size ({})",
                       D_sparse.size(), decoder->get_syndrome_size()));
     }
+    // Order the detectors by when they become resolvable. Keying on how many
+    // measurement columns each one needs, rather than bucketing by round, keeps
+    // this correct when rounds differ in width, which they do for the boundary
+    // layers of a memory circuit. A detector with no columns needs none and so
+    // sorts strictly ahead of one that reads column 0; it is trivially zero and
+    // resolvable before any measurement arrives.
+    pimpl->detector_ready_order.clear();
+    pimpl->detector_ready_order.reserve(D_sparse.size());
+    for (std::size_t i = 0; i < D_sparse.size(); i++) {
+      uint32_t columns_needed = 0;
+      for (const auto col : D_sparse[i])
+        columns_needed = std::max(columns_needed, col + 1);
+      pimpl->detector_ready_order.emplace_back(columns_needed,
+                                               static_cast<uint32_t>(i));
+    }
+    std::sort(pimpl->detector_ready_order.begin(),
+              pimpl->detector_ready_order.end());
   }
+  pimpl->detector_ready_cursor = 0;
 
   pimpl->num_msyn_per_decode = calculate_num_msyn_per_decode(D_sparse);
   pimpl->msyn_buffer.clear();
@@ -372,6 +404,28 @@ void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
   on_d_sparse_configured();
 }
 
+// Fold in every detector whose measurements have all arrived, i.e. that needs
+// no more than \p columns_available leading columns of msyn_buffer.
+// detector_ready_order is sorted by that requirement, so this walks a cursor
+// forward and reduces each detector exactly once per shot. Not used by the
+// sliding window path, which emits one detector layer per round and is already
+// incremental.
+template <typename PimplType>
+static void
+resolve_ready_detectors(const std::vector<std::vector<uint32_t>> &D_sparse,
+                        PimplType *pimpl, uint32_t columns_available) {
+  const auto &order = pimpl->detector_ready_order;
+  while (pimpl->detector_ready_cursor < order.size() &&
+         order[pimpl->detector_ready_cursor].first <= columns_available) {
+    const uint32_t detector = order[pimpl->detector_ready_cursor].second;
+    uint8_t value = 0;
+    for (const auto col : D_sparse[detector])
+      value ^= pimpl->msyn_buffer[col];
+    pimpl->persistent_detector_buffer[detector] = value;
+    pimpl->detector_ready_cursor++;
+  }
+}
+
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                                std::size_t syndrome_length) {
   if (pimpl->msyn_buffer_index + syndrome_length > pimpl->msyn_buffer.size()) {
@@ -382,10 +436,19 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
 
   pimpl->current_round++;
   bool did_decode = false;
-  for (std::size_t i = 0; i < syndrome_length; i++) {
-    pimpl->msyn_buffer[pimpl->msyn_buffer_index] = syndrome[i];
-    pimpl->msyn_buffer_index++;
+  if (syndrome_length > 0) {
+    std::memcpy(pimpl->msyn_buffer.data() + pimpl->msyn_buffer_index, syndrome,
+                syndrome_length);
+    pimpl->msyn_buffer_index += syndrome_length;
   }
+
+  // Resolve every detector whose measurements have now all arrived. Doing this
+  // per round instead of in one pass at the end leaves the final round with
+  // only the detectors that genuinely depend on it, and reads the measurements
+  // while they are still hot from the copy above.
+  if (!pimpl->is_sliding_window)
+    resolve_ready_detectors(this->D_sparse, pimpl.get(),
+                            pimpl->msyn_buffer_index);
 
   bool should_decode = false;
   if (!pimpl->is_sliding_window) {
@@ -419,13 +482,15 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       log_observable_corrections.resize(O_sparse.size());
     }
 
-    // Decode now.
+    // Decode now. A full buffer makes every remaining detector resolvable, so
+    // the per-round pass above will normally have finished all of them and this
+    // drain costs one comparison. It is kept so that a complete detector buffer
+    // is guaranteed by construction rather than inferred from when
+    // should_decode fires; a partially reduced buffer would silently decode
+    // stale values left over from the previous shot.
     if (!pimpl->is_sliding_window) {
-      for (std::size_t i = 0; i < this->D_sparse.size(); i++) {
-        pimpl->persistent_detector_buffer[i] = 0;
-        for (auto col : this->D_sparse[i])
-          pimpl->persistent_detector_buffer[i] ^= pimpl->msyn_buffer[col];
-      }
+      resolve_ready_detectors(this->D_sparse, pimpl.get(),
+                              pimpl->num_msyn_per_decode);
     } else {
       const std::size_t k = pimpl->detector_layer_index++;
       const std::size_t off = pimpl->detector_layer_offsets[k];
@@ -568,6 +633,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     pimpl->msyn_buffer_index = 0;
     pimpl->current_round = 0;
     pimpl->detector_layer_index = 0;
+    pimpl->detector_ready_cursor = 0;
   }
   return did_decode;
 }
@@ -618,6 +684,7 @@ void decoder::reset_decoder() {
   pimpl->msyn_buffer_index = 0;
   pimpl->current_round = 0;
   pimpl->detector_layer_index = 0;
+  pimpl->detector_ready_cursor = 0;
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
   pimpl->corrections.clear();
