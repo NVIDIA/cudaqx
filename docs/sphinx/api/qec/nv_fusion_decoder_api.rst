@@ -1,7 +1,7 @@
 .. class:: nv_fusion_decoder
 
     A multi-threaded minimum-weight perfect matching (MWPM) decoder based on
-    the NV FusionBrickwall algorithm.  It is in essence a combination of
+    the NV Fusion Brickwall algorithm.  It is in essence a combination of
     *fusion blossom* with *sparse blossom*: the detector matching graph is
     partitioned into temporal blocks that are solved independently and then
     fused across their boundaries (fusion blossom), while each individual
