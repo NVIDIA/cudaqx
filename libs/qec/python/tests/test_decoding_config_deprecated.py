@@ -31,6 +31,7 @@ pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 trt_schema_missing = qec.decoder_param_schema("trt_decoder") is None
 chromobius_schema_missing = qec.decoder_param_schema("chromobius") is None
+pymatching_schema_missing = qec.decoder_param_schema("pymatching") is None
 nv_qldpc_schema_missing = qec.decoder_param_schema("nv-qldpc-decoder") is None
 
 
@@ -114,7 +115,10 @@ def test_deprecated_config_assignable_to_property():
     dc.decoder_custom_args = cfg
     dc.type = "pymatching"
     args = dc.decoder_custom_args
-    assert list(args["error_rate_vec"]) == [0.1, 0.2, 0.3]
+    # Model rates are top-level decoder_config state, so the shim promotes
+    # them out of the per-decoder parameters instead of dropping them.
+    assert "error_rate_vec" not in args
+    assert list(dc.error_rate_vec) == [0.1, 0.2, 0.3]
     assert args["merge_strategy"] == "smallest_weight"
     dc.validate_custom_args()
 
@@ -442,6 +446,9 @@ def test_configure_valid_multi_error_lut_decoders():
     dc.block_size = 10
     dc.syndrome_size = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # The decoding server constructs for observable output, so a server config
+    # must supply an observable mapping.
+    dc.O_sparse = [0, -1]
     dc.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         dc.syndrome_size, 2, include_first_round=False)
     dc.set_decoder_custom_args(nv)
@@ -491,6 +498,7 @@ def test_trt_decoder_config_set_and_get_each_optional(name, meta):
 def test_trt_decoder_config_yaml_roundtrip():
     trt = qec.trt_decoder_config()
     trt.engine_load_path = "/path/to/engine.trt"
+    trt.engine_output_format = "observables"
     trt.precision = "fp16"
     trt.memory_workspace = 1073741824  # 1GB
 
@@ -621,7 +629,8 @@ def test_pymatching_config_yaml_roundtrip():
     # reads back as a plain dict, never a typed config object.
     pm2 = dc2.decoder_custom_args
     assert pm2 is not None
-    assert list(pm2["error_rate_vec"]) == [0.1, 0.2, 0.3]
+    assert "error_rate_vec" not in pm2
+    assert list(dc2.error_rate_vec) == [0.1, 0.2, 0.3]
     assert pm2["merge_strategy"] == "smallest_weight"
 
 
@@ -634,6 +643,7 @@ def test_trt_decoder_chromobius_global_config_yaml_roundtrip():
     chromobius.return_weight = False
 
     trt = qec.trt_decoder_config()
+    trt.engine_output_format = "residual_detectors"
     trt.global_decoder = "chromobius"
     trt.global_decoder_params = chromobius
 
@@ -664,6 +674,61 @@ def test_trt_decoder_chromobius_global_config_yaml_roundtrip():
     assert chromobius2 is not None
     assert chromobius2["ignore_decomposition_failures"] is True
     assert chromobius2["return_weight"] is False
+
+
+@pytest.mark.skipif(
+    trt_schema_missing or pymatching_schema_missing,
+    reason="trt_decoder/pymatching plugins (and their schemas) not available")
+def test_trt_decoder_nested_pymatching_rates_promote_and_roundtrip():
+    # A nested composition carries model rates on the child, which belong to
+    # the top-level model rather than the child's parameters.
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.2, 0.3]
+    pm.merge_strategy = "independent"
+
+    trt = qec.trt_decoder_config()
+    trt.engine_output_format = "residual_detectors"
+    trt.global_decoder = "pymatching"
+    trt.global_decoder_params = pm
+
+    dc = qec.decoder_config()
+    dc.id = 0
+    dc.type = "trt_decoder"
+    dc.block_size = 3
+    dc.syndrome_size = 3
+    dc.H_sparse = [0, -1, 1, -1, 2, -1]
+    dc.set_decoder_custom_args(trt)
+
+    assert list(dc.error_rate_vec) == [0.1, 0.2, 0.3]
+    nested = dc.decoder_custom_args["global_decoder_params"]
+    assert "error_rate_vec" not in nested
+    assert nested["merge_strategy"] == "independent"
+    dc.validate_custom_args()
+
+    dc2 = qec.decoder_config.from_yaml_str(dc.to_yaml_str())
+    assert list(dc2.error_rate_vec) == [0.1, 0.2, 0.3]
+    nested2 = dc2.decoder_custom_args["global_decoder_params"]
+    assert "error_rate_vec" not in nested2
+    assert nested2["merge_strategy"] == "independent"
+
+
+@pytest.mark.skipif(
+    trt_schema_missing or pymatching_schema_missing,
+    reason="trt_decoder/pymatching plugins (and their schemas) not available")
+def test_trt_decoder_nested_pymatching_conflicting_rates_rejected():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.9, 0.9, 0.9]
+
+    trt = qec.trt_decoder_config()
+    trt.engine_output_format = "residual_detectors"
+    trt.global_decoder = "pymatching"
+    trt.global_decoder_params = pm
+
+    dc = qec.decoder_config()
+    dc.type = "trt_decoder"
+    dc.error_rate_vec = [0.1, 0.2, 0.3]
+    with pytest.raises(RuntimeError, match="Conflicting error_rate_vec"):
+        dc.set_decoder_custom_args(trt)
 
 
 # decoder_config tests
@@ -798,6 +863,9 @@ def test_configure_valid_decoders():
     dc.block_size = 10
     dc.syndrome_size = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # The decoding server constructs for observable output, so a server config
+    # must supply an observable mapping.
+    dc.O_sparse = [0, -1]
     dc.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         dc.syndrome_size, 2, include_first_round=False)
     lut_config = qec.multi_error_lut_config()
@@ -848,7 +916,7 @@ def test_configure_valid_pymatching_decoder():
 
 @pytest.mark.parametrize(
     "error_rate_vec",
-    ([0.1, 0.1], [0.0, 0.1, 0.1], [0.1, 0.6, 0.1]),
+    ([0.0, 0.1, 0.1], [0.1, 0.6, 0.1]),
 )
 def test_configure_invalid_pymatching_error_rate_vec(error_rate_vec):
     pm = qec.pymatching_config()
@@ -858,6 +926,17 @@ def test_configure_invalid_pymatching_error_rate_vec(error_rate_vec):
     ret = configure_pymatching_status(pm)
     assert isinstance(ret, int)
     assert ret != 0
+
+
+def test_configure_rejects_pymatching_error_rate_vec_size_mismatch():
+    # Promoted rates are validated with the top-level field, which rejects a
+    # size mismatch by raising rather than through the status code.
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.1]
+    pm.merge_strategy = "smallest_weight"
+
+    with pytest.raises(RuntimeError, match="error_rate_vec size"):
+        configure_pymatching_status(pm)
 
 
 def test_configure_invalid_pymatching_merge_strategy():
@@ -893,6 +972,10 @@ def test_configure_invalid_decoders():
     decoder_config.block_size = 10
     decoder_config.syndrome_size = 3
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # A resolvable model, so the failure under test is the unregistered
+    # decoder type at construction rather than an unresolvable configuration.
+    decoder_config.O_sparse = [0, -1]
+    decoder_config.D_sparse = [0, -1, 1, -1, 2, -1]
     decoder_config.set_decoder_custom_args(nv)
 
     multi_decoder_config = qec.multi_decoder_config()

@@ -54,9 +54,12 @@ if(TARGET cudaq-qec-decoding-server)
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq)
-  # The DEM-source test constructs chromobius through the plugin loader.
+  # Chromobius is the DEM-native decoder the raw-DEM model source exists for;
+  # link it when this configuration built it so the acceptance tests can run,
+  # and keep main's feature definition for its conditional cases.
   if(TARGET cudaq-qec-chromobius)
     add_dependencies(test_decoders_yaml cudaq-qec-chromobius)
+    target_link_libraries(test_decoders_yaml PRIVATE cudaq-qec-chromobius)
     target_compile_definitions(test_decoders_yaml PRIVATE CUDAQX_QEC_HAS_CHROMOBIUS)
   endif()
   add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
@@ -153,6 +156,10 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
   )
 
   target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec-decoders cudaq-qec-trt-decoder CUDA::cudart ${TENSORRT_LIBRARY})
+  # Chromobius is the DEM-native child the raw-DEM nesting case needs.
+  if(TARGET cudaq-qec-chromobius)
+    target_link_libraries(test_trt_decoder PRIVATE cudaq-qec-chromobius)
+  endif()
 
   find_package(Python COMPONENTS Interpreter QUIET)
   if(Python_Interpreter_FOUND)

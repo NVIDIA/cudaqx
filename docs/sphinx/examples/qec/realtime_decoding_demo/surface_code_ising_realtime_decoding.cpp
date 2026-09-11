@@ -353,6 +353,7 @@ void save_dem_to_file(const std::vector<cudaq::qec::detector_error_model> &dems,
     config.H_sparse = cudaq::qec::pcm_to_sparse_vec(edem.detector_error_matrix);
     config.O_sparse =
         cudaq::qec::pcm_to_sparse_vec(edem.observables_flips_matrix);
+    config.error_rate_vec = edem.error_rates;
     // Default D == cudaqx's m2d (cudaqx detector order), self-consistent with
     // the dem_gen_circuit H/O above and with the full measurement stream the
     // live path enqueues. The trt+Ising branch below overrides this with the
@@ -362,7 +363,6 @@ void save_dem_to_file(const std::vector<cudaq::qec::detector_error_model> &dems,
     if (decoder_type == "pymatching") {
       cudaqx::heterogeneous_map pm_args;
       pm_args.insert("merge_strategy", "smallest_weight");
-      pm_args.insert("error_rate_vec", edem.error_rates);
       config.decoder_custom_args = pm_args;
     } else if (decoder_type == "trt_decoder") {
       if (ising_artifacts_dir.empty())
@@ -413,7 +413,7 @@ void save_dem_to_file(const std::vector<cudaq::qec::detector_error_model> &dems,
 
       config.syndrome_size = hRows;
       config.block_size = hCols;
-      pm_args.insert("error_rate_vec", priors);
+      config.error_rate_vec = priors;
       printf("trt+Ising: loaded Ising artifacts '%s' (H %ux%u, O %u rows, "
              "priors %zu); D_sparse from D_sparse.txt (%zu detectors)\n",
              ising_artifacts_dir.c_str(), hRows, hCols, oRows, priors.size(),

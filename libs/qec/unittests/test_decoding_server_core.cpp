@@ -37,14 +37,20 @@ using cudaq::realtime::RPCResponse;
 class ControlledDecoder final : public cudaq::qec::decoder {
 public:
   ControlledDecoder()
-      : decoder(cudaq::qec::sparse_binary_matrix::from_csr(
-            /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
-            /*col_indices=*/{0})) {
-    set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
-    // One detector is the parity of two incoming measurement bits, so a decode
-    // completes only after two one-bit enqueue calls.
-    set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
-  }
+      : decoder(
+            cudaq::qec::decoder_init(
+                /*H=*/cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1},
+                                                                 {0}),
+                /*O=*/
+                cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1}, {0}),
+                /*error_rates=*/{},
+                // One detector is the parity of two incoming measurement
+                // bits, so a decode completes only after two one-bit
+                // enqueue calls.
+                /*D=*/
+                cudaq::qec::sparse_binary_matrix::from_csr(1, 2, {0, 2},
+                                                           {0, 1})),
+            cudaq::qec::decode_result_type::errors) {}
 
   cudaq::qec::decoder_result
   decode(const std::vector<cudaq::qec::float_t> &syndrome) override {
@@ -213,11 +219,20 @@ TEST(SetCudaDeviceForDecode, ImpossibleDeviceThrows) {
 class MispinnedDecoder final : public cudaq::qec::decoder {
 public:
   MispinnedDecoder()
-      : decoder(cudaq::qec::sparse_binary_matrix::from_csr(
-            /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
-            /*col_indices=*/{0})) {
-    set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
-    set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
+      : decoder(
+            cudaq::qec::decoder_init(
+                /*H=*/cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1},
+                                                                 {0}),
+                /*O=*/
+                cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1}, {0}),
+                /*error_rates=*/{},
+                // One detector is the parity of two incoming measurement
+                // bits, so a decode completes only after two one-bit
+                // enqueue calls.
+                /*D=*/
+                cudaq::qec::sparse_binary_matrix::from_csr(1, 2, {0, 2},
+                                                           {0, 1})),
+            cudaq::qec::decode_result_type::errors) {
     cuda_device_id_ = 1 << 20;
   }
   cudaq::qec::decoder_result

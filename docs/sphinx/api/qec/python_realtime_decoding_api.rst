@@ -79,17 +79,16 @@ out-of-tree decoder plugins. Use ``cudaq_qec.decoder_param_schema(name)`` to
 inspect a decoder's parameters and ``cudaq_qec.registered_decoder_schemas()``
 to list all decoders with registered schemas.
 
-For example, the ``pymatching`` decoder accepts ``error_rate_vec``
-(per-error prior probabilities in the range ``(0, 0.5]``, length matching
-the decoder ``block_size``) and ``merge_strategy`` (one of ``"disallow"``,
-``"independent"``, ``"smallest_weight"``, ``"keep_original"``,
-``"replace"``):
+For example, model error rates are assigned to the top-level
+``decoder_config.error_rate_vec`` field, while the ``pymatching`` decoder's
+custom ``merge_strategy`` is one of ``"disallow"``, ``"independent"``,
+``"smallest_weight"``, ``"keep_original"``, or ``"replace"``:
 
 .. code-block:: python
 
    config.type = "pymatching"
+   config.error_rate_vec = [0.1, 0.1, 0.1]
    config.decoder_custom_args = {
-       "error_rate_vec": [0.1, 0.1, 0.1],
        "merge_strategy": "smallest_weight",
    }
 

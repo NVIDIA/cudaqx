@@ -600,14 +600,13 @@ Usage:
             auto inner_decoder_params = cudaqx::heterogeneous_map{
                 {"use_osd", true}, {"max_iterations", 50}, {"use_sparsity", true}};
             auto opts = cudaqx::heterogeneous_map{
-                {"error_rate_vec", dem.error_rates},
                 {"window_size", 1},
                 {"num_syndromes_per_round", code->get_num_z_stabilizers() + code->get_num_x_stabilizers()},
                 {"num_boundary_syndromes", code->get_num_z_stabilizers()},
                 {"inner_decoder_name", "nv-qldpc-decoder"},
                 {"inner_decoder_params", inner_decoder_params}};
             auto swdec = cudaq::qec::get_decoder("sliding_window",
-                                                 dem.detector_error_matrix, opts);
+                                                 cudaq::qec::decoder_init{dem}, opts);
             return 0;
         }
 
@@ -616,4 +615,3 @@ Output:
 Once a decode step completes, results use the same types as other pre-built
 decoders (:class:`cudaq_qec.Decoder` in Python, :cpp:class:`cudaq::qec::decoder`
 in C++).
-

@@ -25,7 +25,131 @@
 #include <stdexcept>
 #include <unistd.h>
 
+namespace cudaq::qec {
+
+/// Records the measurement-to-detector map exactly as a plugin sees it at
+/// construction, so a test can pin what the construction inputs carry.
+/// The whole model exactly as the plugin received it, so two construction
+/// paths can be compared field by field.
+struct captured_model {
+  std::vector<std::vector<std::uint32_t>> H;
+  std::vector<std::vector<std::uint32_t>> O;
+  bool has_observable_model = false;
+  std::vector<double> rates;
+  std::vector<std::vector<std::uint32_t>> D;
+  bool has_d = false;
+  bool has_stim_dem = false;
+  std::size_t num_detectors = 0;
+  std::size_t num_error_mechanisms = 0;
+  std::size_t num_observables = 0;
+
+  bool operator==(const captured_model &) const = default;
+};
+
+struct construction_d_probe {
+  static inline bool has_d = false;
+  static inline std::vector<std::vector<std::uint32_t>> rows;
+  static inline std::uint32_t num_cols = 0;
+  /// Detector syndrome handed to decode(), i.e. D as the realtime path applies
+  /// it, so a test can compare that against the construction copy above.
+  static inline std::vector<float_t> last_decode_syndrome;
+
+  static inline captured_model model;
+};
+
+class d_capture_decoder : public decoder {
+public:
+  d_capture_decoder(decoder_init inputs, decode_result_type requested_output,
+                    const cudaqx::heterogeneous_map &)
+      : decoder(std::move(inputs), requested_output) {
+    const auto &in = get_inputs();
+    const auto *D = in.measurement_to_detectors();
+    construction_d_probe::has_d = D != nullptr;
+    construction_d_probe::rows.clear();
+    construction_d_probe::num_cols = 0;
+    if (D) {
+      construction_d_probe::rows = D->to_nested_csr();
+      construction_d_probe::num_cols = D->num_cols();
+    }
+
+    captured_model captured;
+    captured.H = in.detector_error_matrix().canonicalize().to_nested_csr();
+    captured.has_observable_model = in.has_observable_model();
+    if (captured.has_observable_model)
+      captured.O = in.observable_flips_matrix().canonicalize().to_nested_csr();
+    captured.rates = in.error_rates();
+    captured.has_d = D != nullptr;
+    if (D)
+      captured.D = D->to_nested_csr();
+    captured.has_stim_dem = in.has_stim_dem();
+    captured.num_detectors = in.num_detectors();
+    captured.num_error_mechanisms = in.num_error_mechanisms();
+    captured.num_observables = in.num_observables();
+    construction_d_probe::model = std::move(captured);
+  }
+
+  decoder_result decode(const std::vector<float_t> &syndrome) override {
+    construction_d_probe::last_decode_syndrome = syndrome;
+    return decoder_result{true,
+                          std::vector<float_t>(get_num_observables(), 0.0)};
+  }
+
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      d_capture_decoder,
+      static std::unique_ptr<decoder> create(
+          decoder_init inputs, std::optional<decode_result_type> output,
+          const cudaqx::heterogeneous_map &params) {
+        return std::make_unique<d_capture_decoder>(
+            std::move(inputs), output.value_or(decode_result_type::observables),
+            params);
+      })
+};
+
+CUDAQ_EXT_PT_REGISTER_TYPE(d_capture_decoder)
+
+} // namespace cudaq::qec
+
 namespace {
+// A Stim DEM on disk, removed when the test finishes. Two detectors, three
+// error mechanisms, one observable.
+constexpr const char *kTinyDem = "error(0.1) D0 L0\n"
+                                 "error(0.1) D0 D1\n"
+                                 "error(0.2) D1\n";
+
+class ScopedDemFile {
+public:
+  explicit ScopedDemFile(const char *contents = kTinyDem) {
+    // GoogleTest binaries run concurrently under ctest, and this file is
+    // discovered by more than one target, so a process-local counter alone
+    // collides. Qualify by pid.
+    static int counter = 0;
+    path_ = std::filesystem::temp_directory_path() /
+            ("cudaqx_resolver_" + std::to_string(::getpid()) + "_" +
+             std::to_string(counter++) + ".dem");
+    std::ofstream(path_) << contents;
+  }
+  ~ScopedDemFile() {
+    std::error_code ec;
+    std::filesystem::remove(path_, ec);
+  }
+  const std::filesystem::path &path() const { return path_; }
+
+private:
+  std::filesystem::path path_;
+};
+
+/// Config carrying only what both model branches need: an id, a type, and a
+/// two-row measurement-to-detector map matching the tiny DEM's detectors.
+cudaq::qec::decoding::config::decoder_config
+make_dem_config(const std::filesystem::path &dem_path) {
+  cudaq::qec::decoding::config::decoder_config config;
+  config.id = 0;
+  config.type = "d_capture_decoder";
+  config.stim_dem_path = dem_path.string();
+  config.D_sparse = {0, -1, 1, -1};
+  return config;
+}
+
 class ScopedEnv {
 public:
   ScopedEnv(const char *name, const char *value) : name(name) {
@@ -208,6 +332,7 @@ create_test_decoder_config_nv_qldpc(int id) {
   cudaq::qec::decoding::config::decoder_config config =
       create_test_empty_decoder_config(id);
   config.type = "nv-qldpc-decoder";
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
 
   cudaqx::heterogeneous_map nv_args;
   nv_args.insert("use_sparsity", true);
@@ -215,7 +340,6 @@ create_test_decoder_config_nv_qldpc(int id) {
   nv_args.insert("use_osd", true);
   nv_args.insert("osd_order", 60);
   nv_args.insert("osd_method", 3);
-  nv_args.insert("error_rate_vec", std::vector<double>(config.block_size, 0.1));
   nv_args.insert("n_threads", 128);
   nv_args.insert("bp_batch_size", 1);
   nv_args.insert("osd_batch_size", 16);
@@ -406,6 +530,7 @@ create_test_decoder_config_trt(int id) {
   O.at({0, 1}) = 1;
   O.at({1, 3}) = 1;
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
 
   cudaqx::heterogeneous_map trt_args;
   trt_args.insert("onnx_load_path", "/tmp/predecoder.onnx");
@@ -414,11 +539,10 @@ create_test_decoder_config_trt(int id) {
   trt_args.insert("memory_workspace", std::size_t{1ULL << 20});
   trt_args.insert("batch_size", std::size_t{4});
   trt_args.insert("use_cuda_graph", false);
+  trt_args.insert("engine_output_format", "observables_and_residual_detectors");
   trt_args.insert("global_decoder", "pymatching");
   cudaqx::heterogeneous_map pymatching_params;
   pymatching_params.insert("merge_strategy", "smallest_weight");
-  pymatching_params.insert("error_rate_vec",
-                           std::vector<double>(config.block_size, 0.1));
   trt_args.insert("global_decoder_params", pymatching_params);
   config.decoder_custom_args = trt_args;
 
@@ -450,31 +574,27 @@ TEST(DecoderYAMLTest, TrtDecoderConfigToHeterogeneousMap) {
   EXPECT_EQ(params.get<std::size_t>("memory_workspace"), 1ULL << 20);
   EXPECT_EQ(params.get<std::size_t>("batch_size"), 4u);
   EXPECT_FALSE(params.get<bool>("use_cuda_graph"));
+  EXPECT_EQ(params.get<std::string>("engine_output_format"),
+            "observables_and_residual_detectors");
   EXPECT_EQ(params.get<std::string>("global_decoder"), "pymatching");
 
   auto global_params =
       params.get<cudaqx::heterogeneous_map>("global_decoder_params");
   EXPECT_EQ(global_params.get<std::string>("merge_strategy"),
             "smallest_weight");
-  EXPECT_EQ(global_params.get<std::vector<double>>("error_rate_vec").size(),
-            config.block_size);
+  EXPECT_FALSE(global_params.contains("error_rate_vec"));
 }
 
-TEST(DecoderYAMLTest, TrtDecoderRealtimeParamsIncludeObservableMatrix) {
+TEST(DecoderYAMLTest, RealtimeParamsDoNotInjectObservableMatrix) {
   auto config = create_test_decoder_config_trt(0);
   auto params = cudaq::qec::decoding::host::prepare_decoder_params(config);
 
-  auto O = params.get<cudaqx::tensor<uint8_t>>("O");
-  EXPECT_EQ(O.shape()[0], 2u);
-  EXPECT_EQ(O.shape()[1], config.block_size);
-  EXPECT_EQ(O.at({0, 1}), 1);
-  EXPECT_EQ(O.at({1, 3}), 1);
+  EXPECT_FALSE(params.contains("O"));
+  EXPECT_FALSE(params.contains("error_rate_vec"));
 
   auto global_params =
       params.get<cudaqx::heterogeneous_map>("global_decoder_params");
-  auto global_O = global_params.get<cudaqx::tensor<uint8_t>>("O");
-  EXPECT_EQ(global_O.shape()[0], 2u);
-  EXPECT_EQ(global_O.shape()[1], config.block_size);
+  EXPECT_FALSE(global_params.contains("O"));
 }
 
 TEST(DecoderYAMLTest, TrtDecoderEmptyGlobalDecoderParams) {
@@ -508,7 +628,7 @@ TEST(DecoderYAMLTest, TrtDecoderEmptyGlobalDecoderParams) {
 
   params = cudaq::qec::decoding::host::prepare_decoder_params(config);
   EXPECT_TRUE(params.contains("global_decoder_params"));
-  EXPECT_TRUE(params.contains("O"));
+  EXPECT_FALSE(params.contains("O"));
 
   config.O_sparse.clear();
   params = cudaq::qec::decoding::host::prepare_decoder_params(config);
@@ -531,6 +651,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: residual_detectors
       global_decoder: chromobius
 )";
   auto parsed =
@@ -564,6 +685,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: residual_detectors
       global_decoder: my_plugin
       global_decoder_params: {}
 )";
@@ -584,6 +706,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: residual_detectors
       global_decoder: my_plugin
 )";
   auto parsed =
@@ -607,6 +730,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: errors
       onnx_load_path: /tmp/predecoder.onnx
       global_decoder_params:
         merge_strategy: smallest_weight
@@ -643,13 +767,13 @@ TEST(DecoderYAMLTest, SlidingWindowDecoder) {
       cudaq::qec::pcm_to_sparse_vec(cudaqx::tensor<uint8_t>({2, n_cols}));
   config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
       config.syndrome_size, 2, /*include_first_round=*/false);
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
   cudaqx::heterogeneous_map sw_args;
   sw_args.insert("window_size", std::size_t{1});
   sw_args.insert("step_size", std::size_t{1});
   sw_args.insert("num_syndromes_per_round", n_syndromes_per_round);
   sw_args.insert("straddle_start_round", false);
   sw_args.insert("straddle_end_round", true);
-  sw_args.insert("error_rate_vec", std::vector<double>(config.block_size, 0.1));
 
   // Inner decoder config
   sw_args.insert("inner_decoder_name", "multi_error_lut");
@@ -677,6 +801,7 @@ TEST(DecoderYAMLTest, TrtDecoderConfigRoundTripWithoutInstantiation) {
   trt_args.insert("engine_save_path", "/tmp/saved.engine");
   trt_args.insert("precision", "best");
   trt_args.insert("memory_workspace", std::size_t{1 << 20});
+  trt_args.insert("engine_output_format", "errors");
   config.decoder_custom_args = trt_args;
   multi_config.decoders.push_back(config);
 
@@ -698,6 +823,7 @@ TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
     config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
     config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
         config.syndrome_size, 2, /*include_first_round=*/false);
+    config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
     config.decoder_custom_args = sw_args;
     multi_config.decoders.push_back(config);
     test_decoder_yaml_roundtrip(multi_config);
@@ -708,7 +834,6 @@ TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
   single_lut_sw.insert("step_size", std::size_t{1});
   single_lut_sw.insert("num_syndromes_per_round", std::size_t{2});
   single_lut_sw.insert("num_boundary_syndromes", std::size_t{1});
-  single_lut_sw.insert("error_rate_vec", std::vector<double>(6, 0.1));
   single_lut_sw.insert("inner_decoder_name", "single_error_lut");
   check_roundtrip(single_lut_sw);
 
@@ -717,7 +842,6 @@ TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
     nv_sw.insert("inner_decoder_name", "nv-qldpc-decoder");
     cudaqx::heterogeneous_map nv_inner;
     nv_inner.insert("max_iterations", 5);
-    nv_inner.insert("error_rate_vec", std::vector<double>(6, 0.1));
     nv_sw.insert("inner_decoder_params", nv_inner);
     check_roundtrip(nv_sw);
   }
@@ -740,7 +864,9 @@ TEST(DecoderConfigTest, ConfigureRejectsDuplicateAndNegativeIds) {
 TEST(DecoderConfigTest, CreateRealtimeDecoderConfiguresRuntimeState) {
   auto config = create_test_sample_realtime_decoder_config(7);
 
-  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(config);
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      config, cudaq::qec::decoding::host::resolve_decoder_init(
+                  config, std::filesystem::current_path()));
 
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(decoder->get_decoder_id(), 7u);
@@ -748,11 +874,543 @@ TEST(DecoderConfigTest, CreateRealtimeDecoderConfiguresRuntimeState) {
   EXPECT_EQ(decoder->get_num_msyn_per_decode(), 20u);
 }
 
+// A repeated index within a D row cancels under the realtime detector XOR. The
+// construction inputs must encode that same rule, or a plugin reading its
+// inputs sees a different D from the one the realtime path applies.
+TEST(DecoderConfigTest, DuplicateDetectorIndicesCollapseInConstructionInputs) {
+  auto config = create_test_empty_decoder_config(0);
+  config.type = "d_capture_decoder";
+  // Ten non-empty detector rows, as the configuration layer requires. Row 0
+  // names measurement 9 twice, which cancels, plus measurement 2, which
+  // survives. No other row references measurement 9, so the inferred
+  // measurement width stays 10 only if width is taken before cancellation.
+  config.D_sparse = {9,  9, 2,  -1, 0,  -1, 1,  -1, 2,  -1, 3,
+                     -1, 4, -1, 5,  -1, 6,  -1, 7,  -1, 8,  -1};
+
+  // Round-trip so the fixture is a configuration the server would accept.
+  auto parsed = cudaq::qec::decoding::config::decoder_config::from_yaml_str(
+      config.to_yaml_str(200));
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      parsed, cudaq::qec::decoding::host::resolve_decoder_init(
+                  parsed, std::filesystem::current_path()));
+  ASSERT_NE(decoder, nullptr);
+
+  // Construction copy: the duplicate pair has cancelled, measurement 2 remains.
+  ASSERT_TRUE(cudaq::qec::construction_d_probe::has_d);
+  ASSERT_EQ(cudaq::qec::construction_d_probe::rows.size(),
+            parsed.syndrome_size);
+  EXPECT_EQ(cudaq::qec::construction_d_probe::rows[0],
+            std::vector<std::uint32_t>{2});
+  EXPECT_EQ(cudaq::qec::construction_d_probe::rows[1],
+            std::vector<std::uint32_t>{0});
+  // Width survives the cancellation of its only referencing entry.
+  EXPECT_EQ(cudaq::qec::construction_d_probe::num_cols, 10u);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 10u);
+
+  // Realtime application: feed one shot and check the detector syndrome the
+  // decoder receives matches the same canonical D.
+  cudaq::qec::construction_d_probe::last_decode_syndrome.clear();
+  std::vector<uint8_t> measurements(10, 0);
+  measurements[2] = 1; // survives in row 0 and row 3
+  measurements[9] = 1; // cancelled in row 0, referenced nowhere else
+  ASSERT_TRUE(decoder->enqueue_syndrome(measurements));
+
+  const std::vector<cudaq::qec::float_t> expected_detectors = {1, 0, 0, 1, 0,
+                                                               0, 0, 0, 0, 0};
+  EXPECT_EQ(cudaq::qec::construction_d_probe::last_decode_syndrome,
+            expected_detectors);
+}
+
+// --- raw Stim DEM model source ---------------------------------------------
+
+TEST(ResolveDecoderInputs, DemSourceCarriesRawProvenanceAndDerivedSizes) {
+  ScopedDemFile dem;
+  auto config = make_dem_config(dem.path());
+
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      config, std::filesystem::current_path());
+
+  // The DEM stays authoritative, so a DEM-native decoder can read it back.
+  ASSERT_TRUE(inputs.has_stim_dem());
+  EXPECT_NE(inputs.stim_dem().find("error(0.1) D0 L0"), std::string::npos);
+  // Sizes come from the DEM rather than the configuration.
+  EXPECT_EQ(inputs.num_detectors(), 2u);
+  EXPECT_EQ(inputs.num_error_mechanisms(), 3u);
+  EXPECT_EQ(inputs.num_observables(), 1u);
+  // D is orthogonal to the model source and survives resolution.
+  ASSERT_NE(inputs.measurement_to_detectors(), nullptr);
+  EXPECT_EQ(inputs.measurement_to_detectors()->num_rows(), 2u);
+}
+
+TEST(ResolveDecoderInputs, DemSourceRejectsCompetingMatrixKeys) {
+  ScopedDemFile dem;
+  const std::filesystem::path cwd = std::filesystem::current_path();
+
+  auto with_H = make_dem_config(dem.path());
+  with_H.H_sparse = {0, -1, 1, -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(with_H, cwd),
+               std::runtime_error);
+
+  auto with_O = make_dem_config(dem.path());
+  with_O.O_sparse = {0, -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(with_O, cwd),
+               std::runtime_error);
+
+  auto with_rates = make_dem_config(dem.path());
+  with_rates.error_rate_vec = {0.1, 0.1, 0.1};
+  EXPECT_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_init(with_rates, cwd),
+      std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, DemSourceRejectsUnreadableFile) {
+  auto config = make_dem_config("/nonexistent/definitely-not-here.dem");
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, DemSourceTreatsSuppliedSizesAsAssertions) {
+  ScopedDemFile dem;
+  const std::filesystem::path cwd = std::filesystem::current_path();
+
+  // Matching values are accepted.
+  auto matching = make_dem_config(dem.path());
+  matching.syndrome_size = 2;
+  matching.block_size = 3;
+  EXPECT_NO_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_init(matching, cwd));
+
+  auto wrong_detectors = make_dem_config(dem.path());
+  wrong_detectors.syndrome_size = 99;
+  EXPECT_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_init(wrong_detectors, cwd),
+      std::runtime_error);
+
+  auto wrong_mechanisms = make_dem_config(dem.path());
+  wrong_mechanisms.block_size = 99;
+  EXPECT_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_init(wrong_mechanisms, cwd),
+      std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, DemSourceResolvesRelativePathAgainstBaseDir) {
+  ScopedDemFile dem;
+  auto config = make_dem_config(dem.path().filename());
+  ASSERT_TRUE(std::filesystem::path(config.stim_dem_path).is_relative());
+
+  // Against the containing directory it resolves; against an unrelated one it
+  // does not, which is what makes the base directory meaningful.
+  EXPECT_NO_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+      config, dem.path().parent_path()));
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+                   config, "/definitely/not/the/right/place"),
+               std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, MatrixSourceStillRequiresItsDimensions) {
+  auto config = create_test_empty_decoder_config(0);
+  config.block_size = 0;
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, MatrixSourceRequiresAnObservableMapping) {
+  auto config = create_test_empty_decoder_config(0);
+  config.O_sparse.clear();
+  // The realtime path returns observable corrections, so a model with no
+  // observable mapping cannot serve it. Without this it constructed happily
+  // and decoded to a zero-length observable frame.
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+// Acceptance: a DEM-native decoder can be configured and constructed for the
+// decoding server straight from a raw Stim DEM, with no decoder-specific
+// branch anywhere in the configuration or construction path. Chromobius
+// requires the DEM itself -- it throws when handed only matrices -- so this
+// only passes if raw provenance survives resolution.
+// Acceptance: a decoding-server configuration on disk names its model with a
+// path relative to itself, and the server resolves it through its own session
+// path. Deliberately goes through SessionRegistry rather than calling the
+// resolver directly: an earlier version of this test bypassed the registry and
+// therefore missed that the registry resolved every model against the process
+// working directory.
+// --- configuration lifecycle -----------------------------------------------
+//
+// Applying a configuration must not damage a working one. Resolution happens
+// before any process state is touched, and the configuration is cached and
+// published only once it is actually in effect.
+
+TEST(ConfigureDecodersLifecycle, InvalidModelLeavesPriorConfigurationInPlace) {
+  using namespace cudaq::qec::decoding::config;
+
+  multi_decoder_config good;
+  good.decoders.push_back(create_test_sample_realtime_decoder_config(0));
+  ASSERT_EQ(configure_decoders(good), 0);
+  const auto cached_after_good = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_good, nullptr);
+
+  // An unresolvable model: resolution failures propagate as exceptions rather
+  // than a status code, and must happen before anything is replaced.
+  multi_decoder_config bad;
+  auto broken = create_test_sample_realtime_decoder_config(0);
+  broken.O_sparse.clear(); // no observable mapping for an observable server
+  bad.decoders.push_back(broken);
+  EXPECT_THROW(configure_decoders(bad), std::runtime_error);
+
+  // The previously applied configuration is still the cached one, and is not
+  // replaced by the configuration that failed to apply.
+  const auto cached_after_bad = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_bad, nullptr);
+  EXPECT_EQ(*cached_after_bad, *cached_after_good);
+
+  finalize_decoders();
+}
+
+TEST(ConfigureDecodersLifecycle, EmptyLeadingDetectorRowIsRejected) {
+  using namespace cudaq::qec::decoding::config;
+
+  // A -1 in first position is an empty detector row: that detector maps to no
+  // measurement and would decode as permanently zero. The row-emptiness check
+  // once looked only for adjacent -1 pairs, so a leading one reached
+  // construction and produced a silently wrong decoder.
+  multi_decoder_config config;
+  auto leading_empty = create_test_sample_realtime_decoder_config(0);
+  auto &d = leading_empty.D_sparse;
+  d.erase(d.begin(), std::find(d.begin(), d.end(), -1));
+  ASSERT_EQ(d.front(), -1);
+  ASSERT_EQ(std::count(d.begin(), d.end(), -1),
+            std::count(leading_empty.D_sparse.begin(),
+                       leading_empty.D_sparse.end(), -1));
+  config.decoders.push_back(leading_empty);
+  EXPECT_THROW(configure_decoders(config), std::runtime_error);
+
+  finalize_decoders();
+}
+
+TEST(ConfigureDecodersLifecycle, ConstructionFailureIsNotAdvertised) {
+  using namespace cudaq::qec::decoding::config;
+
+  multi_decoder_config good;
+  good.decoders.push_back(create_test_sample_realtime_decoder_config(0));
+  ASSERT_EQ(configure_decoders(good), 0);
+  const auto cached_after_good = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_good, nullptr);
+
+  // Resolves cleanly, then fails in the factory: an unregistered decoder type.
+  multi_decoder_config unbuildable;
+  auto unknown = create_test_sample_realtime_decoder_config(0);
+  unknown.type = "no-such-decoder-is-registered";
+  unbuildable.decoders.push_back(unknown);
+  EXPECT_NE(configure_decoders(unbuildable), 0);
+
+  // A configuration that never took effect must not be cached or published.
+  const auto cached_after_failure = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_failure, nullptr);
+  EXPECT_EQ(*cached_after_failure, *cached_after_good);
+
+  finalize_decoders();
+}
+
+// Acceptance 2: a plugin must receive the same model at construction whether it
+// is built offline or through the decoding server. This is the test that finds
+// divergences between the two construction paths -- the class of defect where
+// one path canonicalized a matrix and the other did not, which was invisible
+// end to end because only the plugin could see both.
+TEST(DecodingServerAcceptance,
+     ConstructionInputsAgreeAcrossOfflineAndServerPaths) {
+  using namespace cudaq::qec::decoding::config;
+
+  auto config = create_test_empty_decoder_config(0);
+  config.type = "d_capture_decoder";
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.01);
+  // A duplicate index, so the two paths must agree on GF(2) collapse too.
+  config.D_sparse = {9,  9, 2,  -1, 0,  -1, 1,  -1, 2,  -1, 3,
+                     -1, 4, -1, 5,  -1, 6,  -1, 7,  -1, 8,  -1};
+
+  // Server path: resolve the configuration, then construct through the factory.
+  auto server_inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      config, std::filesystem::current_path());
+  auto server_decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      config, server_inputs);
+  ASSERT_NE(server_decoder, nullptr);
+  const auto server_model = cudaq::qec::construction_d_probe::model;
+
+  // Offline path: build the model the way an offline caller does, directly from
+  // the same matrices. Reusing the handle the server just produced would only
+  // prove that an object equals itself.
+  auto offline_H = cudaq::qec::pcm_from_sparse_vec(
+      config.H_sparse, config.syndrome_size, config.block_size);
+  const auto offline_num_obs =
+      std::count(config.O_sparse.begin(), config.O_sparse.end(), -1);
+  auto offline_O = cudaq::qec::pcm_from_sparse_vec(
+      config.O_sparse, offline_num_obs, config.block_size);
+  std::vector<std::vector<std::uint32_t>> offline_d_rows;
+  {
+    std::vector<std::uint32_t> row;
+    for (std::int64_t entry : config.D_sparse) {
+      if (entry < 0) {
+        offline_d_rows.push_back(std::move(row));
+        row.clear();
+      } else {
+        row.push_back(static_cast<std::uint32_t>(entry));
+      }
+    }
+  }
+  std::uint32_t offline_measurements = 0;
+  for (const auto &r : offline_d_rows)
+    for (auto c : r)
+      offline_measurements = std::max(offline_measurements, c + 1);
+  auto offline_D = cudaq::qec::sparse_binary_matrix::from_nested_csr(
+                       static_cast<std::uint32_t>(offline_d_rows.size()),
+                       offline_measurements, offline_d_rows)
+                       .canonicalize();
+  cudaq::qec::decoder_init offline_inputs(
+      std::move(offline_H), std::move(offline_O), config.error_rate_vec,
+      std::move(offline_D));
+
+  auto offline_decoder =
+      cudaq::qec::decoder::get("d_capture_decoder", offline_inputs,
+                               cudaq::qec::decode_result_type::observables);
+  ASSERT_NE(offline_decoder, nullptr);
+  const auto offline_model = cudaq::qec::construction_d_probe::model;
+
+  EXPECT_EQ(server_model, offline_model);
+  // And the model is complete, not merely equal: all four fields present.
+  EXPECT_FALSE(server_model.H.empty());
+  EXPECT_TRUE(server_model.has_observable_model);
+  EXPECT_EQ(server_model.rates.size(), config.block_size);
+  EXPECT_TRUE(server_model.has_d);
+  // The duplicate pair cancelled on both paths.
+  EXPECT_EQ(server_model.D[0], std::vector<std::uint32_t>{2});
+}
+
+// Acceptance 1: an H-based plugin remains usable offline and through the server
+// without any decoder-specific framework change. Uses the same registered
+// plugin on both routes and asserts each produces a working decoder.
+TEST(DecodingServerAcceptance, MatrixSourcePluginWorksOfflineAndOnServer) {
+  using namespace cudaq::qec::decoding::config;
+
+  auto config = create_test_sample_realtime_decoder_config(0);
+
+  // Server route.
+  multi_decoder_config multi;
+  multi.decoders.push_back(config);
+  ASSERT_EQ(configure_decoders(multi), 0);
+  finalize_decoders();
+
+  // Offline route, same plugin and the same resolved model.
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      config, std::filesystem::current_path());
+  auto offline = cudaq::qec::decoder::get(
+      config.type, inputs, cudaq::qec::decode_result_type::errors);
+  ASSERT_NE(offline, nullptr);
+  auto result = offline->decode(
+      std::vector<cudaq::qec::float_t>(config.syndrome_size, 0.0));
+  EXPECT_EQ(result.result.size(), config.block_size);
+}
+
+TEST(ConfigureDecodersLifecycle,
+     AppliedConfigurationStoresAnAbsoluteModelPath) {
+  using namespace cudaq::qec::decoding::config;
+
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("cudaqx_abs_" + std::to_string(::getpid()));
+  std::filesystem::create_directories(root / "configs");
+  struct Cleanup {
+    std::filesystem::path dir;
+    ~Cleanup() {
+      std::error_code ec;
+      std::filesystem::remove_all(dir, ec);
+    }
+  } cleanup{root};
+  std::ofstream(root / "configs" / "model.dem") << kTinyDem;
+
+  const auto previous_cwd = std::filesystem::current_path();
+  std::filesystem::current_path(root);
+  struct RestoreCwd {
+    std::filesystem::path path;
+    ~RestoreCwd() { std::filesystem::current_path(path); }
+  } restore{previous_cwd};
+
+  decoder_config dc;
+  dc.id = 0;
+  dc.type = "d_capture_decoder";
+  dc.stim_dem_path = "model.dem";
+  dc.D_sparse = {0, -1, 1, -1};
+  multi_decoder_config mc;
+  mc.decoders.push_back(dc);
+
+  // A RELATIVE base directory: normalizing the join without absolutizing it
+  // would store "configs/model.dem", which stops resolving once the working
+  // directory moves.
+  ASSERT_EQ(configure_decoders(mc, "configs"), 0);
+
+  EXPECT_TRUE(
+      std::filesystem::path(mc.decoders[0].stim_dem_path).is_absolute());
+  const auto cached = last_configured_multi_decoder_config();
+  ASSERT_NE(cached, nullptr);
+  EXPECT_TRUE(
+      std::filesystem::path(cached->decoders[0].stim_dem_path).is_absolute());
+  EXPECT_TRUE(std::filesystem::exists(cached->decoders[0].stim_dem_path));
+
+  finalize_decoders();
+}
+
+TEST(ConfigureDecodersLifecycle, FailedResolutionLeavesCallerConfigUnmodified) {
+  using namespace cudaq::qec::decoding::config;
+
+  ScopedDemFile dem;
+  const auto base = dem.path().parent_path();
+
+  decoder_config first;
+  first.id = 0;
+  first.type = "d_capture_decoder";
+  first.stim_dem_path = dem.path().filename().string();
+  first.D_sparse = {0, -1, 1, -1};
+
+  decoder_config second = first;
+  second.id = 1;
+  second.stim_dem_path = "definitely-not-present.dem";
+
+  multi_decoder_config mc;
+  mc.decoders.push_back(first);
+  mc.decoders.push_back(second);
+  const std::string original_path = mc.decoders[0].stim_dem_path;
+
+  // The second entry cannot resolve, so nothing is applied -- including the
+  // path rewrite on the entry that did resolve. Otherwise a retry against a
+  // different base directory would silently keep the first one.
+  EXPECT_THROW(configure_decoders(mc, base), std::runtime_error);
+  EXPECT_EQ(mc.decoders[0].stim_dem_path, original_path);
+}
+
+TEST(ResolveDecoderInputs, DetectorMapIndicesMustBeRepresentable) {
+  auto config = create_test_empty_decoder_config(0);
+  // Only -1 terminates a row; anything else must be a measurement index that
+  // fits the sparse index type. Narrowing would alias onto a real measurement.
+  config.D_sparse = {
+      static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()), -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+
+  auto negative = create_test_empty_decoder_config(0);
+  negative.D_sparse = {-2, -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+                   negative, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+TEST(DecodingServerAcceptance,
+     ServerLoadsFileRelativeDemThroughSessionRegistry) {
+  if (cudaq::qec::decoding::config::find_decoder_schema("chromobius") ==
+      nullptr)
+    GTEST_SKIP() << "chromobius plugin not built in this configuration";
+
+  // A config directory holding both the document and its model, so the model
+  // is findable only by resolving relative to the document.
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("cudaqx_server_acc_" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  struct Cleanup {
+    std::filesystem::path dir;
+    ~Cleanup() {
+      std::error_code ec;
+      std::filesystem::remove_all(dir, ec);
+    }
+  } cleanup{dir};
+
+  std::ofstream(dir / "model.dem") << "error(0.1) D0 L0\n"
+                                      "error(0.1) D0 D1 L1\n"
+                                      "error(0.1) D1 L2\n"
+                                      "detector(0, 0, 0, 0) D0\n"
+                                      "detector(0, 0, 0, 1) D1\n";
+
+  cudaq::qec::decoding::config::decoder_config config;
+  config.id = 0;
+  config.type = "chromobius";
+  config.stim_dem_path = "model.dem"; // relative to the document, not the CWD
+  config.D_sparse = {0, -1, 1, -1};
+  cudaq::qec::decoding::config::multi_decoder_config multi;
+  multi.decoders.push_back(config);
+  const auto config_path = dir / "decoders.yml";
+  std::ofstream(config_path) << multi.to_yaml_str(200);
+
+  // Run from somewhere else entirely, so a CWD-relative resolution fails.
+  const auto previous_cwd = std::filesystem::current_path();
+  std::filesystem::current_path(std::filesystem::temp_directory_path());
+  struct RestoreCwd {
+    std::filesystem::path path;
+    ~RestoreCwd() { std::filesystem::current_path(path); }
+  } restore{previous_cwd};
+
+  // The model is genuinely unreachable from the working directory, so this
+  // fixture fails unless the registry resolves against the document.
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+
+  cudaq::qec::decoding_server::SessionRegistry registry;
+  ASSERT_NO_THROW(registry.load_from_config(config_path.string()));
+  EXPECT_NO_THROW((void)registry.get(0));
+}
+
+TEST(DecodingServerAcceptance, ChromobiusConstructsFromRawDemSource) {
+  if (cudaq::qec::decoding::config::find_decoder_schema("chromobius") ==
+      nullptr)
+    GTEST_SKIP() << "chromobius plugin not built in this configuration";
+
+  // The reference case from quantumlib/chromobius: two detectors carrying
+  // colour coordinates, three error mechanisms, three observables.
+  ScopedDemFile dem("error(0.1) D0 L0\n"
+                    "error(0.1) D0 D1 L1\n"
+                    "error(0.1) D1 L2\n"
+                    "detector(0, 0, 0, 0) D0\n"
+                    "detector(0, 0, 0, 1) D1\n");
+
+  cudaq::qec::decoding::config::decoder_config config;
+  config.id = 0;
+  config.type = "chromobius";
+  config.stim_dem_path = dem.path().string();
+  config.D_sparse = {0, -1, 1, -1};
+
+  // Round-trip so this is provably a configuration the server would accept.
+  auto parsed = cudaq::qec::decoding::config::decoder_config::from_yaml_str(
+      config.to_yaml_str(200));
+  EXPECT_EQ(parsed.stim_dem_path, config.stim_dem_path);
+  EXPECT_TRUE(parsed.H_sparse.empty());
+
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      parsed, std::filesystem::current_path());
+  ASSERT_TRUE(inputs.has_stim_dem());
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      parsed, std::move(inputs));
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_EQ(decoder->get_num_observables(), 3u);
+  EXPECT_EQ(decoder->get_result_type(),
+            cudaq::qec::decode_result_type::observables);
+
+  // Decoding works off the DEM-derived detector basis, and returns one entry
+  // per observable the DEM declares.
+  ASSERT_EQ(decoder->get_syndrome_size(), 2u);
+  auto result = decoder->decode(
+      std::vector<cudaq::qec::float_t>(decoder->get_syndrome_size(), 0.0));
+  EXPECT_EQ(result.result.size(), 3u);
+}
+
 TEST(DecoderConfigTest, CreateRealtimeDecoderRequiresDetectorMatrix) {
   auto config = create_test_sample_realtime_decoder_config(0);
   config.D_sparse.clear();
 
-  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(config),
+  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(
+                   config, cudaq::qec::decoding::host::resolve_decoder_init(
+                               config, std::filesystem::current_path())),
                std::runtime_error);
 }
 
@@ -761,7 +1419,9 @@ TEST(DecoderConfigTest, CreateRealtimeDecoderRejectsUnrepresentableId) {
   config.id =
       static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
 
-  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(config),
+  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(
+                   config, cudaq::qec::decoding::host::resolve_decoder_init(
+                               config, std::filesystem::current_path())),
                std::invalid_argument);
 }
 
@@ -1141,10 +1801,10 @@ decoders:
     H_sparse: [0, -1, 1, -1]
     O_sparse: [0, -1, 1, -1]
     D_sparse: [0, -1, 1, -1]
+    error_rate_vec: [0.01, 0.01]
     decoder_custom_args:
       window_size: WINDOW
       step_size: STEP
-      error_rate_vec: [0.01, 0.01]
       inner_decoder_name: single_error_lut
 )";
   auto make_yaml = [&](const std::string &window, const std::string &step) {
@@ -1164,10 +1824,10 @@ decoders:
 
   decoder_config config;
   config.type = "sliding_window";
+  config.error_rate_vec = {0.01, 0.01};
   cudaqx::heterogeneous_map args;
   args.insert("window_size", std::size_t(2));
   args.insert("step_size", std::size_t(4));
-  args.insert("error_rate_vec", std::vector<double>{0.01, 0.01});
   args.insert("inner_decoder_name", std::string("single_error_lut"));
   config.decoder_custom_args = args;
   EXPECT_THROW(config.validate_custom_args(), std::runtime_error);
@@ -1186,10 +1846,6 @@ decoders:
   args.insert("num_boundary_syndromes", std::size_t(2));
   config.decoder_custom_args = args;
   EXPECT_NO_THROW(config.validate_custom_args());
-
-  args.insert("error_rate_vec", std::vector<double>{});
-  config.decoder_custom_args = args;
-  EXPECT_THROW(config.validate_custom_args(), std::runtime_error);
 }
 
 TEST(DecoderSchemaTest, JsonSchemaExportReflectsRegistry) {
@@ -1324,6 +1980,7 @@ TEST(DecoderYAMLTest, TrtFirstEmissionMaterializesGlobalDecoderParams) {
   auto config = create_test_empty_decoder_config(0);
   config.type = "trt_decoder";
   cudaqx::heterogeneous_map args;
+  args.insert("engine_output_format", std::string("residual_detectors"));
   args.insert("global_decoder", std::string("pymatching"));
   config.decoder_custom_args = args;
 
@@ -1499,6 +2156,7 @@ TEST(DecoderChunkFormTest, ExpandsToASelfConsistentFlatConfig) {
 
   // 5 rounds × 2 faults = 10 fault columns
   EXPECT_EQ(config.block_size, 10u);
+  EXPECT_EQ(config.error_rate_vec, closed->error_rates);
   // init's prev_round band + 4 inter-chunk boundaries = 5 detectors
   EXPECT_EQ(config.syndrome_size, 5u);
 
@@ -1734,9 +2392,9 @@ detector(3, 0, 0, 1) D3
 const std::vector<std::int64_t> kStimDemDSparse{0, -1, 1, -1, 2, -1, 3, -1};
 
 /// Writes the model to a file, since a config names a DEM by path.
-class ScopedDemFile {
+class ScopedServerDemFile {
 public:
-  ScopedDemFile() {
+  ScopedServerDemFile() {
     static std::atomic<int> counter{0};
     path_ = std::filesystem::temp_directory_path() /
             ("cudaqx-qec-test-" + std::to_string(getpid()) + "-" +
@@ -1748,7 +2406,7 @@ public:
     // has to fail here rather than as a confusing DEM parse error later.
     EXPECT_TRUE(out) << "could not write " << path_;
   }
-  ~ScopedDemFile() {
+  ~ScopedServerDemFile() {
     std::error_code ec;
     std::filesystem::remove(path_, ec);
   }
@@ -1773,7 +2431,7 @@ decoders:
 } // namespace
 
 TEST(DecoderDemFormTest, ParsesADemFormDocument) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
   const auto config = parse_one(dem_form_yaml(dem.path()));
   EXPECT_EQ(config.stim_dem_path, dem.path());
   EXPECT_TRUE(config.H_sparse.empty());
@@ -1784,7 +2442,7 @@ TEST(DecoderDemFormTest, ParsesADemFormDocument) {
 }
 
 TEST(DecoderDemFormTest, EmittedDocumentReParsesAsDemForm) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   multi_config.decoders.push_back(parse_one(dem_form_yaml(dem.path())));
 
@@ -1805,7 +2463,7 @@ TEST(DecoderDemFormTest, EmittedDocumentReParsesAsDemForm) {
 }
 
 TEST(DecoderDemFormTest, RejectsStimDemPathTogetherWithDemChunks) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
   // Each names the whole DEM on its own, and there is no precedence between
   // them the way a flat H_sparse wins over dem_chunks.
   const auto yaml =
@@ -1821,10 +2479,10 @@ TEST(DecoderDemFormTest, RejectsStimDemPathTogetherWithDemChunks) {
 }
 
 TEST(DecoderDemFormTest, RejectsStimDemPathTogetherWithFlatMatrices) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
   for (const char *derived :
-       {"    block_size: 6\n", "    syndrome_size: 4\n",
-        "    H_sparse: [0, 1, 2, -1]\n", "    O_sparse: [2, -1]\n"}) {
+       {"    H_sparse: [0, 1, 2, -1]\n", "    O_sparse: [2, -1]\n",
+        "    error_rate_vec: [0.1]\n"}) {
     const auto yaml = dem_form_yaml(dem.path(), derived);
     try {
       cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
@@ -1838,7 +2496,7 @@ TEST(DecoderDemFormTest, RejectsStimDemPathTogetherWithFlatMatrices) {
 }
 
 TEST(DecoderDemFormTest, RequiresDSparseAlongsideStimDemPath) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
   // The DEM describes detectors but not which measurement bits form them, so
   // this is the one model field DEM form cannot derive.
   const auto yaml = R"(
@@ -1886,7 +2544,7 @@ TEST(DecoderDemFormTest, JsonSchemaAcceptsDemFormAlongsideTheOtherTwo) {
 }
 
 TEST(DecoderDemFormTest, DerivesObservablesForADecoderThatInstallsNone) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
 
   // The LUT decoders return error frames and never install an observable
   // mapping of their own, and DEM form names no O_sparse to install for them.
@@ -1898,7 +2556,10 @@ TEST(DecoderDemFormTest, DerivesObservablesForADecoderThatInstallsNone) {
   dc.stim_dem_path = dem.path();
   dc.D_sparse = kStimDemDSparse;
 
-  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      dc, std::filesystem::current_path());
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      dc, std::move(inputs));
   EXPECT_EQ(decoder->get_syndrome_size(), 4u);
   EXPECT_EQ(decoder->get_num_observables(), 1u);
 }
@@ -1913,7 +2574,8 @@ TEST(DecoderDemFormTest, ReportsAStimDemPathThatIsNotAFile) {
   // A directory opens as a stream and only fails on the first read, so the
   // error has to name the key and the path rather than the stream buffer.
   try {
-    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    (void)cudaq::qec::decoding::host::resolve_decoder_init(
+        dc, std::filesystem::current_path());
     ADD_FAILURE() << "expected a directory to be rejected";
   } catch (const std::runtime_error &error) {
     EXPECT_NE(std::string(error.what()).find("stim_dem_path"),
@@ -1928,7 +2590,7 @@ TEST(DecoderDemFormTest, ReportsAStimDemPathThatIsNotAFile) {
 // The parser's exclusivity rules reached the other way: decoder_config has
 // writable fields, so a caller can build one that never was a document.
 TEST(DecoderDemFormTest, RejectsDemChunksWithStimDemPathAtConstruction) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
 
   // Four rounds close to four detectors, as many as kStimDem declares, so the
   // D row check downstream cannot catch this. What reaches the decoder is the
@@ -1937,7 +2599,8 @@ TEST(DecoderDemFormTest, RejectsDemChunksWithStimDemPathAtConstruction) {
   dc.stim_dem_path = dem.path();
 
   try {
-    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    (void)cudaq::qec::decoding::host::resolve_decoder_init(
+        dc, std::filesystem::current_path());
     ADD_FAILURE() << "expected dem_chunks + stim_dem_path to be rejected";
   } catch (const std::runtime_error &error) {
     EXPECT_NE(std::string(error.what()).find("stim_dem_path"),
@@ -1948,12 +2611,11 @@ TEST(DecoderDemFormTest, RejectsDemChunksWithStimDemPathAtConstruction) {
   }
 }
 
-// block_size, syndrome_size and H_sparse are inert beside a DEM -- the DEM
-// branch reads none of them -- so O_sparse is the only flat field worth
-// rejecting: it overwrites the mapping a DEM-native decoder installed for
-// itself.
+// H_sparse and O_sparse are competing model sources beside a DEM. In
+// particular O_sparse cannot overwrite the mapping the authoritative source
+// supplies.
 TEST(DecoderDemFormTest, RejectsOSparseWithStimDemPathAtConstruction) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
 
   cudaq::qec::decoding::config::decoder_config dc;
   dc.id = 0;
@@ -1963,7 +2625,8 @@ TEST(DecoderDemFormTest, RejectsOSparseWithStimDemPathAtConstruction) {
   dc.O_sparse = {2, -1};
 
   try {
-    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    (void)cudaq::qec::decoding::host::resolve_decoder_init(
+        dc, std::filesystem::current_path());
     ADD_FAILURE() << "expected O_sparse + stim_dem_path to be rejected";
   } catch (const std::runtime_error &error) {
     EXPECT_NE(std::string(error.what()).find("O_sparse"), std::string::npos)
@@ -1976,7 +2639,7 @@ TEST(DecoderDemFormTest, RejectsOSparseWithStimDemPathAtConstruction) {
 
 #ifdef CUDAQX_QEC_HAS_CHROMOBIUS
 TEST(ChromobiusOnDecodingServer, ConstructsFromARawDemSource) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
 
   // No H_sparse and no O_sparse: the DEM is the model, and chromobius installs
   // the observable mapping its results are expressed in.
@@ -1993,7 +2656,7 @@ TEST(ChromobiusOnDecodingServer, ConstructsFromARawDemSource) {
 }
 
 TEST(ChromobiusOnDecodingServer, KeepsItsOwnObservableMapping) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
 
   // Chromobius predicts observables directly and installs an identity mapping
   // over them, which is expressed in a different space than the DEM-derived
@@ -2004,10 +2667,13 @@ TEST(ChromobiusOnDecodingServer, KeepsItsOwnObservableMapping) {
   dc.stim_dem_path = dem.path();
   dc.D_sparse = kStimDemDSparse;
 
-  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      dc, std::filesystem::current_path());
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      dc, std::move(inputs));
   EXPECT_EQ(decoder->get_syndrome_size(), 4u);
   EXPECT_EQ(decoder->get_num_observables(), 1u);
-  EXPECT_EQ(decoder->get_block_size(), 1u);
+  EXPECT_EQ(decoder->get_block_size(), 6u);
 }
 
 TEST(ChromobiusOnDecodingServer, MatrixOnlyConfigStillFails) {
@@ -2025,7 +2691,10 @@ TEST(ChromobiusOnDecodingServer, MatrixOnlyConfigStillFails) {
   // configure_decoders() only reports a status code, so check that the refusal
   // came from chromobius rejecting a matrix and not from something incidental.
   try {
-    cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+        dc, std::filesystem::current_path());
+    (void)cudaq::qec::decoding::host::create_realtime_decoder(
+        dc, std::move(inputs));
     ADD_FAILURE() << "expected chromobius to reject a matrix-only config";
   } catch (const std::runtime_error &error) {
     EXPECT_NE(std::string(error.what()).find("detector error model"),
@@ -2035,10 +2704,10 @@ TEST(ChromobiusOnDecodingServer, MatrixOnlyConfigStillFails) {
 }
 
 TEST(ChromobiusOnDecodingServer, DemReachesANestedGlobalDecoder) {
-  ScopedDemFile dem;
+  ScopedServerDemFile dem;
 
-  // The nesting half: a DEM-sourced entry hands the model text down through
-  // global_decoder_params, which is where trt_decoder builds chromobius from.
+  // The nesting half: a DEM-sourced entry hands the same immutable model to
+  // the nested decoder after removing only the parent's measurement map.
   cudaq::qec::decoding::config::decoder_config dc;
   dc.id = 0;
   dc.type = "trt_decoder";
@@ -2049,16 +2718,12 @@ TEST(ChromobiusOnDecodingServer, DemReachesANestedGlobalDecoder) {
   dc.decoder_custom_args.map().insert("global_decoder_params",
                                       cudaqx::heterogeneous_map{});
 
-  auto params = cudaq::qec::decoding::host::prepare_decoder_params(dc);
-  ASSERT_TRUE(params.contains("global_decoder_params"));
-  const auto global_params =
-      params.get<cudaqx::heterogeneous_map>("global_decoder_params");
-  ASSERT_TRUE(global_params.contains("stim_dem"));
-
-  // What trt_decoder passes to decoder::get() must build the decoder the
-  // config named.
-  auto global_decoder = cudaq::qec::decoder::get(
-      "chromobius", global_params.get<std::string>("stim_dem"), global_params);
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      dc, std::filesystem::current_path());
+  ASSERT_TRUE(inputs.has_stim_dem());
+  auto global_decoder =
+      cudaq::qec::decoder::get("chromobius", inputs.decoder_init_without_d(),
+                               cudaq::qec::decode_result_type::observables, {});
   EXPECT_EQ(global_decoder->get_syndrome_size(), 4);
 }
 #endif // CUDAQX_QEC_HAS_CHROMOBIUS

@@ -11,6 +11,7 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cudaq/qec/extended_dem.h"
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -74,29 +75,35 @@ struct decoder_config {
   /// The fields below describe the DEM three alternative ways, and exactly
   /// one of them applies:
   ///
-  ///   - Flat form: H_sparse plus block_size, syndrome_size, O_sparse and
-  ///     D_sparse, all sized for the whole experiment.
+  ///   - Flat form: H_sparse plus block_size, syndrome_size, O_sparse,
+  ///     D_sparse and optional error_rate_vec, all sized for the whole
+  ///     experiment.
   ///   - Chunk form: dem_chunks (which carries phases, connections, seam, and
-  ///     num_rounds internally). The other five flat fields are derived by
-  ///     expanding the phases, and must be omitted.
+  ///     num_rounds internally). The flat fields are derived by expanding the
+  ///     phases, and must be omitted.
   ///   - DEM form: stim_dem_path, the Stim model text itself. The decoder
-  ///     derives its own dimensions and observable mapping from it, so all of
-  ///     the flat fields except D_sparse must be omitted.
+  ///     derives its dimensions, observable mapping and error rates from it.
+  ///     H_sparse, O_sparse and error_rate_vec must be omitted; D_sparse is
+  ///     still required, while block_size and syndrome_size are optional
+  ///     checked assertions.
   ///
   /// See expand_dem_chunks() for the chunk-form derivation, which runs at
   /// decoder construction so the rest of the pipeline only ever sees the flat
-  /// form. DEM form stays as it is: the model text is what the decoder is
+  /// form. DEM form stays authoritative: the model text is what the decoder is
   /// built from.
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
-  /// Path to a Stim detector error model. When set, the decoder is
-  /// constructed from the DEM text rather than from `H_sparse`, which is what
-  /// a DEM-native decoder such as Chromobius requires. Interpreted like the
-  /// other model paths in a configuration, relative to the working directory.
+  /// Path to an authoritative Stim detector error model. Relative paths are
+  /// resolved against the configuration file's directory, or the process
+  /// working directory for a programmatic or raw-string configuration.
   std::string stim_dem_path;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
+  /// Maps raw measurements to detectors. Orthogonal to the model source and
+  /// required by both.
   std::vector<std::int64_t> D_sparse;
+  /// Error probability per H column.
+  std::vector<double> error_rate_vec;
   /// Optional per-phase DEM for a streaming, repeated-round decomposition.
   /// H_sparse above describes the whole experiment as one flat matrix; these
   /// phases describe one round each so the round count can be chosen at run
@@ -210,9 +217,9 @@ public:
 };
 
 /// @brief Rewrite a chunk-form configuration into the equivalent flat form,
-/// filling block_size, syndrome_size, H_sparse, O_sparse and D_sparse from
-/// `dem_chunks` expanded `num_rounds` times. Everything downstream of this
-/// therefore only has to understand the flat form.
+/// filling block_size, syndrome_size, H_sparse, O_sparse, D_sparse and
+/// error_rate_vec from `dem_chunks` expanded `num_rounds` times. Everything
+/// downstream of this therefore only has to understand the flat form.
 ///
 /// Does nothing to a configuration that is already flat (one whose `H_sparse`
 /// is nonempty, or which carries no `dem_chunks` at all), so it is safe to
@@ -247,6 +254,14 @@ __attribute__((visibility("default"))) std::string decoder_config_json_schema();
 /// @return 0 on success, non-zero on failure.
 __attribute__((visibility("default"))) int
 configure_decoders(multi_decoder_config &config);
+
+/// @brief Configure the decoders, resolving relative model paths (such as
+/// `stim_dem_path`) against @p base_dir. The overload above uses the process
+/// working directory as it stands when resolution starts.
+/// @return 0 on success, non-zero on failure.
+__attribute__((visibility("default"))) int
+configure_decoders(multi_decoder_config &config,
+                   const std::filesystem::path &base_dir);
 
 /// @brief Configure the decoders from a file. This function configures both
 /// local decoders, and if running on remote target hardware, will submit the

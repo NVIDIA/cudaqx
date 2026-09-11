@@ -104,9 +104,9 @@ and measurement-to-detector matrices in one call, then assemble the decoder conf
    config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
    config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
    config.D_sparse = qec.d_sparse(m2d)
+   config.error_rate_vec = list(dem.error_rates)
 
    config.decoder_custom_args = {
-       "error_rate_vec": list(dem.error_rates),
        "merge_strategy": "smallest_weight",
    }
 
@@ -127,8 +127,8 @@ arguments:
        H_sparse: [ 0, -1, 1, -1, 2, -1 ]
        O_sparse: [ 0, -1, 1, -1, 2, -1 ]
        D_sparse: [ 0, -1, 1, -1, 2, -1 ]
+       error_rate_vec: [ 0.1, 0.1, 0.1 ]
        decoder_custom_args:
-         error_rate_vec: [ 0.1, 0.1, 0.1 ]
          merge_strategy: smallest_weight
 
 The ``decoder_custom_args`` section is converted between YAML and the
@@ -671,4 +671,3 @@ After fixing configuration issues, the following log messages should appear:
    [info] Done initializing decoder 0 in 0.234 seconds
 
 If errors appear instead, check the full error message - it often contains specific details about what failed (network timeout, size limit, parsing error, etc.).
-

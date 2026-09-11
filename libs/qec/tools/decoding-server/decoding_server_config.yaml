@@ -22,6 +22,6 @@ decoders:
     H_sparse: [0, -1, 1, -1, 2, -1]
     O_sparse: [0, -1, 1, -1, 2, -1]
     D_sparse: [0, -1, 1, -1, 2, -1]
+    error_rate_vec: [0.1, 0.1, 0.1]
     decoder_custom_args:
       merge_strategy: smallest_weight
-      error_rate_vec: [0.1, 0.1, 0.1]

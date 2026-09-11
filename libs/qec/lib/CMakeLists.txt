@@ -57,6 +57,7 @@ set(DEM_SOURCES
 
 set(DECODERS_SOURCES
   decoder.cpp
+  decoder_init.cpp
   decoder_config_payload.cpp
   decoder_config_schema.cpp
   decoder_stats.cpp

@@ -99,9 +99,9 @@ decoders:
     H_sparse:        $H_SPARSE
     O_sparse:        $O_SPARSE
     D_sparse:        $D_SPARSE
+    error_rate_vec:  $ERR_VEC
     decoder_custom_args:
       use_sparsity:    true
-      error_rate_vec:  $ERR_VEC
       max_iterations:  50
       clip_value:      200
       bp_method:       3
