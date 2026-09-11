@@ -361,6 +361,9 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.cpp.in"
 # ==============================================================================
 
 add_subdirectory(lib)
+add_subdirectory(
+  "${CUDAQX_QEC_SOURCE_DIR}/../../benchmarks/qec"
+  "${CMAKE_CURRENT_BINARY_DIR}/benchmarks")
 if (NOT CUDAQ_QEC_DECODERS_ONLY OR CUDAQ_QEC_BUILD_DECODING_SERVER)
   add_subdirectory(tools)
 endif()
