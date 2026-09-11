@@ -2,9 +2,10 @@
 
     A multi-threaded minimum-weight perfect matching (MWPM) decoder based on
     the NV Fusion Brickwall algorithm.  It is in essence a combination of
-    *fusion blossom* with *sparse blossom*: the detector matching graph is
-    partitioned into temporal blocks that are solved independently and then
-    fused across their boundaries (fusion blossom), while each individual
+    `fusion blossom <https://arxiv.org/abs/2305.08307>`_ with
+    `sparse blossom <https://arxiv.org/abs/2303.15933>`_: the detector matching
+    graph is partitioned into temporal blocks that are solved independently and
+    then fused across their boundaries (fusion blossom), while each individual
     block is solved by PyMatching's sparse blossom implementation.  Blocks
     and the fuses between them form a dependency DAG that is dispatched to a
     worker pool as syndrome data arrives, so the decoder is designed to
