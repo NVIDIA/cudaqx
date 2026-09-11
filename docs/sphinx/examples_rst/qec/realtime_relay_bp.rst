@@ -152,7 +152,7 @@ Source Repositories
      - ``main`` branch (or your feature branch)
    * - **cuda-quantum** (realtime)
      - https://github.com/NVIDIA/cuda-quantum
-     - Branch ``releases/v0.15.1``
+     - Branch ``releases/v0.16.0``
    * - **holoscan-sensor-bridge**
      - https://github.com/nvidia-holoscan/holoscan-sensor-bridge
      - Tag ``2.6.0-EA2``
@@ -164,7 +164,7 @@ provides the ``GpuRoceTransceiver`` library for RDMA transport.
 .. note::
 
    The self-relaunching device-graph scheduler is provided by the
-   ``releases/v0.15.1`` branch of ``cuda-quantum`` (the extension that adds the
+   ``releases/v0.16.0`` branch of ``cuda-quantum`` (the extension that adds the
    ``CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH`` sentinel, the triggered
    fire-and-forget decode launch, and tail self-relaunch on top of the
    device-side graph dispatch).
@@ -212,7 +212,7 @@ To also build the bridge and playback tools for emulated or FPGA testing:
    cd cudaq-realtime-src
    git sparse-checkout init --cone
    git sparse-checkout set realtime
-   git checkout releases/v0.15.1
+   git checkout releases/v0.16.0
    cd ..
 
    # 2. Build holoscan-sensor-bridge (tag 2.6.0-EA2)
