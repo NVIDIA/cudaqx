@@ -106,14 +106,14 @@ used to interpret the data, not a complete reproducibility manifest.
      - PyMatching, using the same decomposed detector error model and sampled
        syndromes
 
-Streaming Completion Latency
-++++++++++++++++++++++++++++
+Streaming Tail Latency
++++++++++++++++++++++++
 
 The following figure shows median and p99 streaming tail latency for one
 decoder instance. Up to 100 rounds, the automatic schedule uses one exact
 leaf, and NV-Fusion broadly follows PyMatching. Above the 192-round automatic
-schedule threshold, NV-Fusion switches to fused leaves and its completion
-latency becomes only weakly dependent on the total number of rounds.
+schedule threshold, NV-Fusion switches to fused leaves and its tail latency
+becomes only weakly dependent on the total number of rounds.
 
 .. image:: ../../../assets/docs/nv_fusion_streaming_tail_latency.png
    :align: center

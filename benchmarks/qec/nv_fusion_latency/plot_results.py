@@ -315,7 +315,7 @@ def plot_stream_tail(rows: list[dict], output: Path) -> None:
     for ax in flat[len(distances):]:
         ax.set_visible(False)
     fig.suptitle(
-        "NVIDIA Vera CPU — streaming completion latency, one decoder instance\n"
+        "NVIDIA Vera CPU — Streaming Tail Latency, one decoder instance\n"
         "Final detector round through observable correction; 1 µs round interval",
         fontsize=13,
     )
