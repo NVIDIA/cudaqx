@@ -285,6 +285,9 @@ nitpick_ignore = [
     ('cpp:identifier', 'cudaq::qview<>'),
     ('cpp:identifier', 'cudaq::measure_result'),
     ('cpp:identifier', 'cudaq::M2DSparseMatrix'),
+    # Type of decoder_config::dem_chunks; the dynamic-DEM API is undocumented
+    # in this release (see EXCLUDE_SYMBOLS in docs/Doxyfile.in).
+    ('cpp:identifier', 'cudaq::qec::dem_chunks_spec'),
     ('py:class', 'SpinOperator'),
     ('py:class', 'cudaq.SpinOperator'),
     ('py:class', 'cudaq::sum_op<cudaq::spin_handler>'),

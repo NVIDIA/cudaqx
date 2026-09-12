@@ -83,7 +83,7 @@ struct decoder_config {
   ///     derives its own dimensions and observable mapping from it, so all of
   ///     the flat fields except D_sparse must be omitted.
   ///
-  /// See expand_dem_chunks() for the chunk-form derivation, which runs at
+  /// See %expand_dem_chunks() for the chunk-form derivation, which runs at
   /// decoder construction so the rest of the pipeline only ever sees the flat
   /// form. DEM form stays as it is: the model text is what the decoder is
   /// built from.
@@ -101,12 +101,12 @@ struct decoder_config {
   /// H_sparse above describes the whole experiment as one flat matrix; these
   /// phases describe one round each so the round count can be chosen at run
   /// time. num_rounds lives inside dem_chunks_spec. See
-  /// cudaq::qec::dem_chunks_from_spec() for expansion to a chunk sequence.
+  /// %cudaq::qec::dem_chunks_from_spec() for expansion to a chunk sequence.
   ///
   /// A configuration that also has a nonempty H_sparse is flat, and that
   /// matrix is the one decoders are built from. Form selection keys off
   /// H_sparse.empty(). Nonempty H_sparse is exactly the state
-  /// expand_dem_chunks() leaves behind, allowing round-trip through YAML.
+  /// %expand_dem_chunks() leaves behind, allowing round-trip through YAML.
   std::optional<cudaq::qec::dem_chunks_spec> dem_chunks;
   decoder_custom_args_t decoder_custom_args;
 

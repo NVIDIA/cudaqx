@@ -20,6 +20,14 @@ EXTRACT_ALL            = YES
 EXTRACT_PRIVATE        = YES
 EXTRACT_STATIC         = YES
 
+# The dynamic-DEM (per-round chunk) API is not part of this release's public
+# documentation (its doc pages were removed from this branch), but the type of
+# decoder_config::dem_chunks still refers to it. Exclude the struct so Doxygen
+# does not emit a cross-reference that Sphinx cannot resolve. (EXCLUDE_SYMBOLS
+# does not apply to free functions; those mentions are un-linked with a
+# leading '%' in the header comments instead.)
+EXCLUDE_SYMBOLS        = cudaq::qec::dem_chunks_spec
+
 #---------------------------------------------------------------------------
 # Configuration options related to warning and progress messages
 #---------------------------------------------------------------------------
