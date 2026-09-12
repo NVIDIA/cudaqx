@@ -16,6 +16,9 @@ decode latency, logical error rate, and the trade-offs behind decoder tuning kno
   one by up to **~100x** in logical error rate on joint-XYZ circuit-level DEMs of
   bivariate-bicycle codes, and makes correlated (joint XYZ) BP+OSD decoding more accurate
   than uncorrelated (split X/Z) decoding.
+* :ref:`NV-Fusion latency <nv_fusion_latency_user_guide>` -- how overlapping decoding
+  with syndrome acquisition bounds the final-round response latency of long-running
+  surface-code experiments.
 
 .. toctree::
    :maxdepth: 1
@@ -23,3 +26,4 @@ decode latency, logical error rate, and the trade-offs behind decoder tuning kno
    Improving Relay BP Decoding With Gamma Ensembles <nv_qldpc_gamma_ensemble_user_guide>
    Sweeping Relay BP Stopping Criteria From a Single Run <nv_qldpc_relay_solutions_user_guide>
    Improving BP+OSD Decoding With Min-LLR OSD Initialization <nv_qldpc_minllr_osd_user_guide>
+   Bounding Real-Time Decode Latency With NV-Fusion <nv_fusion_latency_user_guide>
