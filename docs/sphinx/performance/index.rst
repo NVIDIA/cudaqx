@@ -12,8 +12,13 @@ The second study shows how **relay solution recording** replaces a per-``stop_nc
 sweep of full decode runs with a single recording run plus offline post-processing,
 reproducing every RelayBP-N result exactly from one GPU pass.
 
+The third study shows how **NV-Fusion** overlaps decoding with syndrome
+acquisition, bounding the final-round response latency of long-running
+surface-code experiments.
+
 .. toctree::
    :maxdepth: 1
 
    Improving Relay BP Decoding With Gamma Ensembles <nv_qldpc_gamma_ensemble_user_guide>
    Sweeping Relay BP Stopping Criteria From a Single Run <nv_qldpc_relay_solutions_user_guide>
+   Bounding Real-Time Decode Latency With NV-Fusion <nv_fusion_latency_user_guide>
