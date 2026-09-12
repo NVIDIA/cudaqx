@@ -18,10 +18,10 @@ and fuses their matchings through a dependency graph. This moves most decoding
 work ahead of the final syndrome round and limits how much work remains before
 the observable correction is available. Its implementation combines the
 `Sparse Blossom <https://arxiv.org/abs/2303.15933>`_ and
-`Fusion Blossom <https://arxiv.org/abs/2305.08307>`_ algorithms. Experimental
-real-time surface-code decoding is demonstrated in
+`Fusion Blossom <https://arxiv.org/abs/2305.08307>`_ algorithms. The algorithm is
+motivated by the experimental description in
 `Quantum error correction below the surface code threshold
-<https://arxiv.org/abs/2408.13687>`_.
+<https://arxiv.org/abs/2408.13687>`_ (Google Quantum AI).
 
 This study measures that final response time, called the *streaming tail
 latency*, on rotated surface-code Z-memory circuits. For 10,000-round
