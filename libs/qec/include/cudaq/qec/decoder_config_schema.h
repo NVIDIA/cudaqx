@@ -135,10 +135,10 @@ materialize_default_args(const decoder_schema &schema,
 
 /// Remove (with a warning per key) every key `args` holds that is not in
 /// `schema`, recursing into nested sections whose schemas resolve. Applied by
-/// decoder_config::decoder_custom_args_to_heterogeneous_map() so the map a
-/// local decoder's constructor receives and the map serialized to YAML for a
-/// remote target are the same map -- a non-schema key can never take effect
-/// locally but silently vanish remotely.
+/// decoder_config::decoder_custom_args_to_heterogeneous_map() so a non-schema
+/// key can never take effect locally but silently vanish remotely. The one
+/// exception in emitted YAML is the framework-owned `error_rate_vec`
+/// compatibility alias, which is not a decoder plugin parameter.
 __attribute__((visibility("default"))) void
 drop_non_schema_keys(const decoder_schema &schema,
                      cudaqx::heterogeneous_map &args);

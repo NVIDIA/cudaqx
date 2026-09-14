@@ -69,6 +69,14 @@ schema_typed_map_from_dict(const decoder_schema &schema, nb::dict dict) {
         break;
       }
     }
+    // error_rate_vec remains accepted in decoder_custom_args as a legacy
+    // configuration alias even though it is no longer a plugin parameter.
+    // Give Python lists the same canonical type as the YAML parser.
+    if (key == "error_rate_vec" && !spec) {
+      map.insert(key, cast_param<std::vector<double>>(value, key, schema.name,
+                                                      "list-of-float"));
+      continue;
+    }
     if (!spec) {
       // Unknown keys keep the generic conversion so validate_custom_args and
       // emission diagnostics can still name them.
@@ -142,13 +150,13 @@ void promote_legacy_error_rates(decoder_config &self,
   if (dict.contains(key) && !schema_declares_key) {
     auto rates = cast_param<std::vector<double>>(dict[key], key, schema_name,
                                                  "list of floats");
-    // One model, one set of rates: a disagreement between levels expresses an
-    // intent the model cannot represent, so reject instead of picking one.
-    if (!self.error_rate_vec.empty() && self.error_rate_vec != rates)
-      throw std::runtime_error("Conflicting error_rate_vec values in "
-                               "deprecated configuration for '" +
-                               schema_name +
-                               "'; set model error rates in one place.");
+    // Never choose a winner between two spellings, even when their values
+    // happen to match: the author may not realize both are in effect.
+    if (!self.error_rate_vec.empty())
+      throw std::runtime_error(
+          "error_rate_vec is supplied both at the decoder configuration "
+          "level and in deprecated configuration for '" +
+          schema_name + "'; supply model error rates in exactly one place.");
     self.error_rate_vec = std::move(rates);
     nb::del(dict[key]);
   }

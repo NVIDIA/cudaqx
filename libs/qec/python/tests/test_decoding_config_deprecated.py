@@ -727,7 +727,7 @@ def test_trt_decoder_nested_pymatching_conflicting_rates_rejected():
     dc = qec.decoder_config()
     dc.type = "trt_decoder"
     dc.error_rate_vec = [0.1, 0.2, 0.3]
-    with pytest.raises(RuntimeError, match="Conflicting error_rate_vec"):
+    with pytest.raises(RuntimeError, match="error_rate_vec is supplied both"):
         dc.set_decoder_custom_args(trt)
 
 

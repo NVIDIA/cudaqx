@@ -520,6 +520,139 @@ TEST(DecoderYAMLTest, SingleLUTDecoder) {
   test_decoder_creation(multi_config);
 }
 
+namespace {
+
+std::string error_rate_location_yaml(bool top_level, bool custom_args) {
+  std::string yaml = R"(
+decoders:
+  - id: 0
+    type: single_error_lut
+    block_size: 2
+    syndrome_size: 2
+    H_sparse: [0, -1, 1, -1]
+    O_sparse: [0, -1, 1, -1]
+    D_sparse: [0, -1, 1, -1]
+)";
+  if (top_level)
+    yaml += "    error_rate_vec: [0.1, 0.2]\n";
+  if (custom_args)
+    yaml += "    decoder_custom_args:\n"
+            "      error_rate_vec: [0.1, 0.2]\n";
+  return yaml;
+}
+
+} // namespace
+
+TEST(DecoderYAMLTest, LegacyErrorRatesKeepTheEstablishedWireShape) {
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  auto legacy = multi_decoder_config::from_yaml_str(
+      error_rate_location_yaml(/*top_level=*/false, /*custom_args=*/true));
+  ASSERT_EQ(legacy.decoders.size(), 1u);
+  const auto &config = legacy.decoders.front();
+  EXPECT_EQ(config.error_rate_vec, (std::vector<double>{0.1, 0.2}));
+  EXPECT_FALSE(config.decoder_custom_args.map().contains("error_rate_vec"));
+
+  const auto emitted = legacy.to_yaml_str(200);
+  EXPECT_NE(emitted.find("    decoder_custom_args:\n"
+                         "      error_rate_vec:"),
+            std::string::npos)
+      << emitted;
+  EXPECT_EQ(emitted.find("\n    error_rate_vec:"), std::string::npos)
+      << emitted;
+
+  auto reparsed = multi_decoder_config::from_yaml_str(emitted);
+  EXPECT_EQ(reparsed, legacy);
+  EXPECT_EQ(reparsed.to_yaml_str(200), emitted);
+
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
+      config, std::filesystem::current_path());
+  EXPECT_EQ(inputs.error_rates(), (std::vector<double>{0.1, 0.2}));
+  EXPECT_FALSE(config.decoder_custom_args_to_heterogeneous_map().contains(
+      "error_rate_vec"));
+}
+
+TEST(DecoderYAMLTest, TopLevelErrorRatesNormalizeToEstablishedWireShape) {
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  auto top_level = multi_decoder_config::from_yaml_str(
+      error_rate_location_yaml(/*top_level=*/true, /*custom_args=*/false));
+  auto legacy = multi_decoder_config::from_yaml_str(
+      error_rate_location_yaml(/*top_level=*/false, /*custom_args=*/true));
+
+  EXPECT_EQ(top_level, legacy);
+  EXPECT_EQ(top_level.to_yaml_str(200), legacy.to_yaml_str(200));
+}
+
+TEST(DecoderYAMLTest, DuplicateErrorRateLocationsAreRejected) {
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  try {
+    (void)multi_decoder_config::from_yaml_str(
+        error_rate_location_yaml(/*top_level=*/true, /*custom_args=*/true));
+    ADD_FAILURE() << "expected duplicate error_rate_vec locations to fail";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("both"), std::string::npos)
+        << error.what();
+    EXPECT_NE(std::string(error.what()).find("decoder_custom_args"),
+              std::string::npos)
+        << error.what();
+  }
+}
+
+TEST(DecoderYAMLTest, ProgrammaticLegacyErrorRatesDoNotReachPluginParams) {
+  auto config = create_test_empty_decoder_config(0);
+  cudaqx::heterogeneous_map args;
+  args.insert("error_rate_vec", std::vector<double>{0.1, 0.2});
+  config.block_size = 2;
+  config.syndrome_size = 2;
+  config.H_sparse = {0, -1, 1, -1};
+  config.O_sparse = {0, -1, 1, -1};
+  config.D_sparse = {0, -1, 1, -1};
+  config.decoder_custom_args = args;
+
+  EXPECT_EQ(config.effective_error_rate_vec(), (std::vector<double>{0.1, 0.2}));
+  EXPECT_FALSE(config.decoder_custom_args_to_heterogeneous_map().contains(
+      "error_rate_vec"));
+
+  config.error_rate_vec = {0.1, 0.2};
+  EXPECT_THROW(config.effective_error_rate_vec(), std::runtime_error);
+  EXPECT_THROW(config.to_yaml_str(200), std::runtime_error);
+}
+
+TEST(DecoderYAMLTest, NestedLegacyErrorRatesAreUniqueModelInput) {
+  using cudaq::qec::decoding::config::multi_decoder_config;
+  const std::string nested = R"(
+decoders:
+  - id: 0
+    type: sliding_window
+    block_size: 2
+    syndrome_size: 2
+    H_sparse: [0, -1, 1, -1]
+    O_sparse: [0, -1, 1, -1]
+    D_sparse: [0, -1, 1, -1]
+    decoder_custom_args:
+      window_size: 1
+      inner_decoder_name: single_error_lut
+      inner_decoder_params:
+        error_rate_vec: [0.1, 0.2]
+)";
+
+  auto parsed = multi_decoder_config::from_yaml_str(nested);
+  const auto &config = parsed.decoders.front();
+  EXPECT_EQ(config.error_rate_vec, (std::vector<double>{0.1, 0.2}));
+  auto params = config.decoder_custom_args_to_heterogeneous_map();
+  EXPECT_FALSE(params.contains("error_rate_vec"));
+  EXPECT_FALSE(params.get<cudaqx::heterogeneous_map>("inner_decoder_params")
+                   .contains("error_rate_vec"));
+
+  const auto duplicate = nested.substr(0, nested.find("      window_size:")) +
+                         "      error_rate_vec: [0.1, 0.2]\n" +
+                         nested.substr(nested.find("      window_size:"));
+  EXPECT_THROW(multi_decoder_config::from_yaml_str(duplicate),
+               std::runtime_error);
+}
+
 cudaq::qec::decoding::config::decoder_config
 create_test_decoder_config_trt(int id) {
   cudaq::qec::decoding::config::decoder_config config =

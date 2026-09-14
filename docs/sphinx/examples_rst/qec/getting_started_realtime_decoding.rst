@@ -127,9 +127,13 @@ arguments:
        H_sparse: [ 0, -1, 1, -1, 2, -1 ]
        O_sparse: [ 0, -1, 1, -1, 2, -1 ]
        D_sparse: [ 0, -1, 1, -1, 2, -1 ]
-       error_rate_vec: [ 0.1, 0.1, 0.1 ]
        decoder_custom_args:
+         error_rate_vec: [ 0.1, 0.1, 0.1 ]
          merge_strategy: smallest_weight
+
+``error_rate_vec`` is model input internally, but remains nested in emitted
+YAML for compatibility with existing researcher configuration files. The
+parser also accepts it at decoder level; specifying both forms is an error.
 
 The ``decoder_custom_args`` section is converted between YAML and the
 parameter map a decoder's constructor receives using a *parameter schema*

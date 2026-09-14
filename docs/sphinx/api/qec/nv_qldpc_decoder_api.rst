@@ -56,7 +56,12 @@
             nv_custom_args.insert("use_osd", true);
             // See below for options
 
-            auto nvdec = cudaq::qec::get_decoder("nv-qldpc-decoder", H, nv_custom_args);
+            std::vector<double> error_rates(block_size, 0.001);
+            cudaq::qec::decoder_init inputs(
+                cudaq::qec::sparse_binary_matrix(H), std::nullopt,
+                error_rates);
+            auto nvdec = cudaq::qec::get_decoder(
+                "nv-qldpc-decoder", std::move(inputs), nv_custom_args);
       
     .. note::
       The `"nv-qldpc-decoder"` implements the :class:`cudaq_qec.Decoder`
@@ -74,9 +79,10 @@
         - `use_sparsity` (bool): Whether or not to use a sparse matrix solver
         - `error_rate` (double): Probability of an error (in 0-1 range) on a
           block data bit (defaults to 0.001)
-        - `error_rate_vec` (double): Vector of length "block size" containing
-          the probability of an error (in 0-1 range) on a block data bit (defaults
-          to 0.001). This overrides `error_rate`.
+        - `error_rate_vec` (vector<double>): Vector of length ``block_size``
+          containing the probability of each error. Python accepts this as a
+          keyword. C++ supplies it through :cpp:class:`cudaq::qec::decoder_init`,
+          not the heterogeneous parameter map. This overrides `error_rate`.
         - `max_iterations` (int): Maximum number of BP iterations to perform
           (defaults to 30)
         - `n_threads` (int): Number of CUDA threads to use for the GPU decoder

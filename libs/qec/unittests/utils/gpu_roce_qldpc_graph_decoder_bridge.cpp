@@ -252,7 +252,7 @@ int main(int argc, char *argv[]) {
       cudaq::qec::decoder_init(
           cudaq::qec::sparse_binary_matrix(H_tensor),
           sparse_matrix_from_flat_rows(dec.O_sparse, num_observable_rows),
-          /*error_rates=*/{},
+          dec.effective_error_rate_vec(),
           sparse_matrix_from_flat_rows(dec.D_sparse,
                                        static_cast<std::uint32_t>(ss))),
       params);

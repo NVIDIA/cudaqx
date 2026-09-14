@@ -138,6 +138,8 @@ def test_pymatching_config_yaml_roundtrip():
 
     yaml_text = dc.to_yaml_str()
     assert isinstance(yaml_text, str) and "pymatching" in yaml_text
+    assert "\nerror_rate_vec:" not in yaml_text
+    assert "decoder_custom_args:\n  error_rate_vec:" in yaml_text
 
     dc2 = qec.decoder_config.from_yaml_str(yaml_text)
     assert dc2 is not None
@@ -146,6 +148,19 @@ def test_pymatching_config_yaml_roundtrip():
     args = dc2.decoder_custom_args
     assert list(dc2.error_rate_vec) == [0.1, 0.2, 0.3]
     assert args["merge_strategy"] == "smallest_weight"
+
+
+def test_legacy_custom_arg_error_rates_are_accepted_but_not_plugin_params():
+    dc = qec.decoder_config()
+    dc.type = "pymatching"
+    dc.decoder_custom_args = {
+        "error_rate_vec": [0.1, 0.2, 0.3],
+        "merge_strategy": "smallest_weight",
+    }
+
+    dc.validate_custom_args()
+    yaml_text = dc.to_yaml_str()
+    assert "decoder_custom_args:\n  error_rate_vec:" in yaml_text
 
 
 def test_unknown_custom_arg_key_is_rejected():
@@ -282,6 +297,18 @@ def test_decoder_config_json_schema_validates_yaml_documents():
     }
     document = yaml.safe_load(qec_yaml_for(dc))
     validator.validate(document)
+
+    # Both locations are accepted independently, but never together.
+    top_level = yaml.safe_load(qec_yaml_for(dc))
+    rates = top_level["decoders"][0]["decoder_custom_args"].pop(
+        "error_rate_vec")
+    top_level["decoders"][0]["error_rate_vec"] = rates
+    validator.validate(top_level)
+
+    duplicate = yaml.safe_load(qec_yaml_for(dc))
+    duplicate["decoders"][0]["error_rate_vec"] = [0.1, 0.1, 0.1]
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(duplicate)
 
     # Unknown custom-arg keys fail validation.
     bad = yaml.safe_load(qec_yaml_for(dc))

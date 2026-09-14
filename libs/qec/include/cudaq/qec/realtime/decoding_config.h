@@ -35,7 +35,9 @@ enum class DecoderDispatch { host, device_graph };
 /// `cudaqx::heterogeneous_map` -- the form every decoder's constructor
 /// consumes. YAML conversion and key validation are driven by the parameter
 /// schema the decoder registered (see cudaq/qec/decoder_config_schema.h), so
-/// out-of-tree decoders participate without any framework changes.
+/// out-of-tree decoders participate without any framework changes. The
+/// framework-owned `error_rate_vec` model input is also accepted here as a
+/// legacy YAML alias, but is removed before plugin construction.
 class decoder_custom_args_t {
 public:
   decoder_custom_args_t() = default;
@@ -102,7 +104,9 @@ struct decoder_config {
   /// Maps raw measurements to detectors. Orthogonal to the model source and
   /// required by both.
   std::vector<std::int64_t> D_sparse;
-  /// Error probability per H column.
+  /// Error probability per H column. Input YAML also accepts the established
+  /// `decoder_custom_args.error_rate_vec` spelling, and emitted YAML uses that
+  /// spelling to preserve the researcher-facing wire format.
   std::vector<double> error_rate_vec;
   /// Optional per-phase DEM for a streaming, repeated-round decomposition.
   /// H_sparse above describes the whole experiment as one flat matrix; these
@@ -120,12 +124,23 @@ struct decoder_config {
   bool operator==(const decoder_config &) const = default;
 
   /// Return the parameter map a decoder's constructor should receive: the
-  /// stored custom args with schema-declared defaults materialized (see
-  /// materialize_default_args in cudaq/qec/decoder_config_schema.h) when a
-  /// schema is registered for `type`, so programmatically built configs get
-  /// the same defaulting the YAML parse path applies.
+  /// stored custom args with the legacy error-rate alias removed and
+  /// schema-declared defaults materialized (see materialize_default_args in
+  /// cudaq/qec/decoder_config_schema.h) when a schema is registered for
+  /// `type`, so programmatically built configs get the same normalization the
+  /// YAML parse path applies.
   __attribute__((visibility("default"))) cudaqx::heterogeneous_map
   decoder_custom_args_to_heterogeneous_map() const;
+
+  /// Return the model error rates from either the canonical C++ field or the
+  /// legacy `decoder_custom_args.error_rate_vec` YAML spelling. The legacy
+  /// key is configuration compatibility data and is never included in the
+  /// parameter map handed to a decoder plugin.
+  ///
+  /// @throws std::runtime_error if rates are supplied in both locations, or
+  ///         more than once in nested decoder custom arguments.
+  __attribute__((visibility("default"))) std::vector<double>
+  effective_error_rate_vec() const;
 
   /// Validate `decoder_custom_args` against the parameter schema registered
   /// for `type`: unknown keys, missing required keys, and the schema's own

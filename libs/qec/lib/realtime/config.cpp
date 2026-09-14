@@ -33,8 +33,114 @@ bool decoder_custom_args_t::operator==(
   return custom_args_maps_equal(map_, other.map_);
 }
 
+namespace {
+
+constexpr const char *kErrorRateVec = "error_rate_vec";
+
+struct legacy_error_rates {
+  std::vector<double> values;
+  std::string path;
+};
+
+const param_spec *find_param(const decoder_schema &schema,
+                             const std::string &key) {
+  for (const auto &candidate : schema.params)
+    if (candidate.key == key)
+      return &candidate;
+  return nullptr;
+}
+
+const decoder_schema *nested_schema_for(const param_spec &spec,
+                                        const cudaqx::heterogeneous_map &map) {
+  if (spec.kind == param_kind::subschema)
+    return find_decoder_schema(spec.subschema);
+  if (spec.kind != param_kind::discriminated ||
+      !map.contains(spec.discriminator))
+    return nullptr;
+  try {
+    return find_decoder_schema(map.get<std::string>(spec.discriminator));
+  } catch (const std::runtime_error &) {
+    // Canonical schema validation below reports the ill-typed discriminator.
+    return nullptr;
+  }
+}
+
+void record_legacy_error_rates(const cudaqx::heterogeneous_map &map,
+                               const std::string &path,
+                               std::optional<legacy_error_rates> &found) {
+  std::vector<double> values;
+  try {
+    values = map.get<std::vector<double>>(kErrorRateVec);
+  } catch (const std::runtime_error &) {
+    throw std::runtime_error("'" + path +
+                             "' must be a sequence of floating-point values.");
+  }
+  if (found)
+    throw std::runtime_error(
+        "error_rate_vec is supplied more than once in decoder_custom_args: '" +
+        found->path + "' and '" + path +
+        "'. Supply model error rates in exactly one location.");
+  found = legacy_error_rates{std::move(values), path};
+}
+
+cudaqx::heterogeneous_map strip_legacy_error_rates(
+    const decoder_schema *schema, const cudaqx::heterogeneous_map &map,
+    const std::string &path, std::optional<legacy_error_rates> &found) {
+  cudaqx::heterogeneous_map filtered;
+  for (const auto &kv : map) {
+    if (kv.first == kErrorRateVec) {
+      record_legacy_error_rates(map, path + "." + kErrorRateVec, found);
+      continue;
+    }
+
+    const param_spec *spec = schema ? find_param(*schema, kv.first) : nullptr;
+    const decoder_schema *nested_schema =
+        spec ? nested_schema_for(*spec, map) : nullptr;
+    if (nested_schema) {
+      if (const auto *nested =
+              std::any_cast<cudaqx::heterogeneous_map>(&kv.second)) {
+        filtered.insert(kv.first,
+                        strip_legacy_error_rates(nested_schema, *nested,
+                                                 path + "." + kv.first, found));
+        continue;
+      }
+    }
+    filtered.insert(kv.first, kv.second);
+  }
+  return filtered;
+}
+
+struct normalized_decoder_args {
+  cudaqx::heterogeneous_map plugin_args;
+  std::optional<legacy_error_rates> legacy_rates;
+};
+
+normalized_decoder_args normalize_decoder_args(const decoder_config &config) {
+  normalized_decoder_args normalized;
+  normalized.plugin_args = strip_legacy_error_rates(
+      find_decoder_schema(config.type), config.decoder_custom_args.map(),
+      "decoder_custom_args", normalized.legacy_rates);
+  if (!config.error_rate_vec.empty() && normalized.legacy_rates)
+    throw std::runtime_error(
+        "error_rate_vec is supplied both at the decoder configuration level "
+        "and at '" +
+        normalized.legacy_rates->path +
+        "'. Supply model error rates in exactly one location.");
+  return normalized;
+}
+
+} // namespace
+
 void decoder_config::validate_custom_args() const {
-  config::validate_custom_args(type, decoder_custom_args.map());
+  auto normalized = normalize_decoder_args(*this);
+  config::validate_custom_args(type, normalized.plugin_args);
+}
+
+std::vector<double> decoder_config::effective_error_rate_vec() const {
+  auto normalized = normalize_decoder_args(*this);
+  if (normalized.legacy_rates)
+    return normalized.legacy_rates->values;
+  return error_rate_vec;
 }
 
 /// Flatten the nested sparse form the decoder API uses into the -1-terminated
@@ -93,13 +199,12 @@ expand_dem_chunks(decoder_config &config) {
 
 cudaqx::heterogeneous_map
 decoder_config::decoder_custom_args_to_heterogeneous_map() const {
-  auto args = decoder_custom_args.map();
+  auto args = normalize_decoder_args(*this).plugin_args;
   if (const auto *schema = find_decoder_schema(type)) {
-    // Same normalization on every consumer path: non-schema keys are
-    // warned-and-dropped (they could never round-trip through YAML, so a
-    // local decoder must not see them either) and schema-declared defaults
-    // are materialized. YAML emission serializes this same map, so a config
-    // reaches a local decoder and a remote target identically.
+    // Non-schema keys are warned-and-dropped and schema-declared defaults are
+    // materialized. The YAML serializer starts from this plugin-safe map and
+    // adds the framework-owned error-rate compatibility alias back only to
+    // the wire representation.
     drop_non_schema_keys(*schema, args);
     materialize_default_args(*schema, args);
   }
@@ -170,6 +275,13 @@ struct CustomMappingTraits<schema_binding> {
 
   static void inputOne(IO &io, StringRef key, schema_binding &binding) {
     const std::string key_str = key.str();
+    // Compatibility spelling for the framework-owned model rates. It is
+    // accepted in every decoder parameter section, then promoted out before
+    // schema validation or plugin construction.
+    if (key_str == "error_rate_vec") {
+      input_schema_scalar<std::vector<double>>(io, key_str, *binding.map);
+      return;
+    }
     const param_spec *spec = nullptr;
     for (const auto &candidate : binding.schema->params) {
       if (candidate.key == key_str) {
@@ -243,8 +355,9 @@ struct CustomMappingTraits<schema_binding> {
   }
 
   static void output(IO &io, schema_binding &binding) {
-    // Only schema keys are emitted; surface anything else (a typo in a
-    // programmatically built map) instead of dropping it silently.
+    // Only schema keys and the framework compatibility alias are emitted;
+    // surface anything else (a typo in a programmatically built map) instead
+    // of dropping it silently.
     for (const auto &kv : *binding.map) {
       bool known = false;
       for (const auto &spec : binding.schema->params) {
@@ -253,13 +366,18 @@ struct CustomMappingTraits<schema_binding> {
           break;
         }
       }
-      if (!known)
+      if (!known && kv.first != "error_rate_vec")
         CUDA_QEC_WARN("Key '{}' is not in the '{}' parameter schema; it is "
                       "omitted from the emitted YAML.",
                       kv.first, binding.schema->name);
     }
+    if (binding.map->contains("error_rate_vec"))
+      output_schema_scalar<std::vector<double>>(io, "error_rate_vec",
+                                                *binding.map);
     // Emit in schema declaration order so output is deterministic.
     for (const auto &spec : binding.schema->params) {
+      if (spec.key == "error_rate_vec")
+        continue;
       if (!binding.map->contains(spec.key))
         continue;
       switch (spec.kind) {
@@ -462,6 +580,8 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
 
     io.mapRequired("id", config.id);
     io.mapRequired("type", config.type);
+    const auto *schema =
+        cudaq::qec::decoding::config::find_decoder_schema(config.type);
     io.mapOptional("dispatch", config.dispatch,
                    cudaq::qec::decoding::config::DecoderDispatch::host);
     io.mapOptional("cuda_device_id", config.cuda_device_id);
@@ -493,9 +613,68 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
       io.mapOptional("O_sparse", config.O_sparse, std::vector<std::int64_t>{});
       io.mapOptional("D_sparse", config.D_sparse, std::vector<std::int64_t>{});
     }
-    io.mapOptional("error_rate_vec", config.error_rate_vec);
+    // Continue accepting the PR765 top-level spelling, but registered decoder
+    // configurations are emitted with rates under decoder_custom_args so the
+    // established researcher-facing wire YAML does not change.
+    if (!io.outputting() || !schema)
+      io.mapOptional("error_rate_vec", config.error_rate_vec);
     io.mapOptional("dem_chunks", config.dem_chunks);
     io.mapOptional("stim_dem_path", config.stim_dem_path, std::string{});
+
+    // Convert decoder_custom_args through the schema registered for this
+    // decoder type. error_rate_vec is a reserved compatibility alias: accept
+    // it at any schema-recognized nesting level, promote it to model state,
+    // and never leave it in the map a plugin receives.
+    if (io.outputting()) {
+      auto args_map = config.decoder_custom_args_to_heterogeneous_map();
+      const auto rates = config.effective_error_rate_vec();
+      if (!rates.empty())
+        args_map.insert("error_rate_vec", rates);
+      if (!args_map.empty()) {
+        if (!schema) {
+          // Match the historical emission behavior for unknown types.
+          CUDA_QEC_WARN(
+              "decoder_custom_args set for decoder type '{}' but no parameter "
+              "schema is registered under that name; the args are omitted "
+              "from the emitted YAML.",
+              config.type);
+        } else {
+          cudaqx::heterogeneous_map emitted_args = std::move(args_map);
+          schema_binding binding{&emitted_args, schema};
+          io.mapRequired("decoder_custom_args", binding);
+        }
+      }
+    } else if (schema) {
+      bool args_present = false;
+      for (const auto key : io.keys()) {
+        if (key == "decoder_custom_args") {
+          args_present = true;
+          break;
+        }
+      }
+      cudaqx::heterogeneous_map args_map;
+      schema_binding binding{&args_map, schema};
+      io.mapOptional("decoder_custom_args", binding);
+      if (args_present) {
+        cudaq::qec::decoding::config::decoder_config args_config;
+        args_config.type = config.type;
+        args_config.decoder_custom_args = args_map;
+        auto normalized =
+            cudaq::qec::decoding::config::normalize_decoder_args(args_config);
+        if (in_document("error_rate_vec") && normalized.legacy_rates)
+          throw std::runtime_error(
+              "error_rate_vec is supplied both at the decoder configuration "
+              "level and at '" +
+              normalized.legacy_rates->path +
+              "'. Supply model error rates in exactly one location.");
+        if (normalized.legacy_rates)
+          config.error_rate_vec = std::move(normalized.legacy_rates->values);
+        args_map = std::move(normalized.plugin_args);
+        cudaq::qec::decoding::config::finalize_parsed_args(
+            *schema, args_map, "decoder_custom_args (" + config.type + ")");
+      }
+      config.decoder_custom_args = args_map;
+    }
 
     // LLVM's YAML parser records a diagnostic and keeps going, so a malformed
     // document arrives here half-populated. Validate state only if error-free.
@@ -662,53 +841,6 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
                                    std::to_string(config.id));
         }
       }
-    }
-
-    // Convert decoder_custom_args through the schema registered for this
-    // decoder type. When no schema is registered, the key is intentionally
-    // left unconsumed on input so the YAML parser's strict unknown-key check
-    // rejects the section -- a decoder must register a schema (from its own
-    // plugin library) to accept custom args.
-    const auto *schema =
-        cudaq::qec::decoding::config::find_decoder_schema(config.type);
-    if (io.outputting()) {
-      if (!config.decoder_custom_args.empty()) {
-        if (!schema) {
-          // Match the historical emission behavior (args for unknown types
-          // were silently dropped) so configuration flows still fail with a
-          // status code at decoder construction rather than throwing here.
-          CUDA_QEC_WARN(
-              "decoder_custom_args set for decoder type '{}' but no parameter "
-              "schema is registered under that name; the args are omitted "
-              "from the emitted YAML.",
-              config.type);
-        } else {
-          // Emit the same normalized map the constructor-facing path
-          // produces (non-schema keys dropped, defaults materialized), so a
-          // programmatically built config serializes identically on first
-          // emission and after a YAML round trip -- e.g. a trt config with
-          // only `global_decoder` set gains `global_decoder_params: {}`
-          // here, not just after re-parsing.
-          auto args_map = config.decoder_custom_args_to_heterogeneous_map();
-          schema_binding binding{&args_map, schema};
-          io.mapRequired("decoder_custom_args", binding);
-        }
-      }
-    } else if (schema) {
-      bool args_present = false;
-      for (const auto key : io.keys()) {
-        if (key == "decoder_custom_args") {
-          args_present = true;
-          break;
-        }
-      }
-      cudaqx::heterogeneous_map args_map;
-      schema_binding binding{&args_map, schema};
-      io.mapOptional("decoder_custom_args", binding);
-      if (args_present)
-        cudaq::qec::decoding::config::finalize_parsed_args(
-            *schema, args_map, "decoder_custom_args (" + config.type + ")");
-      config.decoder_custom_args = args_map;
     }
   }
 };
@@ -888,7 +1020,12 @@ llvm::json::Array registered_name_array(const std::vector<std::string> &names) {
 llvm::json::Object
 decoder_params_json_schema(const decoder_schema &schema,
                            const std::vector<std::string> &all_names) {
-  llvm::json::Object properties;
+  // Framework-owned compatibility alias. Runtime normalization removes it
+  // before the map reaches the decoder plugin.
+  llvm::json::Object properties{
+      {"error_rate_vec",
+       llvm::json::Object{{"type", "array"},
+                          {"items", llvm::json::Object{{"type", "number"}}}}}};
   llvm::json::Array required;
   llvm::json::Array all_of;
   for (const auto &spec : schema.params) {
@@ -973,6 +1110,22 @@ std::string decoder_config_json_schema() {
   // a registered type's args follow its schema; a type with no registered
   // schema accepts no args (the parser rejects the section outright).
   llvm::json::Array dispatch;
+  // Direct duplicate spelling is representable in JSON Schema. Duplicates in
+  // schema-recognized nested parameter sections are rejected by the runtime
+  // normalization walk.
+  llvm::json::Array duplicate_rate_locations;
+  duplicate_rate_locations.push_back(llvm::json::Object{
+      {"required",
+       llvm::json::Array{"error_rate_vec", "decoder_custom_args"}}});
+  llvm::json::Object custom_args_with_rates{
+      {"required", llvm::json::Array{"error_rate_vec"}}};
+  llvm::json::Object custom_args_constraint{
+      {"properties", llvm::json::Object{{"decoder_custom_args",
+                                         std::move(custom_args_with_rates)}}}};
+  duplicate_rate_locations.push_back(std::move(custom_args_constraint));
+  dispatch.push_back(llvm::json::Object{
+      {"not",
+       llvm::json::Object{{"allOf", std::move(duplicate_rate_locations)}}}});
   for (const auto &name : names)
     dispatch.push_back(llvm::json::Object{
         {"if", llvm::json::Object{{"properties",

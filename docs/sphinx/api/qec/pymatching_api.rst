@@ -35,7 +35,12 @@
 
             cudaqx::heterogeneous_map params;
             params.insert("merge_strategy", std::string("smallest_weight"));
-            auto dec = cudaq::qec::get_decoder("pymatching", H, params);
+            std::vector<double> error_rates{0.1, 0.1, 0.1};
+            cudaq::qec::decoder_init inputs(
+                cudaq::qec::sparse_binary_matrix(H), std::nullopt,
+                error_rates);
+            auto dec = cudaq::qec::get_decoder(
+                "pymatching", std::move(inputs), params);
 
     .. note::
       The `"pymatching"` decoder implements the :class:`cudaq_qec.Decoder`
@@ -45,10 +50,12 @@
     :param H: Parity check matrix. Each column must have one or two set entries
               (matchable graph). In Python, a ``scipy.sparse`` matrix or a dense
               NumPy ``uint8`` array may be passed.
-    :param params: Heterogeneous map of parameters:
+    :param params: Decoder model inputs and heterogeneous parameters:
 
         - `error_rate_vec` (vector<double>): Per-error prior probabilities, one
-          per column of ``H`` (length ``block_size``). Each value must lie in
+          per column of ``H`` (length ``block_size``). Python accepts this as a
+          keyword. C++ supplies it through :cpp:class:`cudaq::qec::decoder_init`,
+          not the heterogeneous parameter map. Each value must lie in
           ``(0, 0.5]`` and sets the matching edge weight ``-log(p / (1 - p))``.
           When omitted, all edge weights default to ``1.0``.
         - `merge_strategy` (string): How to combine parallel edges that map to

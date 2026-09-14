@@ -166,6 +166,7 @@ cudaq::qec::decoder_init resolve_decoder_init(
   auto expanded_config = config_in;
   cudaq::qec::decoding::config::expand_dem_chunks(expanded_config);
   const auto &decoder_config = expanded_config;
+  const auto error_rate_vec = decoder_config.effective_error_rate_vec();
 
   if (decoder_config.D_sparse.empty())
     throw std::runtime_error(
@@ -178,7 +179,7 @@ cudaq::qec::decoder_init resolve_decoder_init(
     // The matrix keys are a competing representation of the same model, not
     // assertions about it, so supplying both leaves no single authority.
     if (!decoder_config.H_sparse.empty() || !decoder_config.O_sparse.empty() ||
-        !decoder_config.error_rate_vec.empty())
+        !error_rate_vec.empty())
       throw std::runtime_error(
           "stim_dem_path is mutually exclusive with H_sparse, O_sparse and "
           "error_rate_vec; supply exactly one model source");
@@ -242,11 +243,11 @@ cudaq::qec::decoder_init resolve_decoder_init(
         "for observable output, which needs an observable mapping");
   validate_sparse_indices(decoder_config.O_sparse, decoder_config.block_size,
                           "O_sparse");
-  if (!decoder_config.error_rate_vec.empty() &&
-      decoder_config.error_rate_vec.size() != decoder_config.block_size)
-    throw std::runtime_error(fmt::format(
-        "error_rate_vec size is not equal to block_size: {} != {}",
-        decoder_config.error_rate_vec.size(), decoder_config.block_size));
+  if (!error_rate_vec.empty() &&
+      error_rate_vec.size() != decoder_config.block_size)
+    throw std::runtime_error(
+        fmt::format("error_rate_vec size is not equal to block_size: {} != {}",
+                    error_rate_vec.size(), decoder_config.block_size));
   if (static_cast<std::uint64_t>(D.num_rows()) != decoder_config.syndrome_size)
     throw std::runtime_error(
         fmt::format("Number of rows in D_sparse vector is not equal to "
@@ -261,7 +262,7 @@ cudaq::qec::decoder_init resolve_decoder_init(
   auto observable_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
   return cudaq::qec::decoder_init(std::move(pcm), std::move(observable_matrix),
-                                  decoder_config.error_rate_vec, std::move(D));
+                                  error_rate_vec, std::move(D));
 }
 
 std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(

@@ -79,10 +79,12 @@ out-of-tree decoder plugins. Use ``cudaq_qec.decoder_param_schema(name)`` to
 inspect a decoder's parameters and ``cudaq_qec.registered_decoder_schemas()``
 to list all decoders with registered schemas.
 
-For example, model error rates are assigned to the top-level
+For example, model error rates may be assigned to the top-level
 ``decoder_config.error_rate_vec`` field, while the ``pymatching`` decoder's
 custom ``merge_strategy`` is one of ``"disallow"``, ``"independent"``,
-``"smallest_weight"``, ``"keep_original"``, or ``"replace"``:
+``"smallest_weight"``, ``"keep_original"``, or ``"replace"``. Emitted YAML
+retains the established spelling under ``decoder_custom_args``. Input YAML
+accepts either location, but rejects a configuration that supplies both:
 
 .. code-block:: python
 
@@ -91,6 +93,14 @@ custom ``merge_strategy`` is one of ``"disallow"``, ``"independent"``,
    config.decoder_custom_args = {
        "merge_strategy": "smallest_weight",
    }
+
+The corresponding YAML keeps the error rates in the compatibility location:
+
+.. code-block:: yaml
+
+   decoder_custom_args:
+     error_rate_vec: [0.1, 0.1, 0.1]
+     merge_strategy: smallest_weight
 
 The ``trt_decoder`` accepts ``onnx_load_path`` or ``engine_load_path``
 (mutually exclusive), ``engine_save_path``, ``precision`` ("fp16", "bf16",
