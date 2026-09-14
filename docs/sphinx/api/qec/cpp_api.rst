@@ -186,6 +186,13 @@ NVIDIA QLDPC Decoder
 
 .. include:: nv_qldpc_decoder_api.rst
 
+.. _nv_fusion_decoder_api_cpp:
+
+NVIDIA Fusion Decoder
+---------------------
+
+.. include:: nv_fusion_decoder_api.rst
+
 Sliding Window Decoder
 ----------------------
 
