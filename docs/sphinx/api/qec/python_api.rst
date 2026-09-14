@@ -209,6 +209,13 @@ Relay Solutions Post-Processing
 .. autoclass:: cudaq_qec.relay_solutions.StopNConvSweep
     :members:
 
+.. _nv_fusion_decoder_api_python:
+
+NVIDIA Fusion Decoder
+---------------------
+
+.. include:: nv_fusion_decoder_api.rst
+
 Sliding Window Decoder
 ----------------------
 

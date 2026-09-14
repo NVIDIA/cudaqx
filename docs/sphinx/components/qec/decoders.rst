@@ -307,6 +307,12 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
      - Yes
      - Yes
      - Supports Relay BP and BP+OSD
+   * - NVIDIA Fusion Decoder
+     - `"nv-fusion-decoder"`
+     - Yes
+     - Yes
+     - Yes
+     - Multithreaded MWPM decoder optimized for low-latency streaming
    * - Tensor Network Decoder¹
      - `"tensor_network_decoder"`
      - Yes²
@@ -419,6 +425,19 @@ Usage:
         auto d2 = cudaq::qec::get_decoder("nv-qldpc-decoder", H, {{"use_osd", true}, {"bp_batch_size", 100}});
 
 For a runnable example, see :ref:`Getting Started with the NVIDIA QLDPC Decoder <qldpc_decoder_example>`.
+
+NVIDIA Fusion Decoder
+^^^^^^^^^^^^^^^^^^^^^
+
+The ``nv-fusion-decoder`` is a multithreaded minimum-weight perfect matching
+(MWPM) decoder for graphlike error models. It partitions detector data into
+temporal blocks and fuses their solutions to reduce latency in streaming,
+realtime decoding environments. It also supports offline batch decoding.
+
+See the :ref:`Python <nv_fusion_decoder_api_python>` and
+:ref:`C++ <nv_fusion_decoder_api_cpp>` API references for configuration and
+usage details. For benchmark results and reproduction instructions, see
+:doc:`NV-Fusion Decoder Latency </performance/nv_fusion_latency_user_guide>`.
 
 Tensor Network Decoder
 ^^^^^^^^^^^^^^^^^^^^^^
