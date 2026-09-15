@@ -295,9 +295,47 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding
 
 
+def test_pymatching_observable_model_does_not_select_output_basis():
+    H = np.eye(2, dtype=np.uint8)
+    O = np.array([[1, 1]], dtype=np.uint8)
+    rates = np.array([0.1, 0.1])
+    syndrome = np.array([1, 0], dtype=np.uint8)
+
+    error_decoder = qec.get_decoder('pymatching', H, O=O, error_rate_vec=rates)
+    error_result = error_decoder.decode(syndrome)
+    np.testing.assert_array_equal(error_result.result, [1.0, 0.0])
+
+    observable_decoder = qec.get_decoder('pymatching',
+                                         H,
+                                         O=O,
+                                         output='observables',
+                                         error_rate_vec=rates)
+    observable_result = observable_decoder.decode(syndrome)
+    np.testing.assert_array_equal(observable_result.result, [1.0])
+
+    parallel_H = np.array([[1, 1]], dtype=np.uint8)
+    parallel_O = np.array([[1, 0]], dtype=np.uint8)
+    parallel_rates = np.array([0.1, 0.2])
+    with pytest.raises(ValueError):
+        qec.get_decoder('pymatching',
+                        parallel_H,
+                        O=parallel_O,
+                        error_rate_vec=parallel_rates)
+    with pytest.raises(ValueError):
+        qec.get_decoder('pymatching',
+                        parallel_H,
+                        O=parallel_O,
+                        output='errors',
+                        error_rate_vec=parallel_rates)
+    qec.get_decoder('pymatching',
+                    parallel_H,
+                    O=parallel_O,
+                    output='observables',
+                    error_rate_vec=parallel_rates)
+
+
 def test_pymatching_decode_to_observable_surface_code_dem():
-    """Test PyMatching with O (observables) matrix: decoder returns observable
-    flips directly.cpp)."""
+    """Test explicit PyMatching observable output on a surface-code DEM."""
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
     Lz = code.get_observables_z()

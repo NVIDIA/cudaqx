@@ -214,8 +214,11 @@ public:
 
   /// @brief Construct a registered decoder by name.
   /// @param name The registered decoder name.
-  /// @param inputs Stable decoder inputs.
+  /// @param inputs Stable decoder model inputs. Supplying an observable model
+  /// does not select observable output.
   /// @param param_map Optional decoder-specific parameters.
+  /// @note When no result type is supplied, the plugin chooses its documented
+  /// default. PyMatching defaults to error-frame output.
   static std::unique_ptr<decoder>
   get(const std::string &name, decoder_init inputs,
       const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
@@ -557,6 +560,8 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
   }
 }
 
+/// Construct a registered decoder using its documented default result type.
+/// Model inputs, including an observable matrix, do not select that type.
 std::unique_ptr<decoder>
 get_decoder(const std::string &name, decoder_init inputs,
             const cudaqx::heterogeneous_map options = {});
@@ -584,9 +589,9 @@ get_decoder(const std::string &name, const std::string &stim_dem_text,
   return get_decoder(name, decoder_init::from_stim_dem(stim_dem_text), options);
 }
 
-/// Each raw-DEM spelling needs its own explicit-output overload: string_view
-/// does not convert to const std::string&, and with both present a string
-/// literal would otherwise be ambiguous between them.
+/// Raw-DEM convenience overloads use the decoder's documented default output.
+/// To select output explicitly, construct decoder_init with from_stim_dem()
+/// and call the generic decoder_init overload.
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const char *stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {

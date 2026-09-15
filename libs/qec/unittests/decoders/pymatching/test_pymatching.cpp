@@ -238,6 +238,60 @@ TEST(PyMatchingDecoder, RejectsObservableMatrixWithWrongBlockSize) {
       std::invalid_argument);
 }
 
+TEST(PyMatchingDecoder, ObservableModelDoesNotSelectOutputBasis) {
+  cudaqx::tensor<uint8_t> H;
+  const std::vector<uint8_t> H_vec = {1, 0, 0, 1};
+  H.copy(H_vec.data(), {2, 2});
+
+  cudaqx::tensor<uint8_t> O;
+  const std::vector<uint8_t> O_vec = {1, 1};
+  O.copy(O_vec.data(), {1, 2});
+
+  auto inputs = cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                         cudaq::qec::sparse_binary_matrix(O),
+                                         std::vector<double>{0.1, 0.1});
+
+  auto error_decoder = cudaq::qec::decoder::get("pymatching", inputs);
+  EXPECT_EQ(error_decoder->get_result_type(),
+            cudaq::qec::decode_result_type::errors);
+  const auto error_result = error_decoder->decode({1.0, 0.0});
+  ASSERT_TRUE(error_result.converged);
+  EXPECT_EQ(error_result.result, (std::vector<cudaq::qec::float_t>{1.0, 0.0}));
+
+  auto observable_decoder = cudaq::qec::decoder::get(
+      "pymatching", inputs, cudaq::qec::decode_result_type::observables);
+  EXPECT_EQ(observable_decoder->get_result_type(),
+            cudaq::qec::decode_result_type::observables);
+  const auto observable_result = observable_decoder->decode({1.0, 0.0});
+  ASSERT_TRUE(observable_result.converged);
+  EXPECT_EQ(observable_result.result, (std::vector<cudaq::qec::float_t>{1.0}));
+}
+
+TEST(PyMatchingDecoder, ObservableModelDoesNotChangeErrorMergeDefault) {
+  cudaqx::tensor<uint8_t> H;
+  const std::vector<uint8_t> H_vec = {1, 1};
+  H.copy(H_vec.data(), {1, 2});
+
+  cudaqx::tensor<uint8_t> O;
+  const std::vector<uint8_t> O_vec = {1, 0};
+  O.copy(O_vec.data(), {1, 2});
+  auto inputs = cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                         cudaq::qec::sparse_binary_matrix(O),
+                                         std::vector<double>{0.1, 0.2});
+
+  // Parallel edges remain disallowed for error output even when O is model
+  // data. Only an explicit observable-output request selects the independent
+  // merge default used for detector-error models.
+  EXPECT_THROW((void)cudaq::qec::decoder::get("pymatching", inputs),
+               std::invalid_argument);
+  EXPECT_THROW(
+      (void)cudaq::qec::decoder::get("pymatching", inputs,
+                                     cudaq::qec::decode_result_type::errors),
+      std::invalid_argument);
+  EXPECT_NO_THROW((void)cudaq::qec::decoder::get(
+      "pymatching", inputs, cudaq::qec::decode_result_type::observables));
+}
+
 // Regression test: when two H columns share the same edge (parallel columns),
 // edge2col_idx must record the column that the graph actually retains after the
 // merge, not always the last one seen. Under KEEP_ORIGINAL / INDEPENDENT the

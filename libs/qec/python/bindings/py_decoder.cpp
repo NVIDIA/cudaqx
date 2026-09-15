@@ -852,10 +852,11 @@ void bindDecoder(nb::module_ &mod) {
           raw DEM text via ``decoder_init``; Python-registered decoders receive
           the DEM-derived PCM plus ``O`` and ``error_rate_vec`` defaults.
 
-        Native decoders may select their instance-default result with
-        ``output="errors"`` or ``output="observables"``. Matrix ``O`` and
-        ``error_rate_vec`` keyword adapters are normalized into decoder_init;
-        O never selects the output mode.
+        Native decoders select their result basis with ``output="errors"`` or
+        ``output="observables"``. When omitted, the plugin's documented default
+        applies; PyMatching defaults to errors. Matrix ``O`` and
+        ``error_rate_vec`` keyword adapters are normalized into decoder_init.
+        Supplying ``O`` never selects the output mode.
 
         For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``
         is passed through to ``__init__`` unchanged (NumPy array or scipy sparse
