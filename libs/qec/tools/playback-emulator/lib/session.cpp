@@ -7,14 +7,21 @@
  ******************************************************************************/
 
 /// @file session.cpp
-/// @brief All three session backends: `null` (discard every frame), inproc
-/// (dispatch to a decoder's own DecodingSession), and UDP (a decoding
-/// server). Concrete classes are anonymous-namespace private; the factories
-/// in session.h are the only public surface.
+/// @brief All session backends: `null` (discard every frame), inproc
+/// (dispatch to a decoder's own DecodingSession), UDP (a decoding server),
+/// and CPU RoCE (a decoding server over RDMA, when the CUDA-Q CPU RoCE
+/// transport is available). Concrete classes are anonymous-namespace
+/// private; the factories in session.h are the only public surface.
 
 #include "session.h"
 #include "RpcSlot.h"
 #include "SessionRegistry.h"
+
+#ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
+#include "cudaq/realtime/cpu_transport/roce_wrapper.h"
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#endif
 
 #include <algorithm>
 #include <arpa/inet.h>
@@ -26,6 +33,8 @@
 #include <condition_variable>
 #include <cstring>
 #include <ctime>
+#include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <netdb.h>
@@ -230,6 +239,9 @@ public:
     std::uint32_t event = 0, issued = 0;
     std::int32_t term = 0;
     bool has_term = false;
+    // When a queued request gives up waiting for a free ring slot
+    // (cpu_roce_session only; inproc never queues behind a transport).
+    std::chrono::steady_clock::time_point deadline{};
 
     const std::uint8_t *bytes() const {
       return frame_len <= kInlineBytes ? inline_bytes.data()
@@ -460,8 +472,7 @@ void split_endpoint(const std::string &endpoint, std::string &host,
                     std::string &port) {
   auto pos = endpoint.rfind(':');
   if (pos == std::string::npos)
-    throw std::runtime_error("playback UDP endpoint missing ':port': " +
-                             endpoint);
+    throw std::runtime_error("playback endpoint missing ':port': " + endpoint);
   host = endpoint.substr(0, pos);
   port = endpoint.substr(pos + 1);
 }
@@ -712,5 +723,543 @@ make_udp_sessions(
   }
   return out;
 }
+
+// ─── cpu_roce_session ────────────────────────────────────────────────────────
+//
+// A connected CPU RoCE (libibverbs, RDMA-over-Ethernet) client to a decoding
+// server started with `--transport=cpu_roce`. Pure transport, like udp: it
+// looks no further than the generic RPCHeader/RPCResponse framing. The wire is
+// the CUDA-Q CpuRoceTransceiver's ring protocol -- a request is RDMA-written
+// straight into the server's rx ring slot of the same index, and the server
+// Sends its reply back into our matching rx slot. Slots are filled in strict
+// order and there are only `num_slots` of them, so at most that many requests
+// are ever in flight; a slot is reused only once its reply has been collected.
+//
+// Threads: the transceiver runs its own RX and TX polling threads (started by
+// cpu_roce_blocking_monitor); this session adds one worker that both publishes
+// requests into the ring and reports every reply/event_done to the collector,
+// so send() (timing thread) never blocks and never touches the collector.
+
+#ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
+
+namespace {
+
+using cudaq::realtime::RPC_MAGIC_RESPONSE;
+using cudaq::realtime::RPCResponse;
+
+inline void cpu_pause() {
+#if defined(__x86_64__) || defined(__i386__)
+  __builtin_ia32_pause();
+#elif defined(__aarch64__)
+  asm volatile("yield" ::: "memory");
+#endif
+}
+
+/// Byte-for-byte identical to the service end's rendezvous struct (network
+/// order); see the cpu_roce bridge provider / CpuRoceChannel in cuda-quantum.
+struct roce_rendezvous {
+  std::uint32_t qp_number = 0;
+  std::uint32_t rkey = 0;
+  std::uint32_t roce_ipv4 = 0;
+};
+
+bool roce_write_all(int fd, const void *buf, std::size_t len) {
+  const auto *p = static_cast<const std::uint8_t *>(buf);
+  while (len > 0) {
+    const ssize_t n = ::write(fd, p, len);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR)
+        continue;
+      return false;
+    }
+    p += n;
+    len -= static_cast<std::size_t>(n);
+  }
+  return true;
+}
+
+bool roce_read_all(int fd, void *buf, std::size_t len) {
+  auto *p = static_cast<std::uint8_t *>(buf);
+  while (len > 0) {
+    const ssize_t n = ::read(fd, p, len);
+    if (n <= 0) {
+      if (n < 0 && errno == EINTR)
+        continue;
+      return false;
+    }
+    p += n;
+    len -= static_cast<std::size_t>(n);
+  }
+  return true;
+}
+
+std::uint32_t ipv4_network_order(const std::string &ip) {
+  in_addr a{};
+  if (inet_pton(AF_INET, ip.c_str(), &a) != 1)
+    throw std::runtime_error("playback cpu_roce: invalid local_ip '" + ip +
+                             "'");
+  return a.s_addr;
+}
+
+/// TCP connect to the rendezvous endpoint, retrying until `deadline`. The
+/// socket carries a receive/send timeout so a peer that accepts but never
+/// completes the swap fails instead of hanging.
+int connect_rendezvous(const std::string &host, const std::string &port,
+                       std::chrono::steady_clock::time_point deadline) {
+  addrinfo hints{};
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  addrinfo *res = nullptr;
+  if (getaddrinfo(host.c_str(), port.c_str(), &hints, &res) != 0 || !res)
+    throw std::runtime_error(
+        "playback cpu_roce: failed to resolve rendezvous '" + host + ":" +
+        port + "'");
+
+  for (;;) {
+    for (addrinfo *p = res; p; p = p->ai_next) {
+      int fd = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+      if (fd < 0)
+        continue;
+      if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0) {
+        freeaddrinfo(res);
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now())
+                .count();
+        timeval tv{};
+        const long ms = remaining > 0 ? remaining : 1;
+        tv.tv_sec = ms / 1000;
+        tv.tv_usec = (ms % 1000) * 1000;
+        ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        int one = 1;
+        ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+        return fd;
+      }
+      ::close(fd);
+    }
+    if (std::chrono::steady_clock::now() > deadline) {
+      freeaddrinfo(res);
+      throw std::runtime_error(
+          "playback cpu_roce: could not reach rendezvous '" + host + ":" +
+          port + "'");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+}
+
+/// setup() a fresh transceiver, run the bidirectional QP/rkey rendezvous as the
+/// client (write ours first, then read the peer's -- the mirror of the server),
+/// and connect(). Returns a fully connected transceiver, or throws.
+cpu_roce_transceiver_t connect_roce(const std::string &endpoint,
+                                    const cpu_roce_options &opts) {
+  std::string host, port;
+  split_endpoint(endpoint, host, port);
+
+  cpu_roce_transceiver_t x = cpu_roce_create_transceiver(
+      opts.device.c_str(), /*ib_port=*/1, /*tx_ibv_qp=*/0u,
+      /*frame_size=*/opts.slot_size, /*page_size=*/opts.slot_size,
+      opts.num_slots, /*peer_ip=*/"0.0.0.0", /*forward=*/0, /*rx_only=*/0,
+      /*tx_only=*/0, /*unified=*/0, CPU_ROCE_TX_MODE_RDMA_WRITE_WITH_IMM,
+      /*peer_rx_base_addr=*/0, /*peer_rx_rkey=*/0);
+  if (!x)
+    throw std::runtime_error("playback cpu_roce: transceiver create failed "
+                             "(device='" +
+                             opts.device + "')");
+  cpu_roce_set_local_ip(x, opts.local_ip.c_str());
+  if (!cpu_roce_setup(x)) {
+    cpu_roce_destroy_transceiver(x);
+    throw std::runtime_error("playback cpu_roce: transceiver setup() failed "
+                             "(device='" +
+                             opts.device + "', local_ip='" + opts.local_ip +
+                             "')");
+  }
+
+  try {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(opts.connect_timeout_ms);
+    const int fd = connect_rendezvous(host, port, deadline);
+    roce_rendezvous self{htonl(cpu_roce_get_qp_number(x)),
+                         htonl(cpu_roce_get_rkey(x)),
+                         ipv4_network_order(opts.local_ip)};
+    roce_rendezvous peer{};
+    // Client speaks first (its info), then reads the service's reply.
+    if (!roce_write_all(fd, &self, sizeof(self)) ||
+        !roce_read_all(fd, &peer, sizeof(peer))) {
+      ::close(fd);
+      throw std::runtime_error("playback cpu_roce: rendezvous exchange failed");
+    }
+    ::close(fd);
+
+    char peer_ip[INET_ADDRSTRLEN] = {0};
+    in_addr pa{};
+    pa.s_addr = peer.roce_ipv4;
+    if (!inet_ntop(AF_INET, &pa, peer_ip, sizeof(peer_ip)))
+      throw std::runtime_error(
+          "playback cpu_roce: bad peer RoCE IPv4 in rendezvous");
+    if (!cpu_roce_connect(x, ntohl(peer.qp_number), peer_ip,
+                          ntohl(peer.rkey))) {
+      throw std::runtime_error(
+          "playback cpu_roce: transceiver connect() failed");
+    }
+  } catch (...) {
+    cpu_roce_destroy_transceiver(x);
+    throw;
+  }
+  return x;
+}
+
+class cpu_roce_session : public session {
+public:
+  cpu_roce_session(cpu_roce_transceiver_t xcvr, std::uint32_t num_slots,
+                   std::uint32_t slot_size, std::chrono::milliseconds timeout)
+      : xcvr_(xcvr), num_slots_(num_slots), slot_mask_(num_slots - 1),
+        stride_(cpu_roce_get_page_size(xcvr)), timeout_(timeout),
+        slot_owner_(num_slots, kNoOwner) {
+    max_frame_bytes = slot_size;
+    tx_data_ =
+        static_cast<std::uint8_t *>(cpu_roce_get_tx_ring_data_addr(xcvr));
+    tx_flags_ = cpu_roce_get_tx_ring_flag_addr(xcvr);
+    rx_data_ =
+        static_cast<std::uint8_t *>(cpu_roce_get_rx_ring_data_addr(xcvr));
+    rx_flags_ = cpu_roce_get_rx_ring_flag_addr(xcvr);
+    reply_scratch_.resize(stride_);
+    // The QP is already RTS; start the transceiver's RX/TX polling threads.
+    monitor_ = std::thread([xcvr] { cpu_roce_blocking_monitor(xcvr); });
+  }
+
+  ~cpu_roce_session() override {
+    stop_worker();
+    if (xcvr_) {
+      cpu_roce_close(xcvr_); // signals the RX/TX threads to exit
+      if (monitor_.joinable())
+        monitor_.join();
+      cpu_roce_destroy_transceiver(xcvr_);
+      xcvr_ = nullptr;
+    }
+  }
+
+  void start(run_ctx &collector) override {
+    collector_ = &collector;
+    worker_ = std::thread([this] { worker_loop(); });
+  }
+
+  void send(const frame &f, tag t) override {
+    if (f.size < sizeof(RPCHeader))
+      throw std::invalid_argument(
+          "cpu_roce_session::send: frame is smaller than RPCHeader");
+    auto &e = ring_.reserve();
+    e.kind = request_ring::entry::kRequest;
+    e.t = t;
+    e.frame_len = static_cast<std::uint32_t>(f.size);
+    if (f.size <= e.inline_bytes.size())
+      std::memcpy(e.inline_bytes.data(), f.bytes, f.size);
+    else
+      e.overflow_bytes.assign(f.bytes, f.bytes + f.size);
+    ring_.publish();
+  }
+
+  void event_done(std::uint32_t event, std::uint32_t issued, std::int32_t term,
+                  bool has_term) override {
+    auto &e = ring_.reserve();
+    e.kind = request_ring::entry::kEventDone;
+    e.event = event;
+    e.issued = issued;
+    e.term = term;
+    e.has_term = has_term;
+    ring_.publish();
+  }
+
+  void stop(std::chrono::nanoseconds drain) override {
+    if (!worker_.joinable())
+      return;
+    giveup_ns_.store(now_steady_ns() + drain.count(),
+                     std::memory_order_release);
+    ring_.reserve().kind = request_ring::entry::kStop;
+    ring_.publish();
+    worker_.join();
+  }
+
+private:
+  using clock = std::chrono::steady_clock;
+  static constexpr std::uint32_t kNoOwner = 0xFFFFFFFFu;
+  static constexpr std::int64_t kNever =
+      std::numeric_limits<std::int64_t>::max();
+
+  /// One outstanding request: where its reply is tagged, when it gives up, and
+  /// which ring slot it occupies. Worker-thread-only.
+  struct pending {
+    tag t;
+    clock::time_point deadline;
+    std::uint32_t slot;
+  };
+
+  static std::int64_t now_steady_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               clock::now().time_since_epoch())
+        .count();
+  }
+
+  void complete(tag t, RpcStatus status, const std::uint8_t *body,
+                std::size_t len) {
+    handle_reply(*collector_, t, status, body, len, now_ns());
+  }
+
+  bool past_giveup() const {
+    return now_steady_ns() >= giveup_ns_.load(std::memory_order_acquire);
+  }
+
+  /// Publish the head request into the next TX slot, in strict slot order, if
+  /// that slot is free. Returns false (leaving the request queued) when the
+  /// slot still holds an unanswered request -- the ring is full.
+  bool try_publish(const request_ring::entry &e) {
+    const std::uint32_t slot = rr_;
+    if (slot_owner_[slot] != kNoOwner)
+      return false; // prior request in this slot not yet answered
+    if (__atomic_load_n(&tx_flags_[slot], __ATOMIC_ACQUIRE) != 0)
+      return false; // transport has not shipped this slot's last frame yet
+    const std::uint32_t rid =
+        reinterpret_cast<const RPCHeader *>(e.bytes())->request_id;
+    std::uint8_t *dst = tx_data_ + static_cast<std::size_t>(slot) * stride_;
+    // The transceiver ships the whole slot stride, so clear stale tail bytes.
+    std::memset(dst, 0, stride_);
+    std::memcpy(dst, e.bytes(), e.frame_len);
+    pending_.emplace(rid, pending{e.t, clock::now() + timeout_, slot});
+    slot_owner_[slot] = rid;
+    __atomic_store_n(&tx_flags_[slot], reinterpret_cast<std::uint64_t>(dst),
+                     __ATOMIC_RELEASE);
+    rr_ = (rr_ + 1) & slot_mask_;
+    return true;
+  }
+
+  /// Collect the reply sitting at the RX cursor, if any. Replies land in slot
+  /// order (Sends consume our recv WQEs FIFO), so a single advancing cursor
+  /// tracks them; the reply is still matched by request_id, never positionally.
+  bool poll_reply() {
+    const std::uint32_t slot = cursor_;
+    if (__atomic_load_n(&rx_flags_[slot], __ATOMIC_ACQUIRE) == 0)
+      return false;
+    const std::uint8_t *src =
+        rx_data_ + static_cast<std::size_t>(slot) * stride_;
+    std::memcpy(reply_scratch_.data(), src, stride_);
+    // Release the slot so the transceiver's RX thread can re-arm its WQE.
+    __atomic_store_n(&rx_flags_[slot], 0ull, __ATOMIC_RELEASE);
+    cursor_ = (cursor_ + 1) & slot_mask_;
+    slot_owner_[slot] = kNoOwner;
+
+    const auto *resp =
+        reinterpret_cast<const RPCResponse *>(reply_scratch_.data());
+    if (resp->magic != RPC_MAGIC_RESPONSE)
+      return true; // garbage datagram; slot already released
+    auto it = pending_.find(resp->request_id);
+    if (it == pending_.end())
+      return true; // stale reply: nobody waiting (already swept/timed out)
+    const tag t = it->second.t;
+    pending_.erase(it);
+    const std::size_t avail = stride_ - sizeof(RPCResponse);
+    complete(t, static_cast<RpcStatus>(resp->status),
+             reply_scratch_.data() + sizeof(RPCResponse),
+             std::min<std::size_t>(resp->result_len, avail));
+    return true;
+  }
+
+  /// Force-complete requests whose per-request deadline has passed, freeing
+  /// their slot. As with udp, a client-side timeout is reported INTERNAL_ERROR.
+  bool sweep_stale() {
+    if (pending_.empty())
+      return false;
+    const auto now = clock::now();
+    bool any = false;
+    for (auto it = pending_.begin(); it != pending_.end();) {
+      if (now < it->second.deadline) {
+        ++it;
+        continue;
+      }
+      const tag t = it->second.t;
+      const std::uint32_t slot = it->second.slot;
+      if (slot_owner_[slot] == it->first)
+        slot_owner_[slot] = kNoOwner;
+      it = pending_.erase(it);
+      complete(t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+      any = true;
+    }
+    return any;
+  }
+
+  /// kStop handling: honor outstanding replies up to the drain deadline, then
+  /// force-complete whatever never settled.
+  void drain_and_stop() {
+    const clock::time_point deadline = clock::time_point(
+        std::chrono::nanoseconds(giveup_ns_.load(std::memory_order_acquire)));
+    while (!pending_.empty() && clock::now() < deadline) {
+      if (!poll_reply()) {
+        sweep_stale();
+        cpu_pause();
+      }
+    }
+    for (auto &[rid, p] : pending_)
+      complete(p.t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+    pending_.clear();
+  }
+
+  void worker_loop() {
+    bool idling = false;
+    clock::time_point idle_since;
+    for (;;) {
+      bool did_work = poll_reply();
+      did_work |= sweep_stale();
+
+      if (auto *e = ring_.try_pop()) {
+        switch (e->kind) {
+        case request_ring::entry::kRequest:
+          if (try_publish(*e)) {
+            ring_.pop_done();
+            did_work = true;
+          } else if (past_giveup()) {
+            // stop()'s drain window elapsed and the ring never freed a slot:
+            // report the unsent request like a dropped one so kStop is reached.
+            const tag t = e->t;
+            ring_.pop_done();
+            complete(t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
+            did_work = true;
+          }
+          // else: ring full; leave the head queued and service replies first.
+          break;
+        case request_ring::entry::kEventDone: {
+          const auto ev = e->event, is = e->issued;
+          const auto tm = e->term;
+          const auto ht = e->has_term;
+          ring_.pop_done();
+          handle_event_done(*collector_, ev, is, tm, ht);
+          did_work = true;
+          break;
+        }
+        case request_ring::entry::kStop:
+          ring_.pop_done();
+          drain_and_stop();
+          return;
+        }
+      }
+
+      if (did_work) {
+        idling = false;
+        continue;
+      }
+      if (!idling) {
+        idling = true;
+        idle_since = clock::now();
+      }
+      if (clock::now() - idle_since < kIdleSpin)
+        cpu_pause();
+      else
+        std::this_thread::yield();
+    }
+  }
+
+  /// Pushes the stop marker and joins, used by the destructor when stop() was
+  /// never called (gives the worker a zero drain so it exits promptly).
+  void stop_worker() {
+    if (!worker_.joinable())
+      return;
+    std::int64_t expected = kNever;
+    giveup_ns_.compare_exchange_strong(expected, now_steady_ns());
+    ring_.reserve().kind = request_ring::entry::kStop;
+    ring_.publish();
+    worker_.join();
+  }
+
+  cpu_roce_transceiver_t xcvr_ = nullptr;
+  const std::uint32_t num_slots_;
+  const std::uint32_t slot_mask_;
+  const std::size_t stride_;
+  const std::chrono::milliseconds timeout_;
+
+  // Ring memory (owned by the transceiver), cached at construction.
+  std::uint8_t *tx_data_ = nullptr;
+  std::uint64_t *tx_flags_ = nullptr;
+  std::uint8_t *rx_data_ = nullptr;
+  std::uint64_t *rx_flags_ = nullptr;
+
+  // Worker-thread-only state.
+  std::uint32_t rr_ = 0;     // next TX slot to publish into
+  std::uint32_t cursor_ = 0; // next RX slot to collect from
+  std::unordered_map<std::uint32_t, pending> pending_;
+  std::vector<std::uint32_t>
+      slot_owner_; // request_id in each slot, or kNoOwner
+  std::vector<std::uint8_t> reply_scratch_;
+
+  std::atomic<std::int64_t> giveup_ns_{kNever};
+  request_ring ring_; // timing thread -> worker
+  run_ctx *collector_ = nullptr;
+  std::thread worker_;
+  std::thread monitor_; // runs cpu_roce_blocking_monitor
+};
+
+} // namespace
+
+std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+make_cpu_roce_sessions(
+    const std::unordered_map<std::uint64_t, std::string> &endpoints,
+    const cpu_roce_options &opts, std::uint32_t timeout_ms) {
+  if (opts.num_slots == 0 || (opts.num_slots & (opts.num_slots - 1)) != 0)
+    throw std::invalid_argument(
+        "cpu_roce num_slots must be a non-zero power of two");
+  if (opts.slot_size < sizeof(RPCHeader) ||
+      opts.slot_size < sizeof(RPCResponse))
+    throw std::invalid_argument(
+        "cpu_roce slot_size is too small to hold an RPC header/response");
+  if (opts.device.empty() || opts.local_ip.empty())
+    throw std::invalid_argument("cpu_roce requires a device and a local_ip");
+
+  // Bring every session up concurrently: the decoding server accepts its rings
+  // one at a time (each rendezvous listener blocks in accept()), so a serial
+  // loop in the wrong order would deadlock. Each connect retries until it is
+  // accepted, so order does not matter.
+  std::vector<std::pair<std::uint64_t, std::string>> eps(endpoints.begin(),
+                                                         endpoints.end());
+  std::vector<cpu_roce_transceiver_t> xcvrs(eps.size(), nullptr);
+  std::vector<std::exception_ptr> errs(eps.size());
+  std::vector<std::thread> threads;
+  threads.reserve(eps.size());
+  for (std::size_t i = 0; i < eps.size(); ++i)
+    threads.emplace_back([&, i] {
+      try {
+        xcvrs[i] = connect_roce(eps[i].second, opts);
+      } catch (...) {
+        errs[i] = std::current_exception();
+      }
+    });
+  for (auto &t : threads)
+    t.join();
+
+  for (std::size_t i = 0; i < eps.size(); ++i)
+    if (errs[i]) {
+      for (auto x : xcvrs)
+        if (x)
+          cpu_roce_destroy_transceiver(x);
+      std::rethrow_exception(errs[i]);
+    }
+
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> out;
+  out.reserve(eps.size());
+  for (std::size_t i = 0; i < eps.size(); ++i)
+    out.emplace_back(eps[i].first, std::make_unique<cpu_roce_session>(
+                                       xcvrs[i], opts.num_slots, opts.slot_size,
+                                       std::chrono::milliseconds(timeout_ms)));
+  return out;
+}
+
+#else // CUDAQ_QEC_PLAYBACK_CPU_ROCE
+
+std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
+make_cpu_roce_sessions(const std::unordered_map<std::uint64_t, std::string> &,
+                       const cpu_roce_options &, std::uint32_t) {
+  throw std::runtime_error(
+      "playback emulator was built without CPU RoCE support "
+      "(cudaq-realtime-cpu-roce-transport / libibverbs not found at build "
+      "time)");
+}
+
+#endif // CUDAQ_QEC_PLAYBACK_CPU_ROCE
 
 } // namespace cudaq::qec::playback

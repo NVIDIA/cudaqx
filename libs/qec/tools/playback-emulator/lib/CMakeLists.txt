@@ -7,7 +7,8 @@
 # ============================================================================ #
 
 # The playback emulator core: parser, timing loop, dispatch (polling streams),
-# the three required session backends, syndrome sources, and the downstream
+# the session backends (null, inproc, udp, and cpu_roce when the CUDA-Q CPU
+# RoCE transport is installed), syndrome sources, and the downstream
 # CSV analyzer. This file is the one place that reaches outside this tool's
 # own directory, for pieces it borrows rather than owns a copy of: the
 # existing decoding-server (RpcSlot.h et al.) and core (heterogeneous_map).
@@ -64,6 +65,28 @@ target_link_libraries(cudaq-qec-playback-emulator
     libstim
     Threads::Threads
 )
+
+# Optional `cpu_roce` backend: the CUDA-Q CPU RoCE ring transceiver (a static
+# archive over libibverbs, shipped with the realtime install next to
+# libcudaq-realtime). Without it the factory still exists but throws.
+find_library(QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY
+  cudaq-realtime-cpu-roce-transport
+  HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR} ${CUDAQ_INSTALL_PREFIX}
+  PATH_SUFFIXES lib)
+find_library(QEC_PLAYBACK_IBVERBS_LIBRARY ibverbs)
+if(QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY AND QEC_PLAYBACK_IBVERBS_LIBRARY)
+  message(STATUS "playback-emulator: cpu_roce backend enabled "
+                 "(${QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY})")
+  # PUBLIC so the unit tests can build their RoCE fake server too.
+  target_compile_definitions(cudaq-qec-playback-emulator PUBLIC
+    CUDAQ_QEC_PLAYBACK_CPU_ROCE)
+  target_link_libraries(cudaq-qec-playback-emulator PRIVATE
+    ${QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY}
+    ${QEC_PLAYBACK_IBVERBS_LIBRARY})
+else()
+  message(STATUS "playback-emulator: cpu_roce backend disabled "
+                 "(cudaq-realtime-cpu-roce-transport or libibverbs not found)")
+endif()
 
 set_target_properties(cudaq-qec-playback-emulator PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
