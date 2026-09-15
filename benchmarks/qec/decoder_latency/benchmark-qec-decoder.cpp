@@ -43,7 +43,6 @@
 #include "stim.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/decoder_config_schema.h"
-#include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include <algorithm>
 #include <chrono>
@@ -53,6 +52,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -108,8 +108,6 @@ struct options {
   bool run_batch = true;
   bool run_stream = true;
   bool emit_csv = false;
-  // False reproduces the realtime server, which passes O only to trt_decoder.
-  bool pass_O = true;
   std::vector<std::pair<std::string, std::string>> extra_params;
 };
 
@@ -159,8 +157,6 @@ void print_usage(const char *argv0) {
       << "  --param KEY=VALUE          extra param forwarded to all decoders\n"
       << "                             (repeatable; auto-typed)\n"
       << "  --csv                      emit machine-readable CSV rows\n"
-      << "  --no_O                     withhold the O param, as the realtime\n"
-      << "                             server does for every non-trt decoder\n"
       << "  --help                     show this message\n";
 }
 
@@ -225,10 +221,6 @@ bool parse_args(int argc, char **argv, options &opts, int &exit_code) {
     }
     if (arg == "--csv") {
       opts.emit_csv = true;
-      continue;
-    }
-    if (arg == "--no_O") {
-      opts.pass_O = false;
       continue;
     }
     if (arg == "--pin_instances") {
@@ -510,11 +502,11 @@ std::vector<std::size_t> detectors_per_round(const std::vector<int32_t> &dr) {
   return widths;
 }
 
-void set_identity_d_sparse(cudaq::qec::decoder &dec, std::size_t nd) {
+cudaq::qec::sparse_binary_matrix identity_measurement_map(std::size_t nd) {
   std::vector<std::vector<uint32_t>> d_sparse(nd);
   for (std::size_t i = 0; i < nd; ++i)
     d_sparse[i].push_back(static_cast<uint32_t>(i));
-  dec.set_D_sparse(d_sparse);
+  return cudaq::qec::sparse_binary_matrix::from_nested_csr(nd, nd, d_sparse);
 }
 
 // ── Parameter helpers
@@ -582,15 +574,6 @@ std::size_t auto_thread_share(const options &opts, std::size_t instances) {
 
 // Build a params map tailored to one decoder, in tiers:
 //
-//   Universal  -- O and error_rate_vec are included by default.  They are not
-//                 in every decoder's schema (e.g. pymatching's schema omits O)
-//                 but every decoder that uses them reads them from params, and
-//                 omitting O causes pymatching to fall back to edge mode which
-//                 rejects the parallel edges that DEM decomposition produces.
-//                 --no_O withholds O to mirror the realtime server, which
-//                 hands it to trt_decoder alone: pymatching then decodes into
-//                 error space and the base class projects to observables.
-//
 //   detector_round -- vector<int32_t> has no corresponding param_kind so it
 //                 cannot appear in any schema.  nv-fusion-decoder reads it
 //                 directly, while decoders with strict schema validation
@@ -609,9 +592,9 @@ std::size_t auto_thread_share(const options &opts, std::size_t instances) {
 //                 decoder that does not declare it, without warnings or
 //                 validation failures.
 cudaqx::heterogeneous_map build_decoder_params(
-    const std::string &name, const dem_matrices &matrices,
-    const std::vector<int32_t> &dr, std::size_t block_leaf,
-    const std::vector<std::pair<std::string, std::string>> &extra, bool pass_O,
+    const std::string &name, const std::vector<int32_t> &dr,
+    std::size_t block_leaf,
+    const std::vector<std::pair<std::string, std::string>> &extra,
     std::size_t auto_threads) {
   const auto *schema = cudaq::qec::decoding::config::find_decoder_schema(name);
 
@@ -625,11 +608,6 @@ cudaqx::heterogeneous_map build_decoder_params(
   };
 
   cudaqx::heterogeneous_map p;
-
-  // ── Universal ──────────────────────────────────────────────────────────────
-  if (pass_O)
-    p.insert("O", matrices.O);
-  p.insert("error_rate_vec", matrices.priors);
 
   // ── detector_round (name-gated) ────────────────────────────────────────────
   if (name == "nv-fusion-decoder")
@@ -962,17 +940,20 @@ measurement run_point(const options &opts, const benchmark_data &data,
   instance_work work;
 
   work.setup = [&](std::size_t instance) {
-    auto dec = cudaq::qec::decoder::get(point.name, matrices.H, dec_params);
+    std::optional<cudaq::qec::sparse_binary_matrix> D;
+    if (mode == bench_mode::stream)
+      D = identity_measurement_map(data.circuit.count_detectors());
+    cudaq::qec::decoder_init inputs(
+        matrices.H, cudaq::qec::sparse_binary_matrix(matrices.O),
+        matrices.priors, std::move(D));
+    auto dec = cudaq::qec::decoder::get(
+        point.name, std::move(inputs),
+        cudaq::qec::decode_result_type::observables, dec_params);
     // Stamp the sweep's id on the decoder so any [DecoderStats] line it logs
     // carries the same ID the table rows report.  Every instance of a point
     // shares that id, matching the one pooled row the point produces.
     dec->set_decoder_id(static_cast<uint32_t>(point.decoder_id));
-    // A decoder that never saw O in its params has no observables of its own,
-    // so supply them the way create_realtime_decoder() does.
-    if (!opts.pass_O)
-      dec->set_O_sparse(cudaq::qec::pcm_to_sparse_vec(matrices.O));
     if (mode == bench_mode::stream) {
-      set_identity_d_sparse(*dec, data.circuit.count_detectors());
       warmup_stream(*dec, data, opts, round_widths);
     } else {
       warmup_batch(*dec, data, opts);
@@ -1139,7 +1120,7 @@ int main(int argc, char **argv) {
                           1e3) +
                           " us per round"
                     : std::string("none"))
-            << "  O param=" << (opts.pass_O ? "passed" : "withheld") << "\n"
+            << "  output=observables\n"
             << "instances: ";
   for (std::size_t i = 0; i < opts.instances_list.size(); ++i)
     std::cout << (i ? ", " : "") << opts.instances_list[i];
@@ -1206,9 +1187,9 @@ int main(int argc, char **argv) {
             for (const std::size_t instances : opts.instances_list) {
               // Rebuilt per row because a machine-sized thread request
               // resolves against this row's instance count.
-              const cudaqx::heterogeneous_map dec_params = build_decoder_params(
-                  name, matrices, dr, block_leaf, opts.extra_params,
-                  opts.pass_O, auto_thread_share(opts, instances));
+              const cudaqx::heterogeneous_map dec_params =
+                  build_decoder_params(name, dr, block_leaf, opts.extra_params,
+                                       auto_thread_share(opts, instances));
               sweep_point point;
               point.decoder_id = id;
               point.name = name;

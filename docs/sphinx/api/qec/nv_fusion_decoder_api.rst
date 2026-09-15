@@ -80,12 +80,10 @@
                           [0, 1, 1]], dtype=np.uint8)
             O = np.array([[1, 0, 0],              # rows = observables
                           [0, 1, 0]], dtype=np.uint8)
-            opts = {
-                "O": O,
-                # int32, one round index per detector
-                "detector_round": np.array([0, 1], dtype=np.int32),
-            }
-            decoder = qec.get_decoder('nv-fusion-decoder', H, **opts)
+            # int32, one round index per detector
+            opts = {"detector_round": np.array([0, 1], dtype=np.int32)}
+            decoder = qec.get_decoder('nv-fusion-decoder', H, O=O,
+                                      output='observables', **opts)
             decoder.decode([1.0, 0.0])            # -> [1.0, 0.0]
 
       .. tab:: C++
@@ -105,10 +103,13 @@
             O.copy(O_vec.data(), {2, 3});
 
             cudaqx::heterogeneous_map opts;
-            opts.insert("O", O);
             opts.insert("detector_round", std::vector<int32_t>{0, 1});
-            auto decoder = cudaq::qec::get_decoder("nv-fusion-decoder", H,
-                                                   opts);
+            cudaq::qec::decoder_init inputs(
+                cudaq::qec::sparse_binary_matrix(H),
+                cudaq::qec::sparse_binary_matrix(O));
+            auto decoder = cudaq::qec::get_decoder(
+                "nv-fusion-decoder", std::move(inputs),
+                cudaq::qec::decode_result_type::observables, opts);
             decoder->decode({1.0, 0.0});          // -> {1.0, 0.0}
 
     .. note::
@@ -118,11 +119,22 @@
 
     :param H: Parity-check matrix (sparse binary matrix or dense
       ``tensor<uint8_t>``), shape ``(num_detectors, num_error_mechanisms)``.
-      When the matching graph is built from it, each column must have exactly
-      one or two non-zero rows (graphlike error mechanisms); alongside a
-      ``dem_string`` only its shape is read.  Pass Stim DEM text in this
-      position instead to construct from a DEM, which needs neither ``H`` nor
-      ``O``.
+      Each column must have exactly one or two non-zero rows (graphlike error
+      mechanisms). Pass Stim DEM text in this position instead to construct
+      from an authoritative DEM, which carries ``H``, ``O``, and error rates.
+    :param O: Optional observable matrix with shape
+      ``(num_observables, num_error_mechanisms)``. It is model data and does
+      not select the result basis. Python accepts it as a keyword adapter; C++
+      supplies it through :cpp:class:`cudaq::qec::decoder_init`.
+    :param output: Result basis, ``"errors"`` or ``"observables"`` in Python
+      and :cpp:enum:`cudaq::qec::decode_result_type` in C++. Supplying ``O`` or
+      DEM text does not select observable output.
+    :param error_rate_vec: Optional physical error probability per error
+      mechanism, with length ``H.num_cols()`` and values in ``(0, 0.5]``.
+      Python accepts it as a keyword adapter; C++ supplies it through
+      :cpp:class:`cudaq::qec::decoder_init`. The H construction path uses it
+      to compute log-likelihood-ratio edge weights; otherwise unit weights are
+      used. A DEM already carries its own probabilities.
     :param params: Heterogeneous map of parameters:
 
         .. note::
@@ -133,34 +145,6 @@
           and the temporal layout through the top-level ``H_sparse``,
           ``O_sparse`` and ``D_sparse`` fields instead.
 
-        **Construction:**
-
-        - ``dem_string`` (str): Serialized Stim detector error model string.
-          Equivalent to passing the DEM text in place of ``H``, and only
-          needed when you want to supply an ``H`` of your own alongside it:
-          the matching graph and observable wiring still come from the DEM, so
-          ``H`` is read for its shape alone and its dimensions must agree with
-          ``dem.count_detectors()`` and ``dem.count_errors()``.  Either way,
-          Stim detector coordinates supply the per-detector temporal round map
-          automatically, removing the need to pass ``detector_round``
-          explicitly — provided every detector carries a coordinate.  A DEM
-          with an uncoordinated detector is rejected at construction, asking
-          for ``detector_round``.
-
-        - ``O`` (``tensor<uint8_t>`` or ``sparse_binary_matrix``): Observable
-          matrix, shape ``(num_observables, num_error_mechanisms)``.  When
-          provided, ``decode()`` returns observable flip predictions of length
-          ``num_observables`` rather than a block-size correction vector;
-          without it the ``H`` path stays in edge mode.  Redundant with a DEM,
-          which already carries the observable wiring and decodes to
-          ``dem.count_observables()`` observables on its own.  Supplying one
-          alongside a DEM is only useful to widen the correction buffer past
-          that count; an ``O`` with fewer rows than the DEM declares is
-          rejected.  Takes precedence over the ``O_sparse``
-          set-from-outside path: when ``O`` is given, a later
-          ``set_O_sparse()`` does not change the observable wiring the decoder
-          matches against.  Supply one or the other to keep that unambiguous.
-
         **Temporal layout (one of the following is required, unless a DEM
         supplies detector coordinates):**
 
@@ -169,21 +153,19 @@
           its round in 0-based integer coordinates.  Takes highest priority
           over all automatic derivation paths.
 
-        - ``D_sparse`` (``vector<int64_t>``): Flat measurement-to-detector
-          map in row-major format, with ``-1`` row terminators.  The decoder
-          infers the per-detector round from the column stride of the
-          two-entry (timelike) rows.  Rows with more than two entries are
-          treated as terminal boundary detectors placed in the last round.
-          Used automatically by the realtime layer; can also be supplied
-          explicitly when ``detector_round`` is not available at construction
-          time.
+        - ``D`` in :cpp:class:`cudaq::qec::decoder_init`: Sparse
+          measurement-to-detector map with shape ``(num_detectors,
+          num_measurements)``. The decoder infers the per-detector round from
+          the column stride of the two-entry (timelike) rows. Rows with more
+          than two entries are treated as terminal boundary detectors placed
+          in the last round. The realtime configuration's top-level
+          ``D_sparse`` field is normalized into this model input.
 
         The three sources are consulted in that order: an explicit
-        ``detector_round`` first, then DEM coordinates, then ``D_sparse``.  A
-        DEM therefore takes precedence over ``D_sparse``, and one missing a
-        detector coordinate fails rather than falling back to it.  Without a
-        DEM and with neither vector given, scaffold construction is deferred
-        until ``set_D_sparse()`` is called.
+        ``detector_round`` first, then DEM coordinates, then ``D``. A DEM
+        therefore takes precedence over ``D``, and one missing a detector
+        coordinate fails rather than falling back to it. Without a DEM and
+        with neither input given, construction is rejected.
 
         **Blocking and threading:**
 
@@ -230,17 +212,6 @@
           scaffold construction and parallel fuse operations.  Defaults to
           ``1``.
 
-        **Edge weights:**
-
-        - ``error_rate_vec`` (``vector<double>``): Physical error probability
-          per error mechanism (column of ``H``), length
-          ``H.num_cols()``.  Each value must be in the range ``(0, 0.5]``.
-          When provided, edge weights are computed as the log-likelihood
-          ratio ``-log(p / (1 - p))``.  When absent, unit weights are
-          used.  Applies to the ``H`` construction path only: a DEM already
-          carries a probability per error mechanism, so ``error_rate_vec`` is
-          ignored when constructing from one.
-
         **Fusion schedule:**
 
         - ``fusion_strategy`` (str): Fusion schedule to use.  Currently
@@ -250,12 +221,10 @@
 
     ``decode()`` returns a :class:`~cudaq_qec.DecoderResult` where:
 
-    - ``result`` — length ``num_observables`` when constructed from a DEM or
-      with ``O``, otherwise length ``block_size``.  In
-      observable mode each entry is ``0.0`` or ``1.0`` indicating a
-      predicted logical flip.  In edge mode each entry is ``1.0`` if the
-      corresponding H column was selected as a matching edge, ``0.0``
-      otherwise.
+    - ``result`` — the explicitly selected result basis. Observable output has
+      length ``num_observables`` and each entry indicates a predicted logical
+      flip. Error output has length ``block_size`` and each entry indicates
+      whether the corresponding H column was selected as a matching edge.
 
     - ``converged`` — ``True`` if the fuse pass raised no herald flag.  A
       ``False`` value indicates a suspect or ambiguous match; the correction
@@ -278,10 +247,9 @@
     and exposed via ``get_obs_corrections()``.
 
     .. note::
-      ``D_sparse`` must be configured (either via ``set_D_sparse()`` or
-      the ``D_sparse`` constructor parameter) before the first call to
-      ``enqueue_syndrome()``.  The realtime layer in the CUDA-QX QEC stack
-      sets ``D_sparse`` automatically; direct callers must set it manually.
+      ``D`` must be supplied in :cpp:class:`cudaq::qec::decoder_init` before
+      the first call to ``enqueue_syndrome()``. The realtime layer normalizes
+      its top-level ``D_sparse`` configuration into that model input.
 
     .. note::
       Observable corrections accumulate across shots.  Call
