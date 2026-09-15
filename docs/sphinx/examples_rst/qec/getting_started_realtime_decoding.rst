@@ -205,8 +205,9 @@ still be rejected by a hook when the configuration is parsed.
 
 ``cuda_device_id`` pins a GPU-accelerated decoder (e.g. ``nv-qldpc-decoder``
 or ``trt_decoder``) to a specific CUDA device. The same knob is available as
-a construction parameter in C++ and Python
-(``qec.get_decoder("trt_decoder", H, cuda_device_id=1)``). The thread that
+a construction parameter in C++ and Python (for example,
+``qec.get_decoder("trt_decoder", H, engine_load_path="model.engine", engine_output_format="errors", cuda_device_id=1)``).
+The thread that
 creates a decoder is pinned to that device and is expected to drive its
 decode calls; create each pinned decoder on its own thread to place several
 decoders on different GPUs.

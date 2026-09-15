@@ -380,6 +380,8 @@ void save_dem_to_file(const std::vector<cudaq::qec::detector_error_model> &dems,
       trt_args.insert("onnx_load_path", ising_artifacts_dir + "/model.onnx");
       trt_args.insert("batch_size", std::size_t{1});
       trt_args.insert("use_cuda_graph", true);
+      trt_args.insert("engine_output_format",
+                      std::string("observables_and_residual_detectors"));
       trt_args.insert("global_decoder", "pymatching");
 
       cudaqx::heterogeneous_map pm_args;

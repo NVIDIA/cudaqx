@@ -103,11 +103,16 @@ The corresponding YAML keeps the error rates in the compatibility location:
      merge_strategy: smallest_weight
 
 The ``trt_decoder`` accepts ``onnx_load_path`` or ``engine_load_path``
-(mutually exclusive), ``engine_save_path``, ``precision`` ("fp16", "bf16",
-"int8", "fp8", "tf32", "noTF32", or "best"), ``memory_workspace`` (bytes),
-``batch_size``, ``use_cuda_graph``, and an optional global decoder attached
-via ``global_decoder`` plus ``global_decoder_params`` (a nested dict whose
-keys follow the schema of the named global decoder).
+(mutually exclusive), required ``engine_output_format`` (``"errors"``,
+``"residual_detectors"``, ``"observables"``, or
+``"observables_and_residual_detectors"``), ``engine_save_path``, ``precision``
+(``"best"``, ``"tf32"``, or ``"noTF32"``; legacy ``"fp16"``, ``"bf16"``,
+``"int8"``, and ``"fp8"`` values are accepted but ignored for strongly typed
+networks),
+``memory_workspace`` (bytes), ``batch_size``, ``use_cuda_graph``, and an
+optional global decoder attached via ``global_decoder`` plus
+``global_decoder_params`` (a nested dict whose keys follow the schema of the
+named global decoder).
 
 .. py:function:: cudaq_qec.decoder_param_schema(decoder_name)
 
