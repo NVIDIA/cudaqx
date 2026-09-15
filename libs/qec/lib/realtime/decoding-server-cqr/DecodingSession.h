@@ -75,11 +75,18 @@ struct DecodingSession {
   DecodingSession(DecodingSession &&) = delete;
   DecodingSession &operator=(DecodingSession &&) = delete;
 
-  /// Construct a session around an already configured decoder and capture
-  /// graph resources if supported.  Probes the decoder's CUDA device pin so
-  /// an unhonorable pin fails server bring-up, not the first RPC.
+  /// Construct a session around an already configured decoder and, when
+  /// `capture_graph` is set and the decoder supports graph dispatch, capture
+  /// its device graph resources.  Host-dispatch sessions pass `false`: they
+  /// are served inline on the dispatcher thread and never launch the graph,
+  /// so a decoder whose graph capture cannot be honored in this process
+  /// (e.g. a prebuilt plugin whose device-side handlers are not linked into
+  /// this binary) still serves host dispatch.  Probes the decoder's CUDA
+  /// device pin so an unhonorable pin fails server bring-up, not the first
+  /// RPC.
   static std::unique_ptr<DecodingSession>
-  create(std::unique_ptr<cudaq::qec::decoder> decoder);
+  create(std::unique_ptr<cudaq::qec::decoder> decoder,
+         bool capture_graph = true);
 
   // -- Inline HOST_CALL path (CUDAQ dispatcher thread) --
   //

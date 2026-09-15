@@ -81,7 +81,8 @@ struct SingleCallerGuard {
 };
 
 std::unique_ptr<DecodingSession>
-DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder) {
+DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
+                        bool capture_graph) {
   if (!decoder)
     throw std::invalid_argument("DecodingSession requires a decoder");
 
@@ -96,7 +97,7 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder) {
   auto s = std::make_unique<DecodingSession>();
   s->dec = std::move(decoder);
 
-  if (s->dec->supports_graph_dispatch()) {
+  if (capture_graph && s->dec->supports_graph_dispatch()) {
     // Reserve SMs so the cooperative decode graph can become co-resident
     // with everything else occupying the GPU when it is fired device-side:
     // the persistent dispatch graph itself (1 block) plus any transport

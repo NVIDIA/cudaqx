@@ -6,8 +6,4 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-include pyproject.toml.cu12
-include pyproject.toml.cu13
-include LICENSE
-include NOTICE
-include CITATION.cff
+add_subdirectory(decoder_latency)
