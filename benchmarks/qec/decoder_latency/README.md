@@ -97,10 +97,11 @@ integer, floating-point, and string parameters are supported. A key absent
 from a decoder's schema is skipped for that decoder, allowing one command to
 compare decoders with different option sets.
 
-The benchmark supplies `O` and `error_rate_vec` to every decoder by default.
-It also supplies temporal detector-round information to NV-Fusion.
-`--no_O` withholds `O` during construction and configures it afterward,
-matching the real-time server's non-TensorRT construction path.
+The benchmark supplies `H`, `O`, the per-error priors, and (for streaming) the
+measurement map together through `decoder_init`. It explicitly requests
+observable output, so batch results can be compared directly with the sampled
+logical outcomes; the presence of `O` does not select that output basis. It
+also supplies temporal detector-round information to NV-Fusion.
 
 `--block_leaf_size N` is a convenience option for decoders whose schema
 supports that parameter. Omitting it lets the decoder select its own schedule.

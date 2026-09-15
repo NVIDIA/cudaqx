@@ -30,8 +30,8 @@ python3 plot_sweep.py report_data
 ```
 
 **Arms** -- the decoder configurations under test (`--arms`, default all six; `bp_method` is the default sum-product,
-`use_sparsity=True`, `bp_batch_size=2048`, priors from the DEM, decoding to
-observables via `O=L`):
+`use_sparsity=True`, `bp_batch_size=2048`, priors from the DEM, `O=L`, and
+explicit `output="observables"`):
 
 | Arm | `max_iterations` | `osd_method` | `osd_order` | `osd_init_method` |
 |---|---|---|---|---|
