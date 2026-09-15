@@ -902,5 +902,109 @@ def test_configure_invalid_decoders():
     assert ret != 0
 
 
+def _clear_kind_cache(cls):
+    if "_kind_cache" in cls.__dict__:
+        delattr(cls, "_kind_cache")
+
+
+def test_typed_config_assignment_when_schema_lookup_fails(monkeypatch):
+    # A missing or failing parameter schema is optional: assignment still
+    # stores the value because no kind check can be applied.
+    cls = qec.nv_qldpc_decoder_config
+    _clear_kind_cache(cls)
+
+    def raise_schema(name):
+        raise RuntimeError("schema lookup failed")
+
+    monkeypatch.setattr(qec, "decoder_param_schema", raise_schema)
+    try:
+        cfg = cls()
+        cfg.max_iterations = 50
+        assert cfg.max_iterations == 50
+    finally:
+        _clear_kind_cache(cls)
+
+
+def test_typed_config_equality_and_repr():
+    # Equality is type-plus-set-fields; repr lists those fields in _fields order.
+    a = qec.pymatching_config()
+    a.error_rate_vec = [0.1, 0.2]
+    a.merge_strategy = "smallest_weight"
+    b = qec.pymatching_config()
+    b.error_rate_vec = [0.1, 0.2]
+    b.merge_strategy = "smallest_weight"
+    c = qec.pymatching_config()
+    c.merge_strategy = "disallow"
+    assert a == b
+    assert a != c
+    assert repr(a) == ("pymatching_config(error_rate_vec=[0.1, 0.2], "
+                       "merge_strategy='smallest_weight')")
+    assert repr(c) == "pymatching_config(merge_strategy='disallow')"
+
+
+# A 1-D list: accepted length, but not a list of rows.
+_not_a_matrix = [0.1, 0.2]
+
+
+@pytest.mark.parametrize(
+    "field, kind, bad, expected",
+    [
+        ("use_sparsity", "bool", 1, "a bool"),
+        ("osd_method", "int32", 1.5, "an int"),
+        ("osd_method", "int32", True, "an int"),
+        ("max_iterations", "uint64", -1, "a non-negative int"),
+        ("max_iterations", "uint64", True, "a non-negative int"),
+        ("error_rate", "float64", "0.1", "a float"),
+        ("proc_float", "string", 32, "a str"),
+        ("error_rate_vec", "float64_vec", 0.1, "a list of floats"),
+        ("error_rate_vec", "float64_vec", [0.1, "x"], "a list of floats"),
+        ("explicit_gammas", "float64_matrix", 0.1, "a list of lists of floats"),
+        ("explicit_gammas", "float64_matrix", _not_a_matrix,
+         "a list of lists of floats"),
+        ("srelay_config", "subschema", 5, "a config object or dict"),
+        ("composition", "discriminated", "bp", "a config object or dict"),
+    ],
+)
+def test_nv_qldpc_decoder_config_kind_errors(monkeypatch, field, kind, bad,
+                                             expected):
+    # Drive every schema kind through the public property setters on a real
+    # nv_qldpc_decoder_config field, using a synthetic schema for this image.
+    cls = qec.nv_qldpc_decoder_config
+    _clear_kind_cache(cls)
+
+    def synthetic_schema(name):
+        return [{"key": field, "kind": kind}]
+
+    monkeypatch.setattr(qec, "decoder_param_schema", synthetic_schema)
+    try:
+        cfg = cls()
+        with pytest.raises(
+                TypeError,
+                match=(f"nv_qldpc_decoder_config.{field} expects {expected}, "
+                       f"got {type(bad).__name__}")):
+            setattr(cfg, field, bad)
+    finally:
+        _clear_kind_cache(cls)
+
+
+def test_nv_qldpc_decoder_config_nested_srelay_from_map():
+    # from_heterogeneous_map rebuilds nested srelay_bp_config and round-trips.
+    source = {
+        "use_sparsity": True,
+        "max_iterations": 50,
+        "srelay_config": {
+            "pre_iter": 5,
+            "num_sets": 3,
+        },
+    }
+    cfg = qec.nv_qldpc_decoder_config.from_heterogeneous_map(source)
+    assert isinstance(cfg.srelay_config, qec.qecrt.config.srelay_bp_config)
+    assert cfg.srelay_config.pre_iter == 5
+    assert cfg.srelay_config.num_sets == 3
+    assert cfg.use_sparsity is True
+    assert cfg.max_iterations == 50
+    assert cfg.to_heterogeneous_map() == source
+
+
 if __name__ == "__main__":
     pytest.main()
