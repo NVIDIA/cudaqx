@@ -688,5 +688,33 @@ def test_decode_batch_all_valid_all_converged(mock_decoder):
     np.testing.assert_allclose(res.result[:, 0], [0.8, 0.4, 0.9])
 
 
+def test_error_pairs_noise_model_ndarray_batch():
+    # Ndarray batch must be (N, 2, 2): one 2x2 joint-probability matrix per pair.
+    error_index_pairs = [('e0', 'e1'), ('e2', 'e3')]
+    error_probabilities = np.array([[[0.9, 0.1], [0.2, 0.8]],
+                                    [[0.7, 0.3], [0.4, 0.6]]])
+    tn = error_pairs_noise_model(error_index_pairs, error_probabilities)
+    assert isinstance(tn, TensorNetwork)
+    assert len(tn.tensors) == 2
+    for i, t in enumerate(tn.tensors):
+        # Each slice is a 2-index tensor, not a length-2 vector.
+        np.testing.assert_array_equal(t.data, error_probabilities[i])
+        assert t.inds == error_index_pairs[i]
+        assert "NOISE" in t.tags
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        np.array([[0.9, 0.1], [0.7, 0.3]]),  # (N, 2): one vector per pair
+        np.ones((2, 2, 3)),  # trailing size is not 2x2
+    ])
+def test_error_pairs_noise_model_ndarray_rejects_bad_shapes(bad):
+    # Unusable ndarray ranks/shapes must fail in this helper, not later in Quimb.
+    error_index_pairs = [('e0', 'e1'), ('e2', 'e3')]
+    with pytest.raises(AssertionError, match=r"\(N, 2, 2\)"):
+        error_pairs_noise_model(error_index_pairs, bad)
+
+
 if __name__ == "__main__":
     pytest.main()
