@@ -871,6 +871,38 @@ TEST(CpuRoceBackend, AServerThatNeverRepliesTimesOutBoundedWithAnError) {
             std::vector<std::uint32_t>{kResetDecoderFunctionId});
 }
 
+TEST(CpuRoceBackend, AFullRingBehindADeadServerStillFailsEveryRequest) {
+  // 12 reads through 8 slots with no replies: the first 8 time out and free
+  // their slots, the 4 queued behind them go out and time out in turn, and
+  // the whole run settles within two timeouts -- stop() never adds to it.
+  const auto topo = roce_test_topology();
+  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
+  recording_roce_server server(topo, std::chrono::milliseconds(1),
+                               /*reply=*/false);
+  constexpr std::uint32_t kTimeoutMs = 80;
+  constexpr int kReads = 12;
+  auto sessions = make_cpu_roce_sessions(
+      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
+      roce_client_options(topo), kTimeoutMs);
+  std::unordered_map<std::uint64_t, session *> router{
+      {0, sessions[0].second.get()}};
+
+  std::string text;
+  for (int i = 0; i < kReads; ++i)
+    text += std::string(i ? "+0" : "0") + " get_corrections return_size=1\n";
+  auto t0 = std::chrono::steady_clock::now();
+  auto result = run(plan(parse(text, {0}, 1000), router, {}, {}));
+  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
+
+  ASSERT_EQ(result.records.size(), static_cast<std::size_t>(kReads));
+  for (const auto &r : result.records)
+    EXPECT_EQ(r.status, static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR));
+  EXPECT_LT(elapsed_ms, 2 * static_cast<long long>(kTimeoutMs) + 500);
+  EXPECT_EQ(server.arrivals().size(), static_cast<std::size_t>(kReads));
+}
+
 TEST(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndPlanTrustsIt) {
   const auto topo = roce_test_topology();
   SKIP_WITHOUT_ROCE_TOPOLOGY(topo);

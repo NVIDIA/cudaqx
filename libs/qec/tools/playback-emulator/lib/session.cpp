@@ -239,9 +239,6 @@ public:
     std::uint32_t event = 0, issued = 0;
     std::int32_t term = 0;
     bool has_term = false;
-    // When a queued request gives up waiting for a free ring slot
-    // (cpu_roce_session only; inproc never queues behind a transport).
-    std::chrono::steady_clock::time_point deadline{};
 
     const std::uint8_t *bytes() const {
       return frame_len <= kInlineBytes ? inline_bytes.data()
@@ -802,8 +799,9 @@ std::uint32_t ipv4_network_order(const std::string &ip) {
 }
 
 /// TCP connect to the rendezvous endpoint, retrying until `deadline`. The
-/// socket carries a receive/send timeout so a peer that accepts but never
-/// completes the swap fails instead of hanging.
+/// send/receive timeout is set before connect() so it bounds the connect
+/// itself (a host that drops SYNs would otherwise hang for minutes) as well
+/// as a peer that accepts but never completes the swap.
 int connect_rendezvous(const std::string &host, const std::string &port,
                        std::chrono::steady_clock::time_point deadline) {
   addrinfo hints{};
@@ -816,22 +814,22 @@ int connect_rendezvous(const std::string &host, const std::string &port,
         port + "'");
 
   for (;;) {
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now())
+            .count();
+    timeval tv{};
+    const long ms = remaining > 0 ? remaining : 1;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
     for (addrinfo *p = res; p; p = p->ai_next) {
       int fd = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
       if (fd < 0)
         continue;
+      ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
       if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0) {
         freeaddrinfo(res);
-        const auto remaining =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                deadline - std::chrono::steady_clock::now())
-                .count();
-        timeval tv{};
-        const long ms = remaining > 0 ? remaining : 1;
-        tv.tv_sec = ms / 1000;
-        tv.tv_usec = (ms % 1000) * 1000;
-        ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
         int one = 1;
         ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
         return fd;
@@ -924,16 +922,12 @@ public:
         static_cast<std::uint8_t *>(cpu_roce_get_rx_ring_data_addr(xcvr));
     rx_flags_ = cpu_roce_get_rx_ring_flag_addr(xcvr);
     reply_scratch_.resize(stride_);
-    // The QP is already RTS; start the transceiver's RX/TX polling threads.
-    monitor_ = std::thread([xcvr] { cpu_roce_blocking_monitor(xcvr); });
   }
 
   ~cpu_roce_session() override {
     stop_worker();
     if (xcvr_) {
-      cpu_roce_close(xcvr_); // signals the RX/TX threads to exit
-      if (monitor_.joinable())
-        monitor_.join();
+      close_transport();
       cpu_roce_destroy_transceiver(xcvr_);
       xcvr_ = nullptr;
     }
@@ -941,6 +935,12 @@ public:
 
   void start(run_ctx &collector) override {
     collector_ = &collector;
+    // The QP has been RTS since construction; the transceiver's busy-polling
+    // RX/TX threads only run between start() and stop().
+    monitor_ = std::thread([this] {
+      monitor_entered_.store(true, std::memory_order_release);
+      cpu_roce_blocking_monitor(xcvr_);
+    });
     worker_ = std::thread([this] { worker_loop(); });
   }
 
@@ -978,6 +978,7 @@ public:
     ring_.reserve().kind = request_ring::entry::kStop;
     ring_.publish();
     worker_.join();
+    close_transport();
   }
 
 private:
@@ -1003,6 +1004,19 @@ private:
   void complete(tag t, RpcStatus status, const std::uint8_t *body,
                 std::size_t len) {
     handle_reply(*collector_, t, status, body, len, now_ns());
+  }
+
+  /// Stops the transceiver's RX/TX threads. cpu_roce_close() racing a
+  /// cpu_roce_blocking_monitor() that has not spawned them yet leaves them
+  /// running over released ring memory, so wait for the monitor thread to
+  /// be inside the call first. Idempotent; the worker must already be joined.
+  void close_transport() {
+    while (monitor_.joinable() &&
+           !monitor_entered_.load(std::memory_order_acquire))
+      std::this_thread::yield();
+    cpu_roce_close(xcvr_);
+    if (monitor_.joinable())
+      monitor_.join();
   }
 
   bool past_giveup() const {
@@ -1189,6 +1203,7 @@ private:
   std::vector<std::uint8_t> reply_scratch_;
 
   std::atomic<std::int64_t> giveup_ns_{kNever};
+  std::atomic<bool> monitor_entered_{false};
   request_ring ring_; // timing thread -> worker
   run_ctx *collector_ = nullptr;
   std::thread worker_;

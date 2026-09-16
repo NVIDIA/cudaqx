@@ -100,11 +100,14 @@ libibverbs is present; otherwise the factory throws.
   request *and* reply (`max_frame_bytes`), which `plan()` enforces before t0.
   Slots are filled in strict order and only `num_slots` requests are ever in
   flight; further sends queue locally until a reply frees a slot, so a burst
-  behind a slow decode adds latency but never fails.
-- **Threads.** The transceiver runs its own busy-polling RX and TX threads,
-  and the session adds one worker that publishes requests and collects
-  replies -- up to three cores per session while a run is active, unlike
-  `udp`'s single receiver blocked in `recv()`.
+  behind a slow decode adds latency but never fails. The per-request timeout
+  starts when a request reaches a slot, not when it was queued (the run's
+  own latency records do include the wait).
+- **Threads.** Between `start()` and `stop()` the transceiver runs its own
+  busy-polling RX and TX threads and the session adds one worker that
+  publishes requests and collects replies -- three cores per session while
+  a run is active, unlike `udp`'s single receiver blocked in `recv()`.
+  Outside a run only the connected QP is held.
 - **Testing.** The C++ and Python RoCE tests skip unless
   `CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP}` name the client and
   server device/IP (the same variables `test_decoding_server` uses). On a

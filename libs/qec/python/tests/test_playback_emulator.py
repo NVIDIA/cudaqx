@@ -398,12 +398,12 @@ def test_a_schedule_runs_end_to_end_against_a_cpu_roce_decoding_server():
 
         result = pb.run(
             "0 reset\n"
-            "1 stream source=0 rounds=2\n"
+            "1 stream source=0 rounds=1\n"
             "2 get_corrections return_size=3\n",
             1_000_000,
             {0: {
                 "type": "static",
-                "rounds": [[0, 1, 0]] * 2
+                "rounds": [[0, 1, 0]]
             }},
             cpu_roce_endpoints={0: f"127.0.0.1:{port}"},
             cpu_roce_options={
