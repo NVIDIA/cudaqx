@@ -1028,6 +1028,15 @@ TEST(SlidingWindowDecoder, PerRoundStreamingUsesRollingWindowUnwrap) {
   EXPECT_EQ(last_result.result.size(), pcm.shape()[1]);
 }
 
+// H-only sliding-window model with uniform error rates, as a decoder_init.
+static cudaq::qec::decoder_init
+sliding_window_init(const cudaqx::tensor<uint8_t> &pcm) {
+  auto H = cudaq::qec::sparse_binary_matrix(pcm);
+  auto O = cudaq::qec::sparse_binary_matrix::from_csr(0, H.num_cols(), {0}, {});
+  return cudaq::qec::decoder_init(std::move(H), std::move(O),
+                                  std::vector<double>(pcm.shape()[1], 0.1));
+}
+
 TEST(SlidingWindowDecoder, ForwardsCancellationTokenToInnerDecoders) {
   const std::size_t n_rounds = 4;
   const std::size_t n_errs_per_round = 3;
@@ -1041,12 +1050,12 @@ TEST(SlidingWindowDecoder, ForwardsCancellationTokenToInnerDecoders) {
   params.insert("window_size", std::size_t{2});
   params.insert("step_size", std::size_t{1});
   params.insert("num_syndromes_per_round", n_syndromes_per_round);
-  params.insert("error_rate_vec", std::vector<double>(pcm.shape()[1], 0.1));
   params.insert("inner_decoder_name",
                 std::string("cancellation_probe_decoder"));
   params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
 
-  auto decoder = cudaq::qec::decoder::get("sliding_window", pcm, params);
+  auto decoder = cudaq::qec::decoder::get("sliding_window",
+                                          sliding_window_init(pcm), params);
   ASSERT_NE(decoder, nullptr);
 
   const std::vector<std::vector<cudaq::qec::float_t>> block(
@@ -1055,13 +1064,19 @@ TEST(SlidingWindowDecoder, ForwardsCancellationTokenToInnerDecoders) {
   src.request_soft_stop();
 
   // Whole-block batch path: the token reaches every window's inner decoder
-  // unchanged, so a soft stop abandons the batch (std::nullopt) while a
-  // hard_only() view still returns converged answers.
+  // unchanged, so a soft stop abandons the batch (std::nullopt), while inner
+  // decoders that poll for hard stops only still return converged answers.
   EXPECT_FALSE(decoder->decode_batch(block, src.get_token()).has_value());
-  auto masked = decoder->decode_batch(block, src.get_token().hard_only());
-  ASSERT_TRUE(masked.has_value());
-  ASSERT_EQ(masked->size(), block.size());
-  for (const auto &r : *masked)
+  cudaqx::heterogeneous_map hard_inner_params;
+  hard_inner_params.insert("stop_level", std::string("hard"));
+  params.insert("inner_decoder_params", hard_inner_params);
+  auto hard_decoder = cudaq::qec::decoder::get(
+      "sliding_window", sliding_window_init(pcm), params);
+  ASSERT_NE(hard_decoder, nullptr);
+  auto results = hard_decoder->decode_batch(block, src.get_token());
+  ASSERT_TRUE(results.has_value());
+  ASSERT_EQ(results->size(), block.size());
+  for (const auto &r : *results)
     EXPECT_TRUE(r.converged);
 
   // Per-round streaming path through decode(syndrome, tok): round 0 is only
@@ -1094,7 +1109,6 @@ TEST(SlidingWindowDecoder,
   params.insert("window_size", std::size_t{2});
   params.insert("step_size", std::size_t{1});
   params.insert("num_syndromes_per_round", n_syndromes_per_round);
-  params.insert("error_rate_vec", std::vector<double>(pcm.shape()[1], 0.1));
   params.insert("inner_decoder_name",
                 std::string("cancellation_probe_decoder"));
   params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
@@ -1105,7 +1119,8 @@ TEST(SlidingWindowDecoder,
   // an unstopped token -- exactly the state it will be in below, before the
   // stop is requested.
   {
-    auto baseline = cudaq::qec::decoder::get("sliding_window", pcm, params);
+    auto baseline = cudaq::qec::decoder::get("sliding_window",
+                                             sliding_window_init(pcm), params);
     ASSERT_NE(baseline, nullptr);
     std::optional<cudaq::qec::decoder_result> last;
     for (std::size_t r = 0; r < n_rounds; ++r) {
@@ -1116,7 +1131,8 @@ TEST(SlidingWindowDecoder,
     EXPECT_TRUE(last->converged);
   }
 
-  auto decoder = cudaq::qec::decoder::get("sliding_window", pcm, params);
+  auto decoder = cudaq::qec::decoder::get("sliding_window",
+                                          sliding_window_init(pcm), params);
   ASSERT_NE(decoder, nullptr);
   cudaq::qec::cancellation_source src;
 
@@ -1154,12 +1170,12 @@ TEST(SlidingWindowDecoder, AbandonedStreamDoesNotLeakIntoNextBlock) {
   params.insert("window_size", std::size_t{2});
   params.insert("step_size", std::size_t{1});
   params.insert("num_syndromes_per_round", n_syndromes_per_round);
-  params.insert("error_rate_vec", std::vector<double>(pcm.shape()[1], 0.1));
   params.insert("inner_decoder_name",
                 std::string("cancellation_probe_decoder"));
   params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
 
-  auto decoder = cudaq::qec::decoder::get("sliding_window", pcm, params);
+  auto decoder = cudaq::qec::decoder::get("sliding_window",
+                                          sliding_window_init(pcm), params);
   ASSERT_NE(decoder, nullptr);
   const std::vector<cudaq::qec::float_t> round(n_syndromes_per_round, 0.0);
 

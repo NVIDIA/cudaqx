@@ -11,13 +11,20 @@
 namespace cudaq::qec {
 
 /// @brief Test-only decoder that reports std::nullopt once `tok` reports a
-/// requested stop, and a converged result otherwise, so composite decoders
-/// can be checked for forwarding the token they were given unchanged.
+/// stop at the level it polls for (`stop_level` param: "soft" by default, or
+/// "hard"), and a converged result otherwise, so composite decoders can be
+/// checked for forwarding the token they were given unchanged.
 class cancellation_probe_decoder : public decoder {
+  cancellation_level stop_level_ = cancellation_level::soft;
+
 public:
-  cancellation_probe_decoder(const cudaq::qec::sparse_binary_matrix &H,
+  cancellation_probe_decoder(cudaq::qec::decoder_init inputs,
+                             decode_result_type requested_output,
                              const cudaqx::heterogeneous_map &params)
-      : decoder(H) {}
+      : decoder(std::move(inputs), requested_output) {
+    if (params.get<std::string>("stop_level", "soft") == "hard")
+      stop_level_ = cancellation_level::hard;
+  }
 
   using decoder::decode;
   decoder_result decode(const std::vector<float_t> &syndrome) override {
@@ -28,11 +35,13 @@ public:
 
   std::optional<decoder_result> decode(const std::vector<float_t> &syndrome,
                                        cancellation_token tok) override {
-    if (tok.stop_requested())
+    if (tok.stop_requested(stop_level_))
       return std::nullopt;
     decoder_result result;
     result.converged = true;
     result.result.assign(block_size, 0.0);
+    if (get_result_type() == decode_result_type::observables)
+      result.result.assign(get_num_observables(), 0.0);
     return result;
   }
 
@@ -52,10 +61,12 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       cancellation_probe_decoder, static std::unique_ptr<decoder> create(
-                                      const cudaq::qec::decoder_init &init,
+                                      cudaq::qec::decoder_init inputs,
+                                      std::optional<decode_result_type> output,
                                       const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<cancellation_probe_decoder>(init,
-                                                                        params);
+        return std::make_unique<cancellation_probe_decoder>(
+            std::move(inputs), output.value_or(decode_result_type::errors),
+            params);
       })
 };
 

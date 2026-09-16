@@ -41,19 +41,19 @@ TEST(CancellationTest, SoftStopIsAStopButNotAHardOne) {
   // visible on the source.
   EXPECT_TRUE(tok.stop_requested());
   EXPECT_EQ(src.level(), cancellation_level::soft);
-  EXPECT_FALSE(tok.hard_only().stop_requested());
+  EXPECT_FALSE(tok.stop_requested(cancellation_level::hard));
   // Repeating the same request reports no change.
   EXPECT_FALSE(src.request_soft_stop());
   EXPECT_EQ(src.level(), cancellation_level::soft);
 }
 
-TEST(CancellationTest, HardStopIsReportedByEveryView) {
+TEST(CancellationTest, HardStopIsReportedAtEveryPollLevel) {
   cancellation_source src;
   auto tok = src.get_token();
   EXPECT_TRUE(src.request_hard_stop());
   EXPECT_TRUE(tok.stop_requested());
-  EXPECT_TRUE(tok.at_least(cancellation_level::soft).stop_requested());
-  EXPECT_TRUE(tok.hard_only().stop_requested());
+  EXPECT_TRUE(tok.stop_requested(cancellation_level::soft));
+  EXPECT_TRUE(tok.stop_requested(cancellation_level::hard));
   EXPECT_FALSE(src.request_hard_stop());
 }
 
@@ -68,57 +68,34 @@ TEST(CancellationTest, LevelsOnlyEscalate) {
   EXPECT_EQ(src.level(), cancellation_level::hard);
 }
 
-TEST(CancellationTest, AtLeastViewHidesLevelsBelowItsThreshold) {
+TEST(CancellationTest, HardPollIgnoresSoftStops) {
   cancellation_source src;
   auto tok = src.get_token();
-  auto masked = tok.hard_only(); // == at_least(hard)
-  EXPECT_EQ(tok.min_level(), cancellation_level::none);
-  EXPECT_EQ(masked.min_level(), cancellation_level::hard);
-  EXPECT_TRUE(masked.stop_possible()) << "a hard stop can still arrive";
+  EXPECT_FALSE(tok.stop_requested());
+  EXPECT_FALSE(tok.stop_requested(cancellation_level::hard));
 
   src.request_soft_stop();
-  // A soft stop is invisible to the masked view but not to the unmasked one.
+  // A soft stop is invisible to a hard poll but not to the default poll.
   EXPECT_TRUE(tok.stop_requested());
-  EXPECT_FALSE(masked.stop_requested());
+  EXPECT_FALSE(tok.stop_requested(cancellation_level::hard));
 
   src.request_hard_stop();
-  EXPECT_TRUE(masked.stop_requested());
+  EXPECT_TRUE(tok.stop_requested(cancellation_level::hard));
 }
 
-TEST(CancellationTest, AtLeastThresholdsComposeUpwards) {
+TEST(CancellationTest, PollLevelIsChosenPerCallNotPerToken) {
   cancellation_source src;
   auto tok = src.get_token();
-  // A threshold of `none` or `soft` is a no-op today: soft is the lowest
-  // level a stop can have, so both views see exactly what the token sees.
-  EXPECT_EQ(tok.at_least(cancellation_level::none).min_level(),
-            cancellation_level::none);
-  auto soft_view = tok.at_least(cancellation_level::soft);
   src.request_soft_stop();
-  EXPECT_TRUE(soft_view.stop_requested());
-  // Views only tighten: a stricter view of a view keeps the stricter
-  // threshold, a milder one leaves it alone.
-  auto hard_view = soft_view.at_least(cancellation_level::hard);
-  EXPECT_EQ(hard_view.min_level(), cancellation_level::hard);
-  EXPECT_EQ(hard_view.at_least(cancellation_level::soft).min_level(),
-            cancellation_level::hard);
-  EXPECT_FALSE(hard_view.stop_requested());
-  src.request_hard_stop();
-  EXPECT_TRUE(hard_view.stop_requested());
-}
-
-TEST(CancellationTest, AtLeastIsAViewNotACopyOfState) {
-  cancellation_source src;
-  auto masked = src.get_token().hard_only();
-  // Masking is a property of the token value: the source, other tokens and
-  // fresh tokens are unaffected, and copies of the view keep the threshold.
-  src.request_soft_stop();
-  EXPECT_EQ(src.level(), cancellation_level::soft);
-  EXPECT_TRUE(src.get_token().stop_requested());
-  cancellation_token copy = masked;
-  EXPECT_EQ(copy.min_level(), cancellation_level::hard);
-  EXPECT_FALSE(copy.stop_requested());
-  // A default token masked is still a never-stopped token.
-  EXPECT_FALSE(cancellation_token{}.hard_only().stop_possible());
+  // A poll level of `none` or `soft` is the same thing: soft is the lowest
+  // level a stop can have, so both report every stop.
+  EXPECT_TRUE(tok.stop_requested(cancellation_level::none));
+  EXPECT_TRUE(tok.stop_requested(cancellation_level::soft));
+  EXPECT_FALSE(tok.stop_requested(cancellation_level::hard));
+  // The same token serves both kinds of poll, and so does a copy of it.
+  cancellation_token copy = tok;
+  EXPECT_TRUE(copy.stop_requested());
+  EXPECT_FALSE(copy.stop_requested(cancellation_level::hard));
 }
 
 TEST(CancellationTest, TokensShareStateWithSourceAndEachOther) {
@@ -159,7 +136,7 @@ TEST(CancellationTest, RequestFromAnotherThreadIsObserved) {
   while (!tok.stop_requested())
     std::this_thread::yield();
   requester.join();
-  EXPECT_TRUE(tok.hard_only().stop_requested());
+  EXPECT_TRUE(tok.stop_requested(cancellation_level::hard));
 }
 
 namespace {
@@ -180,29 +157,31 @@ struct recording_decoder : public cudaq::qec::decoder {
 };
 
 /// Decoder that overrides the cancellable overload and polls the token it was
-/// handed; the caller picks the level it reacts to via the token's mask.
+/// handed at `poll_level`, the way an ensemble member picks the level it
+/// reacts to.
 struct token_aware_decoder : public recording_decoder {
   using recording_decoder::decode;
   using recording_decoder::recording_decoder;
+  cancellation_level poll_level = cancellation_level::soft;
   bool saw_possible = false;
 
   std::optional<cudaq::qec::decoder_result>
   decode(const std::vector<cudaq::qec::float_t> &syndrome,
          cancellation_token tok) override {
     saw_possible = tok.stop_possible();
-    if (tok.stop_requested())
+    if (tok.stop_requested(poll_level))
       return std::nullopt;
     return recording_decoder::decode(syndrome);
   }
 };
 
-cudaq::qec::sparse_binary_matrix make_H() {
+cudaq::qec::decoder_init make_H() {
   cudaqx::tensor<uint8_t> H({2, 3});
   H.at({0, 0}) = 1;
   H.at({0, 1}) = 1;
   H.at({1, 1}) = 1;
   H.at({1, 2}) = 1;
-  return cudaq::qec::sparse_binary_matrix(H);
+  return cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H));
 }
 } // namespace
 
@@ -224,13 +203,15 @@ TEST(CancellationTest, DecoderTensorOverloadForwardsToken) {
   src.request_soft_stop();
   cudaqx::tensor<uint8_t> syn({2});
   syn.at({0}) = 1;
-  // The mask survives the tensor -> vector conversion: a hard_only() view
-  // ignores the soft stop, the unmasked token honors it.
-  auto r = d.decode(syn, src.get_token().hard_only());
+  // The token survives the tensor -> vector conversion: a hard poll ignores
+  // the soft stop, the default poll honors it.
+  d.poll_level = cancellation_level::hard;
+  auto r = d.decode(syn, src.get_token());
   EXPECT_TRUE(d.saw_possible);
   ASSERT_TRUE(r.has_value());
   EXPECT_TRUE(r->converged);
   EXPECT_EQ(d.plain_calls, 1);
+  d.poll_level = cancellation_level::soft;
   EXPECT_FALSE(d.decode(syn, src.get_token()).has_value());
   EXPECT_EQ(d.plain_calls, 1);
 }
@@ -254,13 +235,16 @@ TEST(CancellationTest, DecoderDefaultBatchOverloadIgnoresToken) {
     EXPECT_TRUE(r.converged);
 }
 
-TEST(CancellationTest, TokenMaskPicksTheLevelADecoderReactsTo) {
-  token_aware_decoder d(make_H());
+TEST(CancellationTest, PollLevelPicksWhatADecoderReactsTo) {
+  token_aware_decoder soft_member(make_H());
+  token_aware_decoder hard_member(make_H());
+  hard_member.poll_level = cancellation_level::hard;
   cancellation_source src;
   std::vector<cudaq::qec::float_t> syn{1.0, 0.0};
+  // One token for the whole ensemble; each member polls at its own level.
   src.request_soft_stop();
-  EXPECT_FALSE(d.decode(syn, src.get_token()).has_value());
-  EXPECT_TRUE(d.decode(syn, src.get_token().hard_only()).has_value());
+  EXPECT_FALSE(soft_member.decode(syn, src.get_token()).has_value());
+  EXPECT_TRUE(hard_member.decode(syn, src.get_token()).has_value());
   src.request_hard_stop();
-  EXPECT_FALSE(d.decode(syn, src.get_token().hard_only()).has_value());
+  EXPECT_FALSE(hard_member.decode(syn, src.get_token()).has_value());
 }
