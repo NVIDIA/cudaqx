@@ -33,6 +33,15 @@ on:
         type: string
         description: Retrieve decoder assets from a draft release with this tag (e.g. docker-files-123)
         required: false
+      push_to_ngc_staging:
+        type: boolean
+        description: >-
+          Also copy the published image to NGC staging.
+        default: true
+        required: false
+
+env:
+  NGC_STAGING_IMAGE_NAME: nvcr.io/nvstaging/cudaq-qec/cudaq-decoders
 
 jobs:
   build:
@@ -129,6 +138,8 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
+          # nvcr.io 400s on buildx's default attestation manifest, so build plain manifests.
+          provenance: false
           outputs: type=image,name=${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export image digest
@@ -178,6 +189,7 @@ jobs:
           merge-multiple: true
 
       - name: Create and verify multi-platform image
+        id: publish-ghcr
         env:
           IMAGE_NAME: ${{ inputs.image_name }}
           CUDA_VERSION: ${{ matrix.cuda_version }}
@@ -190,12 +202,17 @@ jobs:
           # releases/vX.Y.Z branch. All tags point at the same
           # multi-platform manifest.
           short_sha="${GITHUB_SHA:0:8}"
-          tags=("${IMAGE_NAME}:${short_sha}-cu${CUDA_VERSION}")
+          tag_suffixes=("${short_sha}-cu${CUDA_VERSION}")
 
           if [[ "$GIT_REF_NAME" == releases/* ]]; then
             release_version=$(echo "$GIT_REF_NAME" | grep -Eo '([0-9]+\.)+[0-9]+')
-            tags+=("${IMAGE_NAME}:${release_version}-cu${CUDA_VERSION}")
+            tag_suffixes+=("${release_version}-cu${CUDA_VERSION}")
           fi
+
+          tags=()
+          for suffix in "${tag_suffixes[@]}"; do
+            tags+=("${IMAGE_NAME}:${suffix}")
+          done
 
           cd /tmp/digests
           mapfile -t digests < <(find . -maxdepth 1 -type f -printf '%f\n' | sort)
@@ -230,3 +247,38 @@ jobs:
           echo "Tagged as:"
           printf '  %s\n' "${tags[@]}"
           docker buildx imagetools inspect "$image_ref"
+
+          # Hand the digest refs and tag suffixes to the (optional) NGC
+          # staging copy below.
+          echo "refs=${refs[*]}" >> "$GITHUB_OUTPUT"
+          echo "tag_suffixes=${tag_suffixes[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to NGC staging
+        if: ${{ inputs.push_to_ngc_staging }}
+        uses: docker/login-action@v3
+        with:
+          registry: nvcr.io
+          # Literal string: nvcr.io's convention for API-key auth.
+          username: $oauthtoken
+          password: ${{ secrets.NGC_API_KEY }}
+
+      # Registry-to-registry copy of the just-published manifest: imagetools
+      # reads the per-platform images from GHCR by digest and pushes them,
+      # plus a new manifest list, to NGC staging. Nothing is rebuilt.
+      - name: Copy image to NGC staging
+        if: ${{ inputs.push_to_ngc_staging }}
+        env:
+          REFS: ${{ steps.publish-ghcr.outputs.refs }}
+          TAG_SUFFIXES: ${{ steps.publish-ghcr.outputs.tag_suffixes }}
+        run: |
+          set -euo pipefail
+
+          read -ra refs <<< "$REFS"
+          read -ra tag_suffixes <<< "$TAG_SUFFIXES"
+          for suffix in "${tag_suffixes[@]}"; do
+            docker buildx imagetools create --tag "${NGC_STAGING_IMAGE_NAME}:${suffix}" "${refs[@]}"
+          done
+
+          # All suffixes point at the same manifest; inspect via the first
+          # (always-present) one.
+          docker buildx imagetools inspect "${NGC_STAGING_IMAGE_NAME}:${tag_suffixes[0]}"
