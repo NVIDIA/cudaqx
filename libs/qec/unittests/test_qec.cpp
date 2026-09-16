@@ -22,6 +22,14 @@
 
 namespace {
 
+TEST(DecoderInputsUtilities, DSparseDoesNotRequireDeclaredMeasurementWidth) {
+  cudaq::M2DSparseMatrix m2d;
+  m2d.rows = {{2}, {}, {0, 4}};
+
+  EXPECT_EQ(cudaq::qec::d_sparse(m2d),
+            (std::vector<std::int64_t>{2, -1, -1, 0, 4, -1}));
+}
+
 using cudaq::qec::surface_code::sc_orientation;
 using cudaq::qec::surface_code::stabilizer_grid;
 using cudaq::qec::surface_code::surface_role;
