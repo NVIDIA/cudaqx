@@ -104,9 +104,9 @@ and measurement-to-detector matrices in one call, then assemble the decoder conf
    config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
    config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
    config.D_sparse = qec.d_sparse(m2d)
+   config.error_rate_vec = list(dem.error_rates)
 
    config.decoder_custom_args = {
-       "error_rate_vec": list(dem.error_rates),
        "merge_strategy": "smallest_weight",
    }
 
@@ -130,6 +130,10 @@ arguments:
        decoder_custom_args:
          error_rate_vec: [ 0.1, 0.1, 0.1 ]
          merge_strategy: smallest_weight
+
+``error_rate_vec`` is model input internally, but remains nested in emitted
+YAML for compatibility with existing researcher configuration files. The
+parser also accepts it at decoder level; specifying both forms is an error.
 
 The ``decoder_custom_args`` section is converted between YAML and the
 parameter map a decoder's constructor receives using a *parameter schema*
@@ -201,8 +205,9 @@ still be rejected by a hook when the configuration is parsed.
 
 ``cuda_device_id`` pins a GPU-accelerated decoder (e.g. ``nv-qldpc-decoder``
 or ``trt_decoder``) to a specific CUDA device. The same knob is available as
-a construction parameter in C++ and Python
-(``qec.get_decoder("trt_decoder", H, cuda_device_id=1)``). The thread that
+a construction parameter in C++ and Python (for example,
+``qec.get_decoder("trt_decoder", H, engine_load_path="model.engine", engine_output_format="errors", cuda_device_id=1)``).
+The thread that
 creates a decoder is pinned to that device and is expected to drive its
 decode calls; create each pinned decoder on its own thread to place several
 decoders on different GPUs.
@@ -671,4 +676,3 @@ After fixing configuration issues, the following log messages should appear:
    [info] Done initializing decoder 0 in 0.234 seconds
 
 If errors appear instead, check the full error message - it often contains specific details about what failed (network timeout, size limit, parsing error, etc.).
-

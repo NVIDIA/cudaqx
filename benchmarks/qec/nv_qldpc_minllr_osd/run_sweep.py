@@ -77,7 +77,8 @@ def make_decoder(H, L, er, arm):
                            osd_init_method=init,
                            max_iterations=max_iter,
                            bp_batch_size=2048,
-                           O=L)
+                           O=L,
+                           output="observables")
 
 
 def main():

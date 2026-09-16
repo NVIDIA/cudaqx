@@ -96,14 +96,13 @@
                 auto inner_decoder_params =
                     cudaqx::heterogeneous_map{{"use_osd", true}, {"max_iterations", 50}};
                 auto opts = cudaqx::heterogeneous_map{
-                    {"error_rate_vec", dem.error_rates},
                     {"window_size", 1},
                     {"num_syndromes_per_round", code->get_num_z_stabilizers() + code->get_num_x_stabilizers()},
                     {"num_boundary_syndromes", code->get_num_z_stabilizers()},
                     {"inner_decoder_name", "single_error_lut"},
                     {"inner_decoder_params", inner_decoder_params}};
                 auto swdec = cudaq::qec::get_decoder("sliding_window",
-                                                    dem.detector_error_matrix, opts);
+                                                    cudaq::qec::decoder_init{dem}, opts);
 
                 return 0;
             }
@@ -116,10 +115,12 @@
     :param H: Parity check matrix (tensor format)
     :param params: Heterogeneous map of parameters:
 
-        - `error_rate_vec` (double): Vector of length "block size" containing
-          the probability of an error (in 0-1 range). This vector is used to
-          populate the `error_rate_vec` parameter for the inner decoder
-          (automatically sliced correctly according to each window).
+        - `error_rate_vec` (vector<double>): Vector of length ``block_size``
+          containing the probability of each error. Python accepts this as a
+          keyword. C++ supplies it through :cpp:class:`cudaq::qec::decoder_init`
+          (for example, by constructing it from the DEM as above), not the
+          heterogeneous parameter map. It is sliced to each window before the
+          inner decoder is constructed.
         - `window_size` (int): The number of rounds of syndrome data in each window. (Defaults to 1.)
         - `step_size` (int): The number of rounds to advance the window by each time. (Defaults to 1.)
         - `num_syndromes_per_round` (int): The number of syndromes per round. (Must be provided.)

@@ -239,7 +239,8 @@ class trt_decoder_config(_deprecated_typed_config):
     _schema_name = "trt_decoder"
     _fields = ("onnx_load_path", "engine_load_path", "engine_save_path",
                "precision", "memory_workspace", "batch_size", "use_cuda_graph",
-               "global_decoder", "global_decoder_params")
+               "engine_output_format", "global_decoder",
+               "global_decoder_params")
 
     _global_decoder_classes = {
         "pymatching": pymatching_config,
