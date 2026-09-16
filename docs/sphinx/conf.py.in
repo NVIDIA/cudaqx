@@ -103,6 +103,7 @@ exclude_patterns = [
     '_templates',
     'examples/**/README.md',
     'api/qec/nv_qldpc_decoder_api.rst',
+    'api/qec/nv_fusion_decoder_api.rst',
     'api/qec/sliding_window_api.rst',
     'api/qec/trt_decoder_api.rst',
     'api/qec/tensor_network_decoder_api.rst',

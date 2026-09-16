@@ -10,6 +10,7 @@
 #include "../realtime_decoding.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include <filesystem>
 
 #include <fstream>
 #include <iterator>
@@ -30,11 +31,16 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
 
   std::string yaml_str((std::istreambuf_iterator<char>(f)),
                        std::istreambuf_iterator<char>());
-  load_from_config(multi_decoder_config::from_yaml_str(yaml_str), yaml_path);
+  // A model path in the document is relative to the document, not to wherever
+  // the server happened to be started from.
+  auto base_dir = std::filesystem::absolute(yaml_path).parent_path();
+  load_from_config(multi_decoder_config::from_yaml_str(yaml_str), yaml_path,
+                   base_dir);
 }
 
 void SessionRegistry::load_from_config(const multi_decoder_config &config,
-                                       const std::string &source_name) {
+                                       const std::string &source_name,
+                                       const std::filesystem::path &base_dir) {
   for (const auto &dc : config.decoders) {
     if (dc.id < 0)
       throw std::runtime_error("Negative decoder id " + std::to_string(dc.id) +
@@ -57,12 +63,22 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
     CUDA_QEC_INFO("SessionRegistry: creating decoder id={} type={}", dc.id,
                   dc.type);
 
-    auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
-    // dc.dispatch (host / device_graph) is not consulted here: host sessions
-    // are served inline by the CQR HOST_CALL plugin on the dispatcher
-    // thread; the decoding_server process binds device_graph sessions to
-    // their ring consumers via dispatch_for().
-    sessions_.emplace(id, DecodingSession::create(std::move(decoder)));
+    auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+        dc, cudaq::qec::decoding::host::resolve_decoder_init(dc, base_dir));
+    // Host sessions are served inline by the CQR HOST_CALL plugin on the
+    // dispatcher thread and never fire the decoder's device graph, so only
+    // device_graph sessions capture graph resources here; the
+    // decoding_server process binds those to their ring consumers via
+    // dispatch_for().
+    const bool capture_graph = dc.dispatch == DecoderDispatch::device_graph;
+    if (!capture_graph && decoder->supports_graph_dispatch())
+      CUDA_QEC_INFO("SessionRegistry: decoder id={} type={} supports graph "
+                    "dispatch but is configured for host dispatch; serving "
+                    "it inline on the dispatcher thread without capturing "
+                    "its decode graph",
+                    dc.id, dc.type);
+    sessions_.emplace(
+        id, DecodingSession::create(std::move(decoder), capture_graph));
   }
 
   CUDA_QEC_INFO("SessionRegistry: loaded {} decoder session(s)",
