@@ -1055,29 +1055,30 @@ TEST(SlidingWindowDecoder, ForwardsCancellationTokenToInnerDecoders) {
   src.request_soft_stop();
 
   // Whole-block batch path: the token reaches every window's inner decoder
-  // unchanged, so a stop abandons every shot (std::nullopt) while a masked
-  // view still returns a converged answer.
-  for (const auto &r : decoder->decode_batch(block, src.get_token()))
-    EXPECT_FALSE(r.has_value());
-  for (const auto &r : decoder->decode_batch(block, src.get_token().hard_only())) {
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r->converged);
-  }
+  // unchanged, so a soft stop abandons the batch (std::nullopt) while a
+  // hard_only() view still returns converged answers.
+  EXPECT_FALSE(decoder->decode_batch(block, src.get_token()).has_value());
+  auto masked = decoder->decode_batch(block, src.get_token().hard_only());
+  ASSERT_TRUE(masked.has_value());
+  ASSERT_EQ(masked->size(), block.size());
+  for (const auto &r : *masked)
+    EXPECT_TRUE(r.converged);
 
-  // Per-round streaming path through decode(syndrome, tok).
-  std::optional<cudaq::qec::decoder_result> last_result;
-  for (std::size_t r = 0; r < n_rounds; ++r) {
-    std::vector<cudaq::qec::float_t> round(n_syndromes_per_round, 0.0);
-    last_result = decoder->decode(round, src.get_token());
-  }
-  EXPECT_FALSE(last_result.has_value());
+  // Per-round streaming path through decode(syndrome, tok): round 0 is only
+  // buffered (not ready), round 1 completes the first window, which the
+  // stopped inner decoder abandons.
+  const std::vector<cudaq::qec::float_t> round(n_syndromes_per_round, 0.0);
+  auto r0 = decoder->decode(round, src.get_token());
+  ASSERT_TRUE(r0.has_value());
+  EXPECT_TRUE(r0->result.empty());
+  EXPECT_FALSE(decoder->decode(round, src.get_token()).has_value());
 }
 
 TEST(SlidingWindowDecoder,
-    MidStreamStopAbandonsEntireResultDespiteEarlierWindowConverging) {
+     MidStreamStopAbandonsEntireResultDespiteEarlierWindowConverging) {
   // Windows aren't independent: sliding_window backs a window's committed
   // corrections out of the next window's syndrome, so a later window's
-  // abandonment must poison the whole streamed result even when an earlier
+  // abandonment must abandon the whole streamed result even when an earlier
   // window already converged. This is distinct from -- and not covered by --
   // ForwardsCancellationTokenToInnerDecoders above, which only ever starts
   // with the stop already requested.
@@ -1121,26 +1122,78 @@ TEST(SlidingWindowDecoder,
 
   // Feed rounds 0-1: window 0 (rounds 0-1) completes and is decoded against
   // an unstopped token, so it converges exactly as in the baseline above.
-  // The stream doesn't have a final answer yet either way, so both calls
-  // report std::nullopt for the "not ready" reason, not abandonment.
+  // The stream has no final answer yet, so both calls report a not-ready
+  // (empty) result, not abandonment.
+  const std::vector<cudaq::qec::float_t> round(n_syndromes_per_round, 0.0);
   for (std::size_t r = 0; r < 2; ++r) {
-    std::vector<cudaq::qec::float_t> round(n_syndromes_per_round, 0.0);
-    EXPECT_FALSE(decoder->decode(round, src.get_token()).has_value());
+    auto res = decoder->decode(round, src.get_token());
+    ASSERT_TRUE(res.has_value());
+    EXPECT_TRUE(res->result.empty());
   }
 
   // Only now, after window 0's inner decode has already succeeded, request
   // the stop that will abandon window 1.
   src.request_soft_stop();
 
-  std::optional<cudaq::qec::decoder_result> last_result;
-  for (std::size_t r = 2; r < n_rounds; ++r) {
-    std::vector<cudaq::qec::float_t> round(n_syndromes_per_round, 0.0);
-    last_result = decoder->decode(round, src.get_token());
-  }
-  // Window 0's real, converged progress is discarded along with everything
-  // after it: the final result is std::nullopt, not a converged == false
-  // decoder_result carrying window 0's committed bits.
-  EXPECT_FALSE(last_result.has_value());
+  // Window 0's real, converged progress is discarded along with the rest of
+  // the stream: the call that abandons window 1 reports std::nullopt, not a
+  // converged == false decoder_result carrying window 0's committed bits.
+  EXPECT_FALSE(decoder->decode(round, src.get_token()).has_value());
+}
+
+TEST(SlidingWindowDecoder, AbandonedStreamDoesNotLeakIntoNextBlock) {
+  const std::size_t n_rounds = 4;
+  const std::size_t n_errs_per_round = 3;
+  const std::size_t n_syndromes_per_round = 2;
+  auto pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, /*weight=*/1,
+      std::mt19937_64(2026));
+  pcm = cudaq::qec::sort_pcm_columns(pcm, n_syndromes_per_round);
+
+  cudaqx::heterogeneous_map params;
+  params.insert("window_size", std::size_t{2});
+  params.insert("step_size", std::size_t{1});
+  params.insert("num_syndromes_per_round", n_syndromes_per_round);
+  params.insert("error_rate_vec", std::vector<double>(pcm.shape()[1], 0.1));
+  params.insert("inner_decoder_name",
+                std::string("cancellation_probe_decoder"));
+  params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
+
+  auto decoder = cudaq::qec::decoder::get("sliding_window", pcm, params);
+  ASSERT_NE(decoder, nullptr);
+  const std::vector<cudaq::qec::float_t> round(n_syndromes_per_round, 0.0);
+
+  // A clean block with a fresh token: not ready until the final round, then
+  // converged.
+  auto feed_clean_block = [&]() {
+    cudaq::qec::cancellation_source fresh;
+    std::optional<cudaq::qec::decoder_result> last;
+    for (std::size_t r = 0; r < n_rounds; ++r) {
+      last = decoder->decode(round, fresh.get_token());
+      ASSERT_TRUE(last.has_value());
+      if (r + 1 < n_rounds)
+        EXPECT_TRUE(last->result.empty());
+    }
+    EXPECT_TRUE(last->converged);
+    EXPECT_EQ(last->result.size(), pcm.shape()[1]);
+  };
+
+  // Block A: two rounds under a hard stop. Window 0 is abandoned and the
+  // partial block is dropped with it.
+  cudaq::qec::cancellation_source src;
+  src.request_hard_stop();
+  auto r0 = decoder->decode(round, src.get_token());
+  ASSERT_TRUE(r0.has_value());
+  EXPECT_TRUE(r0->result.empty());
+  EXPECT_FALSE(decoder->decode(round, src.get_token()).has_value());
+
+  // Block B: a fresh block decodes as if block A never happened.
+  feed_clean_block();
+
+  // An explicit reset also drops a partial block.
+  EXPECT_TRUE(decoder->decode(round).result.empty());
+  decoder->reset_decoder();
+  feed_clean_block();
 }
 
 TEST(AsyncDecoderResultTest, MoveConstructorTransfersFuture) {

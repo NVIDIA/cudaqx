@@ -214,14 +214,11 @@ std::vector<decoder_result> decoder::decode_batch(
   return decode_batch(syndrome);
 }
 
-std::vector<std::optional<decoder_result>>
+std::optional<std::vector<decoder_result>>
 decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome,
                       cancellation_token tok) {
   // Default implementation ignores tok
-  auto results = decode_batch(syndrome);
-  return std::vector<std::optional<decoder_result>>(
-      std::make_move_iterator(results.begin()),
-      std::make_move_iterator(results.end()));
+  return decode_batch(syndrome);
 }
 
 std::string decoder::get_version() const {

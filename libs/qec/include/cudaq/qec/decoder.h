@@ -12,8 +12,8 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 #include "sparse_binary_matrix.h"
-#include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/cancellation.h"
+#include "cudaq/qec/detector_error_model.h"
 #include <algorithm>
 #include <functional>
 #include <future>
@@ -206,8 +206,9 @@ public:
   /// @brief Decode a single syndrome, cooperatively cancellable via `tok`.
   /// The default implementation ignores `tok` and delegates to
   /// decode(syndrome), i.e. a decoder is non-cancellable unless it overrides
-  /// this overload. A decoder that can poll `tok`  should override this, 
-  /// honoring the soft/hard stop contract documented in cancellation.h.
+  /// this overload. A decoder that can poll `tok` should override this and
+  /// return std::nullopt once `tok.stop_requested()` answers true (see
+  /// cancellation.h).
   /// @param syndrome A vector of syndrome measurements where the floating point
   /// value is the probability that the syndrome measurement is a |1>.
   /// @param tok The cancellation token to use.
@@ -257,9 +258,9 @@ public:
   /// @param syndrome A vector of `N` syndrome measurements where the floating
   /// point value is the probability that the syndrome measurement is a |1>.
   /// @param tok The cancellation token to use.
-  /// @returns One entry per shot; a shot abandoned by an honored stop before
-  /// it had a result is std::nullopt.
-  virtual std::vector<std::optional<decoder_result>>
+  /// @returns One result per shot, or std::nullopt if a stop was honored
+  /// before the batch completed.
+  virtual std::optional<std::vector<decoder_result>>
   decode_batch(const std::vector<std::vector<float_t>> &syndrome,
                cancellation_token tok);
 

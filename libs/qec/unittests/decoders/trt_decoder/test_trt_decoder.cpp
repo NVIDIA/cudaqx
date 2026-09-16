@@ -917,8 +917,8 @@ TEST_F(TRTDecoderTest, CompositeGlobalDecoderReceivesCancellationToken) {
                                                     {0.0, 1.0, 0.0}};
   cancellation_source src;
   src.request_hard_stop();
-  for (const auto &r : trt_decoder->decode_batch(syndromes, src.get_token()))
-    EXPECT_FALSE(r.has_value());
+  EXPECT_FALSE(
+      trt_decoder->decode_batch(syndromes, src.get_token()).has_value());
   EXPECT_FALSE(trt_decoder->decode(syndromes[0], src.get_token()).has_value());
 }
 

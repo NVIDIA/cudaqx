@@ -26,9 +26,8 @@ public:
     return decode(syndrome, cancellation_token{}).value();
   }
 
-  std::optional<decoder_result>
-  decode(const std::vector<float_t> &syndrome,
-        cancellation_token tok) override {
+  std::optional<decoder_result> decode(const std::vector<float_t> &syndrome,
+                                       cancellation_token tok) override {
     if (tok.stop_requested())
       return std::nullopt;
     decoder_result result;
@@ -38,20 +37,23 @@ public:
   }
 
   using decoder::decode_batch;
-  std::vector<std::optional<decoder_result>>
+  std::optional<std::vector<decoder_result>>
   decode_batch(const std::vector<std::vector<float_t>> &syndromes,
                cancellation_token tok) override {
-    std::vector<std::optional<decoder_result>> results;
-    for (const auto &s : syndromes)
-      results.push_back(decode(s, tok));
+    std::vector<decoder_result> results;
+    for (const auto &s : syndromes) {
+      auto r = decode(s, tok);
+      if (!r)
+        return std::nullopt;
+      results.push_back(std::move(*r));
+    }
     return results;
   }
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
-      cancellation_probe_decoder,
-      static std::unique_ptr<decoder> create(
-          const cudaq::qec::decoder_init &init,
-          const cudaqx::heterogeneous_map &params) {
+      cancellation_probe_decoder, static std::unique_ptr<decoder> create(
+                                      const cudaq::qec::decoder_init &init,
+                                      const cudaqx::heterogeneous_map &params) {
         return cudaq::qec::make_pcm_decoder<cancellation_probe_decoder>(init,
                                                                         params);
       })

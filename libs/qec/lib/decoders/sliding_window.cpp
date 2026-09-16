@@ -16,18 +16,6 @@
 
 namespace cudaq::qec {
 
-namespace {
-
-decoder_init canonicalize_sliding_window_inputs(decoder_init inputs) {
-  // Canonical CSC is the steady-state contract for decode_window's column
-  // slices and validate_inputs's per-column reads. canonicalize_H() is
-  // basis-preserving and retains the authoritative source, so no source kind
-  // needs special-casing here.
-  return inputs.canonicalize_H();
-}
-
-} // namespace
-
 void sliding_window::validate_inputs() {
   uint32_t num_rows = H.num_rows();
   if (num_boundary_syndromes > num_syndromes_per_round)
@@ -108,7 +96,6 @@ void sliding_window::initialize_window(std::size_t batch_size) {
     rw_results[s].converged = true; // Gets set to false if we fail to decode
     rw_results[s].result.resize(this->block_size);
   }
-  rw_abandoned.assign(batch_size, false);
   window_proc_times.resize(num_windows);
   std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
   this->batch_size = batch_size;
@@ -121,22 +108,11 @@ void sliding_window::initialize_window(std::size_t batch_size) {
       std::chrono::duration<double>(t1 - t0).count() * 1000;
 }
 
-sliding_window::sliding_window(cudaq::qec::decoder_init inputs,
-                               decode_result_type requested_output,
+sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
     // Canonical CSC is the steady-state contract for decode_window's column
     // slices and for validate_inputs's per-column .front()/.back() reads.
-    : decoder(canonicalize_sliding_window_inputs(std::move(inputs)),
-              requested_output),
-      H(get_inputs().detector_error_matrix()) {
-  // This decoder composes an error frame from its windows. Producing
-  // observables requires an observable mapping to project through; reject at
-  // construction rather than on the first decode.
-  if (requested_output == decode_result_type::observables &&
-      !get_inputs().has_observable_model())
-    throw std::invalid_argument(
-        "sliding_window was constructed for observable output but its model "
-        "supplies no observable mapping");
+    : decoder(H.canonicalize().to_csc()) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);
@@ -148,7 +124,8 @@ sliding_window::sliding_window(cudaq::qec::decoder_init inputs,
       params.get<bool>("straddle_start_round", straddle_start_round);
   straddle_end_round =
       params.get<bool>("straddle_end_round", straddle_end_round);
-  error_rate_vec = get_inputs().error_rates();
+  error_rate_vec = params.get<std::vector<cudaq::qec::float_t>>(
+      "error_rate_vec", error_rate_vec);
   inner_decoder_name =
       params.get<std::string>("inner_decoder_name", inner_decoder_name);
   inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
@@ -171,16 +148,6 @@ sliding_window::sliding_window(cudaq::qec::decoder_init inputs,
 
   validate_inputs();
 
-  // Hand the base its streaming geometry. Everything else the realtime path
-  // needs came from the model at base construction; layer widths and offsets
-  // are a property of how this decoder consumes rounds, not of the model, and
-  // the base cannot ask for them while this constructor is still running.
-  std::vector<std::size_t> detector_layer_offsets(num_detector_layers + 1);
-  for (std::size_t r = 0; r <= num_detector_layers; ++r)
-    detector_layer_offsets[r] = get_layer_offset(r);
-  initialize_streaming_layout(num_syndromes_per_round,
-                              std::move(detector_layer_offsets));
-
   // Build the per-window inner decoders from the real (unpadded) sub-PCMs. The
   // boundary-aware round layout is handled by get_pcm_for_rounds.
   // this->H is canonical CSC (ctor init list), so skip the per-call
@@ -194,9 +161,12 @@ sliding_window::sliding_window(cudaq::qec::decoder_init inputs,
         num_boundary_syndromes);
     first_columns.push_back(first_column);
 
-    // Slice model rates to the same error-column basis as the window H.
-    std::vector<double> error_vec_mod(error_rate_vec.begin() + first_column,
-                                      error_rate_vec.begin() + last_column + 1);
+    // Slice the error vector to only include the current window.
+    auto inner_decoder_params_mod = inner_decoder_params;
+    std::vector<cudaq::qec::float_t> error_vec_mod(
+        error_rate_vec.begin() + first_column,
+        error_rate_vec.begin() + last_column + 1);
+    inner_decoder_params_mod.insert("error_rate_vec", error_vec_mod);
 
     CUDA_QEC_INFO("Creating a decoder for rounds {}-{} (dims {} x {}) "
                   "first_column = {}, last_column = {}",
@@ -210,60 +180,45 @@ sliding_window::sliding_window(cudaq::qec::decoder_init inputs,
                       last_column - first_column + 1, H_round.shape()[1]));
     }
 
-    auto inner_O = sparse_binary_matrix::from_csr(
-        0, H_round.shape()[1], std::vector<std::uint32_t>{0}, {});
-    std::optional<std::vector<std::size_t>> inner_error_ids;
-    if (const auto &ids = get_inputs().error_ids())
-      inner_error_ids = std::vector<std::size_t>(
-          ids->begin() + first_column, ids->begin() + last_column + 1);
-    // Slicing detector rows and error columns re-indexes both, so this window
-    // gets its own matrices. Nothing is inherited: a raw DEM names the outer
-    // detectors and would not describe these.
-    decoder_init inner_inputs(sparse_binary_matrix(H_round), std::move(inner_O),
-                              std::move(error_vec_mod),
-                              /*measurement_to_detectors=*/std::nullopt,
-                              std::move(inner_error_ids));
     auto inner_decoder =
-        decoder::get(inner_decoder_name, std::move(inner_inputs),
-                     decode_result_type::errors, inner_decoder_params);
+        decoder::get(inner_decoder_name, H_round, inner_decoder_params_mod);
     inner_decoders.push_back(std::move(inner_decoder));
   }
 }
 
 decoder_result sliding_window::decode(const std::vector<float_t> &syndrome) {
-  return decode(syndrome, cancellation_token{}).value_or(decoder_result());
+  // A default-constructed token never requests a stop, so this always has a
+  // value.
+  return decode(syndrome, cancellation_token{}).value();
 }
 
 std::optional<decoder_result>
 sliding_window::decode(const std::vector<float_t> &syndrome,
                        cancellation_token tok) {
   auto results = decode_batch({syndrome}, std::move(tok));
-  if (results.empty())
-    return std::nullopt; // not ready until the final window
-  return std::move(results[0]);
+  if (!results)
+    return std::nullopt; // abandoned
+  if (results->empty())
+    return decoder_result(); // not ready until the final window
+  return std::move((*results)[0]);
 }
 
 std::vector<decoder_result> sliding_window::decode_batch(
     const std::vector<std::vector<float_t>> &syndromes) {
-  auto results = decode_batch(syndromes, cancellation_token{});
-  std::vector<decoder_result> out;
-  out.reserve(results.size());
-  for (auto &r : results)
-    out.push_back(r.value_or(decoder_result()));
-  return out;
+  return decode_batch(syndromes, cancellation_token{}).value();
 }
 
-std::vector<std::optional<decoder_result>> sliding_window::decode_batch(
-    const std::vector<std::vector<float_t>> &syndromes,
-    cancellation_token tok) {
+std::optional<std::vector<decoder_result>>
+sliding_window::decode_batch(const std::vector<std::vector<float_t>> &syndromes,
+                             cancellation_token tok) {
   if (syndromes.empty()) {
     CUDA_QEC_DBG("Returning empty decoder_result (no syndrome)");
-    return {};
+    return std::vector<decoder_result>{};
   }
   if (syndromes[0].size() == this->syndrome_size) {
     CUDA_QEC_DBG("Decoding whole block");
     // Decode the whole thing, feeding one detector layer at a time.
-    std::vector<std::optional<decoder_result>> results;
+    std::optional<std::vector<decoder_result>> results;
     std::vector<std::vector<float_t>> syndromes_round(syndromes.size());
     for (std::size_t r = 0; r < num_detector_layers; ++r) {
       std::size_t round_start = layout.round_start(r);
@@ -274,6 +229,8 @@ std::vector<std::optional<decoder_result>> sliding_window::decode_batch(
                   syndromes[s].begin() + round_end, syndromes_round[s].begin());
       }
       results = decode_batch(syndromes_round, tok);
+      if (!results)
+        return std::nullopt;
     }
     return results;
   }
@@ -302,54 +259,46 @@ std::vector<std::optional<decoder_result>> sliding_window::decode_batch(
   ++rounds_since_last_reset;
 
   if (window_rounds.size() < window_size)
-    return {};
+    return std::vector<decoder_result>{}; // not ready yet
 
   // A full window is buffered; decode it.
   CUDA_QEC_DBG("Decoding window {}/{}", num_windows_decoded + 1, num_windows);
-  decode_window(tok);
+  if (!decode_window(tok)) {
+    // Abandoned: drop the partial block so the next round starts a new one.
+    reset_stream();
+    return std::nullopt;
+  }
   ++num_windows_decoded;
 
   if (num_windows_decoded == num_windows) {
     // Final window decoded: hand back the accumulated results and reset.
-    std::vector<std::optional<decoder_result>> results;
-    results.reserve(rw_results.size());
-    for (std::size_t s = 0; s < rw_results.size(); ++s) {
-      if (rw_abandoned[s])
-        results.push_back(std::nullopt);
-      else
-        results.push_back(std::move(rw_results[s]));
-    }
-    window_rounds.clear();
-    rounds_since_last_reset = 0;
-    num_windows_decoded = 0;
-    // The only site that produces composed error frames; the whole-block path
-    // returns results already converted by its recursive call, and every other
-    // return is the empty streaming sentinel.
-    // Composed frames are error frames; whether they are projected is fixed at
-    // construction.
-    if (get_result_type() == decode_result_type::observables)
-      for (auto &r : results) {
-        if (r.result.empty())
-          continue; // streaming sentinel
-        std::vector<float_t> observables(get_num_observables(), 0.0);
-        project_errors_to_observables(r.result.data(), observables.data(),
-                                      observables.size());
-        r.result = std::move(observables);
-      }
+    auto results = std::move(rw_results);
+    reset_stream();
     return results;
   }
 
   // Slide the window: drop the oldest step_size rounds.
   window_rounds.erase(window_rounds.begin(), window_rounds.begin() + step_size);
   CUDA_QEC_DBG("Returning empty decoder_result");
-  return {}; // not ready yet -- no shots have a result on this call
+  return std::vector<decoder_result>{}; // not ready yet
+}
+
+void sliding_window::reset_stream() {
+  window_rounds.clear();
+  rounds_since_last_reset = 0;
+  num_windows_decoded = 0;
+}
+
+void sliding_window::reset_decoder() {
+  decoder::reset_decoder();
+  reset_stream();
 }
 
 /// This is an internal helper function that decodes a single window. Regular
 /// users should use the regular `cudaq::qec::decoder::decode` or
 /// `cudaq::qec::decoder::decode_batch` functions instead of trying to access
 /// this function.
-void sliding_window::decode_window(cancellation_token tok) {
+bool sliding_window::decode_window(cancellation_token tok) {
   auto t0 = std::chrono::high_resolution_clock::now();
   const auto &w = this->num_windows_decoded;
   // Detector range of window w's rounds.
@@ -378,24 +327,21 @@ void sliding_window::decode_window(cancellation_token tok) {
   CUDA_QEC_DBG("Window {}: syndrome_start = {}, num_window_syndromes = {}", w,
                syndrome_start, num_window_syndromes);
 
-  std::vector<std::optional<decoder_result>> inner_results =
+  auto inner =
       inner_decoders[w]->decode_batch(window_syndromes, std::move(tok));
-  if (inner_results[0] && !inner_results[0]->converged) {
+  if (!inner) {
+    CUDA_QEC_DBG("Window {}: inner decoder abandoned the window", w);
+    return false;
+  }
+  auto &inner_results = *inner;
+  if (!inner_results[0].converged) {
     CUDA_QEC_DBG("Window {}: inner decoder failed to converge", w);
   }
   auto t5 = std::chrono::high_resolution_clock::now();
   std::vector<std::vector<uint8_t>> window_results(batch_size);
   for (std::size_t s = 0; s < batch_size; ++s) {
-    if (!inner_results[s]) {
-      // The inner decoder abandoned this shot: nothing to commit from this
-      // window, and the whole streamed result for this shot is abandoned.
-      CUDA_QEC_DBG("Window {}: inner decoder abandoned shot {}", w, s);
-      rw_abandoned[s] = true;
-      window_results[s].assign(inner_decoders[w]->get_block_size(), 0);
-      continue;
-    }
-    this->rw_results[s].converged &= inner_results[s]->converged;
-    cudaq::qec::convert_vec_soft_to_hard(inner_results[s]->result,
+    this->rw_results[s].converged &= inner_results[s].converged;
+    cudaq::qec::convert_vec_soft_to_hard(inner_results[s].result,
                                          window_results[s]);
   }
   // Commit to everything up to the first column of the next window.
@@ -469,6 +415,7 @@ void sliding_window::decode_window(cancellation_token tok) {
                 window_proc_times_arr[3], window_proc_times_arr[4],
                 window_proc_times_arr[5], window_proc_times_arr[6],
                 window_proc_times_arr[7]);
+  return true;
 }
 
 sliding_window::~sliding_window() {}
@@ -511,6 +458,7 @@ struct sliding_window_schema_registrar {
             {"num_boundary_syndromes", k::uint64},
             {"straddle_start_round", k::boolean},
             {"straddle_end_round", k::boolean},
+            {"error_rate_vec", k::f64_vec, /*required=*/true},
             {"inner_decoder_name", k::string, /*required=*/true},
             {"inner_decoder_params", k::discriminated, false, "",
              "inner_decoder_name", /*materialize_empty=*/false},
@@ -537,6 +485,9 @@ struct sliding_window_schema_registrar {
               "<= num_syndromes_per_round ({})",
               num_boundary_syndromes, num_syndromes_per_round));
       }
+      if (args.get<std::vector<double>>("error_rate_vec").empty())
+        throw std::runtime_error(
+            "sliding_window parameters: error_rate_vec must be non-empty");
     };
     decoding::config::register_decoder_schema(std::move(schema));
   }
