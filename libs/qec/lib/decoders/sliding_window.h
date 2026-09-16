@@ -81,6 +81,8 @@ private:
   std::size_t num_windows_decoded = 0;
   std::vector<std::vector<bool>> syndrome_mods; // [batch_size, syndrome_size]
   std::vector<decoder_result> rw_results;       // [batch_size]
+  std::vector<bool> rw_abandoned; // [batch_size]; true once any window's
+                                  // inner decoder returned no result
   std::vector<double> window_proc_times;
   std::array<double, WindowProcTimes::NUM_WINDOW_PROC_TIMES>
       window_proc_times_arr = {};
@@ -95,7 +97,7 @@ private:
 
   /// @brief Decode the active window from the rolling buffer, commit, and back
   /// out committed errors into the next window's syndrome mods.
-  void decode_window();
+  void decode_window(cancellation_token tok);
 
 public:
   /// @brief Constructor
@@ -116,12 +118,31 @@ public:
   /// @return The decoded error correction
   decoder_result decode(const std::vector<float_t> &syndrome) override;
 
+  /// @brief Decode a syndrome vector, forwarding `tok` to the inner decoders.
+  /// @param syndromes Syndrome measurements to decode
+  /// @param tok The cancellation token to use
+  /// @return std::nullopt if the window isn't complete yet, or if it (or any
+  /// window contributing to this streamed result) was abandoned by an
+  /// honored stop.
+  std::optional<decoder_result> decode(const std::vector<float_t> &syndrome,
+                                       cancellation_token tok) override;
+
   /// @brief Decode multiple syndromes in batch
   /// @param syndromes Multiple syndrome measurements to decode
   /// @return The decoded error corrections
   using decoder::decode_batch; // keep the batch_opt_results overload visible
   std::vector<decoder_result>
   decode_batch(const std::vector<std::vector<float_t>> &syndromes) override;
+
+  /// @brief Decode multiple syndromes in batch, forwarding `tok` to the inner
+  /// decoders.
+  /// @param syndromes Multiple syndrome measurements to decode
+  /// @param tok The cancellation token to use
+  /// @return One entry per shot; a shot whose window was abandoned by an
+  /// honored stop is std::nullopt instead of a converged == false result.
+  std::vector<std::optional<decoder_result>>
+  decode_batch(const std::vector<std::vector<float_t>> &syndromes,
+               cancellation_token tok) override;
 
   /// @brief Get the number of syndromes per round
   /// @return The number of syndromes measured in each round

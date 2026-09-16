@@ -108,6 +108,7 @@ void sliding_window::initialize_window(std::size_t batch_size) {
     rw_results[s].converged = true; // Gets set to false if we fail to decode
     rw_results[s].result.resize(this->block_size);
   }
+  rw_abandoned.assign(batch_size, false);
   window_proc_times.resize(num_windows);
   std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
   this->batch_size = batch_size;
@@ -230,14 +231,31 @@ sliding_window::sliding_window(cudaq::qec::decoder_init inputs,
 }
 
 decoder_result sliding_window::decode(const std::vector<float_t> &syndrome) {
-  auto results = decode_batch({syndrome});
+  return decode(syndrome, cancellation_token{}).value_or(decoder_result());
+}
+
+std::optional<decoder_result>
+sliding_window::decode(const std::vector<float_t> &syndrome,
+                       cancellation_token tok) {
+  auto results = decode_batch({syndrome}, std::move(tok));
   if (results.empty())
-    return decoder_result(); // empty until the final window
+    return std::nullopt; // not ready until the final window
   return std::move(results[0]);
 }
 
 std::vector<decoder_result> sliding_window::decode_batch(
     const std::vector<std::vector<float_t>> &syndromes) {
+  auto results = decode_batch(syndromes, cancellation_token{});
+  std::vector<decoder_result> out;
+  out.reserve(results.size());
+  for (auto &r : results)
+    out.push_back(r.value_or(decoder_result()));
+  return out;
+}
+
+std::vector<std::optional<decoder_result>> sliding_window::decode_batch(
+    const std::vector<std::vector<float_t>> &syndromes,
+    cancellation_token tok) {
   if (syndromes.empty()) {
     CUDA_QEC_DBG("Returning empty decoder_result (no syndrome)");
     return {};
@@ -245,7 +263,7 @@ std::vector<decoder_result> sliding_window::decode_batch(
   if (syndromes[0].size() == this->syndrome_size) {
     CUDA_QEC_DBG("Decoding whole block");
     // Decode the whole thing, feeding one detector layer at a time.
-    std::vector<decoder_result> results;
+    std::vector<std::optional<decoder_result>> results;
     std::vector<std::vector<float_t>> syndromes_round(syndromes.size());
     for (std::size_t r = 0; r < num_detector_layers; ++r) {
       std::size_t round_start = layout.round_start(r);
@@ -255,7 +273,7 @@ std::vector<decoder_result> sliding_window::decode_batch(
         std::copy(syndromes[s].begin() + round_start,
                   syndromes[s].begin() + round_end, syndromes_round[s].begin());
       }
-      results = decode_batch(syndromes_round);
+      results = decode_batch(syndromes_round, tok);
     }
     return results;
   }
@@ -288,12 +306,19 @@ std::vector<decoder_result> sliding_window::decode_batch(
 
   // A full window is buffered; decode it.
   CUDA_QEC_DBG("Decoding window {}/{}", num_windows_decoded + 1, num_windows);
-  decode_window();
+  decode_window(tok);
   ++num_windows_decoded;
 
   if (num_windows_decoded == num_windows) {
     // Final window decoded: hand back the accumulated results and reset.
-    auto results = std::move(rw_results);
+    std::vector<std::optional<decoder_result>> results;
+    results.reserve(rw_results.size());
+    for (std::size_t s = 0; s < rw_results.size(); ++s) {
+      if (rw_abandoned[s])
+        results.push_back(std::nullopt);
+      else
+        results.push_back(std::move(rw_results[s]));
+    }
     window_rounds.clear();
     rounds_since_last_reset = 0;
     num_windows_decoded = 0;
@@ -317,14 +342,14 @@ std::vector<decoder_result> sliding_window::decode_batch(
   // Slide the window: drop the oldest step_size rounds.
   window_rounds.erase(window_rounds.begin(), window_rounds.begin() + step_size);
   CUDA_QEC_DBG("Returning empty decoder_result");
-  return std::vector<decoder_result>(); // empty return value
+  return {}; // not ready yet -- no shots have a result on this call
 }
 
 /// This is an internal helper function that decodes a single window. Regular
 /// users should use the regular `cudaq::qec::decoder::decode` or
 /// `cudaq::qec::decoder::decode_batch` functions instead of trying to access
 /// this function.
-void sliding_window::decode_window() {
+void sliding_window::decode_window(cancellation_token tok) {
   auto t0 = std::chrono::high_resolution_clock::now();
   const auto &w = this->num_windows_decoded;
   // Detector range of window w's rounds.
@@ -353,16 +378,24 @@ void sliding_window::decode_window() {
   CUDA_QEC_DBG("Window {}: syndrome_start = {}, num_window_syndromes = {}", w,
                syndrome_start, num_window_syndromes);
 
-  std::vector<decoder_result> inner_results =
-      inner_decoders[w]->decode_batch(window_syndromes);
-  if (!inner_results[0].converged) {
+  std::vector<std::optional<decoder_result>> inner_results =
+      inner_decoders[w]->decode_batch(window_syndromes, std::move(tok));
+  if (inner_results[0] && !inner_results[0]->converged) {
     CUDA_QEC_DBG("Window {}: inner decoder failed to converge", w);
   }
   auto t5 = std::chrono::high_resolution_clock::now();
   std::vector<std::vector<uint8_t>> window_results(batch_size);
   for (std::size_t s = 0; s < batch_size; ++s) {
-    this->rw_results[s].converged &= inner_results[s].converged;
-    cudaq::qec::convert_vec_soft_to_hard(inner_results[s].result,
+    if (!inner_results[s]) {
+      // The inner decoder abandoned this shot: nothing to commit from this
+      // window, and the whole streamed result for this shot is abandoned.
+      CUDA_QEC_DBG("Window {}: inner decoder abandoned shot {}", w, s);
+      rw_abandoned[s] = true;
+      window_results[s].assign(inner_decoders[w]->get_block_size(), 0);
+      continue;
+    }
+    this->rw_results[s].converged &= inner_results[s]->converged;
+    cudaq::qec::convert_vec_soft_to_hard(inner_results[s]->result,
                                          window_results[s]);
   }
   // Commit to everything up to the first column of the next window.

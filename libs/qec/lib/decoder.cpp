@@ -180,6 +180,20 @@ decoder_result decoder::decode(const cudaqx::tensor<uint8_t> &syndrome) {
   return decode(soft_syndrome);
 }
 
+// Cancellable counterpart of the tensor<uint8_t> overload above
+std::optional<decoder_result>
+decoder::decode(const cudaqx::tensor<uint8_t> &syndrome,
+                cancellation_token tok) {
+  if (syndrome.rank() != 1) {
+    throw std::runtime_error("Decode requires rank-1 tensors");
+  }
+  std::vector<float_t> soft_syndrome(syndrome.shape()[0]);
+  std::vector<uint8_t> vec_cast(syndrome.data(),
+                                syndrome.data() + syndrome.shape()[0]);
+  convert_vec_hard_to_soft(vec_cast, soft_syndrome);
+  return decode(soft_syndrome, tok);
+}
+
 // Provide a trivial implementation of the multi-syndrome decoder. Child classes
 // should override this if they can do it more efficiently than this.
 std::vector<decoder_result>
@@ -198,6 +212,16 @@ std::vector<decoder_result> decoder::decode_batch(
     std::optional<cudaqx::heterogeneous_map> &batch_opt_results) {
   batch_opt_results.reset();
   return decode_batch(syndrome);
+}
+
+std::vector<std::optional<decoder_result>>
+decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome,
+                      cancellation_token tok) {
+  // Default implementation ignores tok
+  auto results = decode_batch(syndrome);
+  return std::vector<std::optional<decoder_result>>(
+      std::make_move_iterator(results.begin()),
+      std::make_move_iterator(results.end()));
 }
 
 std::string decoder::get_version() const {
