@@ -197,12 +197,11 @@ syndrome_capture_state g_capture;
 // with any --param key=value overrides applied on top. The registered decoder
 // schema drives type coercion for each override.
 static cudaqx::heterogeneous_map
-decoder_args(const std::string &type, const std::vector<double> &error_rates,
+decoder_args(const std::string &type,
              const std::vector<std::string> &params = {}) {
   cudaqx::heterogeneous_map args;
   if (type == "nv-qldpc-decoder") {
     args.insert("use_sparsity", true);
-    args.insert("error_rate_vec", error_rates);
     args.insert("max_iterations", 50);
     args.insert("bp_method", 3);   // min-sum + dmem (required for relay)
     args.insert("composition", 1); // sequential relay
@@ -218,7 +217,6 @@ decoder_args(const std::string &type, const std::vector<double> &error_rates,
     args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
   } else if (type == "pymatching") {
     args.insert("merge_strategy", "smallest_weight");
-    args.insert("error_rate_vec", error_rates);
   } else if (type == "multi_error_lut") {
     args.insert("lut_error_depth", 2);
   } else {
@@ -325,6 +323,7 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
     dc.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
     dc.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
     dc.D_sparse = d_sparse;
+    dc.error_rate_vec = dem.error_rates;
 
     if (opts.decoder_type == "sliding_window") {
       dc.type = "sliding_window";
@@ -336,15 +335,13 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
       sw_args.insert("straddle_start_round", false);
       sw_args.insert("straddle_end_round", true);
       sw_args.insert("inner_decoder_name", opts.sw_inner_decoder);
-      sw_args.insert("error_rate_vec", dem.error_rates);
       sw_args.insert("inner_decoder_params",
-                     decoder_args(opts.sw_inner_decoder, dem.error_rates,
-                                  opts.decoder_params));
+                     decoder_args(opts.sw_inner_decoder, opts.decoder_params));
       dc.decoder_custom_args = sw_args;
     } else {
       dc.type = opts.decoder_type;
       dc.decoder_custom_args =
-          decoder_args(opts.decoder_type, dem.error_rates, opts.decoder_params);
+          decoder_args(opts.decoder_type, opts.decoder_params);
     }
 
     multi_config.decoders.push_back(dc);
