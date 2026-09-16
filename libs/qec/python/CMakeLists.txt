@@ -73,7 +73,10 @@ target_link_libraries(${MODULE_NAME}
     cudaq::cudaq-mlir-runtime
 )
 
-if(TARGET cudaq-qec-playback-emulator)
+# cudaq-qec-playback-emulator only exist when cudaq-realtime was found;
+# CUDAQX_QEC_HAS_CUDAQ_REALTIME lets the bindings reflect that at compile
+# time.
+if(CUDAQ_REALTIME_INCLUDE_DIR)
   target_sources(${MODULE_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/playback-emulator/python/py_playback_emulator.cpp
   )
@@ -82,7 +85,7 @@ if(TARGET cudaq-qec-playback-emulator)
     ${CMAKE_CURRENT_SOURCE_DIR}/bindings
   )
   target_link_libraries(${MODULE_NAME} PRIVATE cudaq-qec-playback-emulator)
-  target_compile_definitions(${MODULE_NAME} PRIVATE CUDAQX_QEC_HAS_PLAYBACK)
+  target_compile_definitions(${MODULE_NAME} PRIVATE CUDAQX_QEC_HAS_CUDAQ_REALTIME)
 endif()
 
 find_package(CUDAToolkit REQUIRED)

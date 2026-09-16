@@ -15,7 +15,8 @@
 #include "py_extended_dem.h"
 #include "py_surface_code.h"
 
-#ifdef CUDAQX_QEC_HAS_PLAYBACK
+// Only built when cudaq-realtime is available; see qec/python/CMakeLists.txt.
+#ifdef CUDAQX_QEC_HAS_CUDAQ_REALTIME
 #include "py_playback_emulator.h"
 #endif
 
@@ -36,7 +37,7 @@ NB_MODULE(_pycudaqx_qec_the_suffix_matters_cudaq_qec, mod) {
   cudaq::qec::surface_code::bindSurfaceCode(mod);
   cudaq::qec::bindDemConstruction(mod);
   cudaq::qec::bindExtendedDem(mod);
-#ifdef CUDAQX_QEC_HAS_PLAYBACK
+#ifdef CUDAQX_QEC_HAS_CUDAQ_REALTIME
   cudaq::qec::playback::bindPlaybackEmulator(mod);
 #endif
   // Suppress nanobind's reference-leak warnings.
