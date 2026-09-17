@@ -1,6 +1,9 @@
 /*******************************************************************************
  * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
+ *                                                                             *
+ * This source code and the accompanying materials are made available under    *
+ * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
 /// Tests the session backends: session.h's ordering contract (submission
@@ -476,14 +479,11 @@ TEST(UdpBackendAdvanced, SubmitRejectsAFrameShorterThanAnRPCHeader) {
 
 // ─── CpuRoceBackend ─────────────────────────────────────────────────────────
 //
-// The UDP suites again, over the CPU RoCE ring wire: same session contract,
-// different transport. Needs an RDMA device (a NIC or SoftRoCE), so every
-// test skips unless the topology is named by the same env vars
-// unittests/realtime/test_decoding_server.cpp uses:
-//   CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE / _IP   this end (the client)
-//   CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE  / _IP   the fake server below
-// With SoftRoCE both pairs may name the same device and IP (same-GID traffic
-// loops back in software).
+// The UDP suites again, over the CPU RoCE ring wire. Needs an RDMA device
+// (a NIC or SoftRoCE): every test skips unless the topology is named by the
+// env vars unittests/realtime/test_decoding_server.cpp uses,
+// CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP} (client / fake server).
+// With SoftRoCE both pairs may name the same device and IP.
 
 #ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
 
@@ -492,78 +492,28 @@ namespace {
 using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
 using cudaq::realtime::RPC_MAGIC_RESPONSE;
 
-constexpr std::uint32_t kRoceSlots = 8;
-constexpr std::uint32_t kRoceSlotSize = 256;
+constexpr std::uint32_t kRoceSlots = 8, kRoceSlotSize = 256;
+constexpr std::uint64_t kDecodeNs = kDecodeTime.count() * 1'000'000;
 
-const char *env_or_null(const char *name) {
+std::string env_or_empty(const char *name) {
   const char *v = std::getenv(name);
-  return (v && *v) ? v : nullptr;
+  return v ? v : "";
 }
 
-struct roce_topology {
-  std::string channel_device, channel_ip, daemon_device, daemon_ip;
-  bool configured() const {
-    return !channel_device.empty() && !channel_ip.empty() &&
-           !daemon_device.empty() && !daemon_ip.empty();
-  }
-};
-
-roce_topology roce_test_topology() {
-  roce_topology t;
-  if (auto *v = env_or_null("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE"))
-    t.channel_device = v;
-  if (auto *v = env_or_null("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP"))
-    t.channel_ip = v;
-  if (auto *v = env_or_null("CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE"))
-    t.daemon_device = v;
-  if (auto *v = env_or_null("CUDAQ_CPU_ROCE_TEST_DAEMON_IP"))
-    t.daemon_ip = v;
-  return t;
+long ms_since(std::chrono::steady_clock::time_point t0) {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now() - t0)
+      .count();
 }
 
-#define SKIP_WITHOUT_ROCE_TOPOLOGY(topo)                                       \
-  if (!(topo).configured())                                                    \
-  GTEST_SKIP() << "cpu_roce test topology not configured (set "                \
-                  "CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP})"
-
-cpu_roce_options roce_client_options(const roce_topology &t,
-                                     std::uint32_t slots = kRoceSlots,
-                                     std::uint32_t slot_size = kRoceSlotSize) {
-  cpu_roce_options o;
-  o.device = t.channel_device;
-  o.local_ip = t.channel_ip;
-  o.num_slots = slots;
-  o.slot_size = slot_size;
-  o.connect_timeout_ms = 2000;
-  return o;
-}
-
-/// Must match the session's (and the CUDA-Q service end's) rendezvous struct
-/// byte-for-byte: network order.
+/// Must match the session's (and CUDA-Q's) rendezvous struct byte-for-byte.
 struct roce_rendezvous {
-  std::uint32_t qp_number = 0;
-  std::uint32_t rkey = 0;
-  std::uint32_t roce_ipv4 = 0;
+  std::uint32_t qp_number = 0, rkey = 0, roce_ipv4 = 0;
 };
 
-bool read_all(int fd, void *buf, std::size_t len) {
-  auto *p = static_cast<std::uint8_t *>(buf);
-  while (len > 0) {
-    const ssize_t n = ::read(fd, p, len);
-    if (n <= 0)
-      return false;
-    p += n;
-    len -= static_cast<std::size_t>(n);
-  }
-  return true;
-}
-
-/// Binds a loopback TCP listener on an ephemeral port; returns the fd and
-/// fills `endpoint` with "127.0.0.1:port".
+/// Loopback TCP listener on an ephemeral port; fills "127.0.0.1:port".
 int listen_loopback_tcp(std::string &endpoint) {
-  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-  int reuse = 1;
-  ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -576,26 +526,21 @@ int listen_loopback_tcp(std::string &endpoint) {
 }
 
 /// The service end of the RoCE wire, standing in for decoding_server the way
-/// recording_server stands in for it over UDP: a CpuRoceTransceiver that
-/// Sends replies, a one-shot TCP rendezvous server, and a ring loop that --
-/// like the server's host dispatcher -- walks its rx slots in order, logs
-/// each frame's function_id, answers reads after `decode_time`, and mirrors
-/// every request's slot to the same tx slot. `reply=false` swallows requests
-/// (a server that never answers), for timeout tests.
+/// recording_server does over UDP: a transceiver that Sends replies, a
+/// one-shot TCP rendezvous, and a ring loop that walks rx slots in order,
+/// logs each function_id, answers reads after `decode_time` into the same tx
+/// slot -- or swallows every request when `reply` is false.
 class recording_roce_server {
 public:
-  explicit recording_roce_server(
-      const roce_topology &topo,
-      std::chrono::milliseconds decode_time = kDecodeTime, bool reply = true,
-      std::uint32_t slots = kRoceSlots, std::uint32_t slot_size = kRoceSlotSize)
-      : decode_time_(decode_time), reply_(reply), daemon_ip_(topo.daemon_ip) {
+  recording_roce_server(const std::string &device, const std::string &ip,
+                        std::chrono::milliseconds decode_time, bool reply)
+      : decode_time_(decode_time), reply_(reply), ip_(ip) {
     xcvr_ = cpu_roce_create_transceiver(
-        topo.daemon_device.c_str(), /*ib_port=*/1, /*tx_ibv_qp=*/0u,
-        /*frame_size=*/slot_size, /*page_size=*/slot_size, slots,
-        /*peer_ip=*/"0.0.0.0", 0, 0, 0, 0, CPU_ROCE_TX_MODE_RDMA_SEND, 0, 0);
+        device.c_str(), 1, 0u, kRoceSlotSize, kRoceSlotSize, kRoceSlots,
+        "0.0.0.0", 0, 0, 0, 0, CPU_ROCE_TX_MODE_RDMA_SEND, 0, 0);
     if (!xcvr_)
       throw std::runtime_error("recording_roce_server: create failed");
-    cpu_roce_set_local_ip(xcvr_, topo.daemon_ip.c_str());
+    cpu_roce_set_local_ip(xcvr_, ip.c_str());
     if (!cpu_roce_setup(xcvr_))
       throw std::runtime_error("recording_roce_server: setup failed");
     listen_fd_ = listen_loopback_tcp(endpoint_);
@@ -605,14 +550,11 @@ public:
   ~recording_roce_server() {
     stop_.store(true);
     ::shutdown(listen_fd_, SHUT_RDWR); // unblock a serve() parked in accept()
-    if (thread_.joinable())
-      thread_.join();
-    if (xcvr_) {
-      cpu_roce_close(xcvr_);
-      if (monitor_.joinable())
-        monitor_.join();
-      cpu_roce_destroy_transceiver(xcvr_);
-    }
+    thread_.join();
+    cpu_roce_close(xcvr_);
+    if (monitor_.joinable())
+      monitor_.join();
+    cpu_roce_destroy_transceiver(xcvr_);
     ::close(listen_fd_);
   }
 
@@ -625,27 +567,24 @@ public:
 
 private:
   void serve() {
-    // Rendezvous: the server reads the client's {qp, rkey, ip} first, then
-    // replies with its own (mirror of the client's exchange).
+    // Rendezvous: read the client's {qp, rkey, ip}, then reply with ours.
     const int fd = ::accept(listen_fd_, nullptr, nullptr);
     if (fd < 0)
       return; // torn down before any client dialed in
-    roce_rendezvous peer{};
     in_addr la{};
-    ::inet_pton(AF_INET, daemon_ip_.c_str(), &la);
+    ::inet_pton(AF_INET, ip_.c_str(), &la);
     const roce_rendezvous self{htonl(cpu_roce_get_qp_number(xcvr_)),
                                htonl(cpu_roce_get_rkey(xcvr_)), la.s_addr};
-    const bool ok = read_all(fd, &peer, sizeof(peer)) &&
-                    ::write(fd, &self, sizeof(self)) == sizeof(self);
+    roce_rendezvous peer{};
+    const bool ok =
+        ::recv(fd, &peer, sizeof peer, MSG_WAITALL) == sizeof peer &&
+        ::send(fd, &self, sizeof self, 0) == sizeof self;
     ::close(fd);
-    if (!ok)
-      return;
     char peer_ip[INET_ADDRSTRLEN] = {0};
-    in_addr pa{};
-    pa.s_addr = peer.roce_ipv4;
-    ::inet_ntop(AF_INET, &pa, peer_ip, sizeof(peer_ip));
+    const in_addr pa{peer.roce_ipv4};
+    ::inet_ntop(AF_INET, &pa, peer_ip, sizeof peer_ip);
     // We only Send replies, so no peer rkey is needed.
-    if (!cpu_roce_connect(xcvr_, ntohl(peer.qp_number), peer_ip, 0))
+    if (!ok || !cpu_roce_connect(xcvr_, ntohl(peer.qp_number), peer_ip, 0))
       return;
     monitor_ = std::thread([x = xcvr_] { cpu_roce_blocking_monitor(x); });
 
@@ -656,10 +595,8 @@ private:
     auto *tx_data =
         static_cast<std::uint8_t *>(cpu_roce_get_tx_ring_data_addr(xcvr_));
     const std::size_t stride = cpu_roce_get_page_size(xcvr_);
-    const std::uint32_t n = cpu_roce_get_num_pages(xcvr_);
 
-    std::uint32_t slot = 0;
-    while (!stop_.load()) {
+    for (std::uint32_t slot = 0; !stop_.load();) {
       if (__atomic_load_n(&rx_flags[slot], __ATOMIC_ACQUIRE) == 0) {
         std::this_thread::sleep_for(std::chrono::microseconds(20));
         continue;
@@ -670,8 +607,8 @@ private:
         std::lock_guard<std::mutex> lock(mu_);
         arrivals_.push_back(hdr.function_id);
       }
-      // Same inline-answer fidelity as recording_server: one dispatcher, so a
-      // slow read delays everything behind it; enqueue/reset ack at once.
+      // One dispatcher, like the real server: a slow read delays everything
+      // behind it; enqueue/reset ack at once.
       const bool is_read = hdr.function_id == kGetCorrectionsFunctionId;
       if (is_read)
         std::this_thread::sleep_for(decode_time_);
@@ -682,7 +619,6 @@ private:
         std::memset(tx, 0, stride);
         RPCResponse resp{};
         resp.magic = RPC_MAGIC_RESPONSE;
-        resp.status = 0;
         resp.result_len = is_read ? 1 : 0;
         resp.request_id = hdr.request_id;
         std::memcpy(tx, &resp, sizeof(resp));
@@ -690,7 +626,7 @@ private:
                          __ATOMIC_RELEASE);
       }
       __atomic_store_n(&rx_flags[slot], 0ull, __ATOMIC_RELEASE);
-      slot = (slot + 1) % n;
+      slot = (slot + 1) % kRoceSlots;
     }
   }
 
@@ -699,7 +635,7 @@ private:
   std::string endpoint_;
   std::chrono::milliseconds decode_time_;
   bool reply_;
-  std::string daemon_ip_;
+  std::string ip_;
   mutable std::mutex mu_;
   std::vector<std::uint32_t> arrivals_;
   std::atomic<bool> stop_{false};
@@ -707,286 +643,204 @@ private:
   std::thread monitor_;
 };
 
+/// Skips without a topology. `connect()` stands up the fake server and one
+/// client session for decoder 0; `run_schedule()` runs a schedule through it.
+class CpuRoceBackend : public ::testing::Test {
+protected:
+  void SetUp() override {
+    for (auto *n :
+         {"CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE",
+          "CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE",
+          "CUDAQ_CPU_ROCE_TEST_DAEMON_IP"})
+      if (env_or_empty(n).empty())
+        GTEST_SKIP() << "cpu_roce test topology not configured (set "
+                        "CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP})";
+    opts.device = env_or_empty("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE");
+    opts.local_ip = env_or_empty("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP");
+    opts.connect_timeout_ms = 2000;
+  }
+
+  void connect(std::chrono::milliseconds decode_time = kDecodeTime,
+               bool reply = true, std::uint32_t timeout_ms = 5000) {
+    server = std::make_unique<recording_roce_server>(
+        env_or_empty("CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE"),
+        env_or_empty("CUDAQ_CPU_ROCE_TEST_DAEMON_IP"), decode_time, reply);
+    sessions =
+        make_cpu_roce_sessions({{0, server->endpoint()}}, opts, timeout_ms);
+    router = {{0, sessions[0].second.get()}};
+  }
+
+  run_result
+  run_schedule(const std::string &text,
+               const std::unordered_map<std::uint32_t, syndrome_source *>
+                   &sources = {}) {
+    return run(plan(parse(text, {0}, 1000), router, sources, {}));
+  }
+
+  static std::string reads(int n) {
+    std::string text;
+    for (int i = 0; i < n; ++i)
+      text += std::string(i ? "+0" : "0") + " get_corrections return_size=1\n";
+    return text;
+  }
+
+  cpu_roce_options opts;
+  std::unique_ptr<recording_roce_server> server;
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> sessions;
+  std::unordered_map<std::uint64_t, session *> router;
+};
+
 } // namespace
 
-TEST(CpuRoceBackend, AWaitingCallerDoesNotHoldBackTheNextSend) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo);
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo), /*timeout_ms=*/5000);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
-
-  auto sched = parse("0 get_corrections return_size=1\n"
-                     "+0 enqueue source=0b1\n",
-                     {0}, 1000);
-  auto result = run(plan(sched, router, {}, {}));
-
+TEST_F(CpuRoceBackend, AWaitingCallerDoesNotHoldBackTheNextSend) {
+  connect();
+  auto result = run_schedule("0 get_corrections return_size=1\n"
+                             "+0 enqueue source=0b1\n");
   ASSERT_EQ(result.records.size(), 2u);
-  const auto &read = result.records[0];
-  const auto &enqueue = result.records[1];
-  EXPECT_LT(enqueue.call_ns - read.call_ns,
-            static_cast<std::uint64_t>(kDecodeTime.count()) * 1'000'000 / 2)
+  const auto &read = result.records[0], &enqueue = result.records[1];
+  EXPECT_LT(enqueue.call_ns - read.call_ns, kDecodeNs / 2)
       << "dispatch waited for the read's reply instead of moving straight to "
          "the next event";
-  EXPECT_GE(read.return_ns - read.call_ns,
-            static_cast<std::uint64_t>(kDecodeTime.count()) * 1'000'000);
+  EXPECT_GE(read.return_ns - read.call_ns, kDecodeNs);
   EXPECT_EQ(read.status, static_cast<std::int32_t>(RpcStatus::OK));
-  EXPECT_EQ(server.arrivals(),
+  EXPECT_EQ(server->arrivals(),
             (std::vector<std::uint32_t>{kGetCorrectionsFunctionId,
                                         kEnqueueSyndromesFunctionId}));
 }
 
-TEST(CpuRoceBackend, ConcurrentSubmissionsEachGetTheirOwnReply) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo);
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo), /*timeout_ms=*/5000);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
-
-  auto sched = parse("0 get_corrections return_size=1\n"
-                     "+0 get_corrections return_size=1\n",
-                     {0}, 1000);
-  auto result = run(plan(sched, router, {}, {}));
-
+TEST_F(CpuRoceBackend, ConcurrentSubmissionsEachGetTheirOwnReply) {
+  connect();
+  auto result = run_schedule(reads(2));
   ASSERT_EQ(result.records.size(), 2u);
-  EXPECT_EQ(result.records[0].status, static_cast<std::int32_t>(RpcStatus::OK));
-  EXPECT_EQ(result.records[1].status, static_cast<std::int32_t>(RpcStatus::OK));
-  EXPECT_EQ(server.arrivals().size(), 2u);
+  for (const auto &r : result.records)
+    EXPECT_EQ(r.status, static_cast<std::int32_t>(RpcStatus::OK));
+  EXPECT_EQ(server->arrivals().size(), 2u);
 }
 
-TEST(CpuRoceBackend, AnUnblockingReadKeepsItsPlaceInTheSyndromeStream) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo);
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo), /*timeout_ms=*/5000);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
+TEST_F(CpuRoceBackend, AnUnblockingReadKeepsItsPlaceInTheSyndromeStream) {
+  connect();
   static_source src(std::vector<std::vector<std::uint8_t>>(8, {1}));
-
-  auto sched = parse("0 stream source=0 rounds=1\n"
-                     "+0 get_corrections return_size=1 signal=shot\n"
-                     "+0 stream source=0 rounds=1\n",
-                     {0}, 1000);
-  auto result = run(plan(sched, router, {{0, &src}}, {}));
-
-  EXPECT_EQ(server.arrivals(),
+  auto result = run_schedule("0 stream source=0 rounds=1\n"
+                             "+0 get_corrections return_size=1 signal=shot\n"
+                             "+0 stream source=0 rounds=1\n",
+                             {{0, &src}});
+  EXPECT_EQ(server->arrivals(),
             (std::vector<std::uint32_t>{kEnqueueSyndromesFunctionId,
                                         kGetCorrectionsFunctionId,
                                         kEnqueueSyndromesFunctionId}));
-  const auto &read = result.records[1];
-  const auto &next_round = result.records[2];
-  EXPECT_LT(next_round.call_ns - read.call_ns,
-            static_cast<std::uint64_t>(kDecodeTime.count()) * 1'000'000 / 2);
+  const auto &read = result.records[1], &next_round = result.records[2];
+  EXPECT_LT(next_round.call_ns - read.call_ns, kDecodeNs / 2);
   EXPECT_TRUE(read.read_completed);
   EXPECT_EQ(read.correction_count, 1u);
 }
 
-TEST(CpuRoceBackend, MoreRequestsThanSlotsWaitTheirTurnAndAllComplete) {
-  // The ring holds kRoceSlots requests in flight; the rest queue locally and
-  // go out as slots free up (like datagrams behind a busy server), never
-  // failing. 12 slow reads through 8 slots wraps the ring and reuses slots,
-  // and the server must still see them in submission order.
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo, std::chrono::milliseconds(30));
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo), /*timeout_ms=*/5000);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
-
-  constexpr int kReads = 12;
-  std::string text;
-  for (int i = 0; i < kReads; ++i)
-    text += std::string(i ? "+0" : "0") + " get_corrections return_size=1\n";
-  auto result = run(plan(parse(text, {0}, 1000), router, {}, {}));
-
-  ASSERT_EQ(result.records.size(), static_cast<std::size_t>(kReads));
+TEST_F(CpuRoceBackend, MoreRequestsThanSlotsWaitTheirTurnAndAllComplete) {
+  // 12 slow reads through 8 slots wrap the ring: the extra queue locally and
+  // go out as slots free up, never failing, and still arrive in order.
+  connect(std::chrono::milliseconds(30));
+  auto result = run_schedule(reads(12));
+  ASSERT_EQ(result.records.size(), 12u);
   for (const auto &r : result.records) {
     EXPECT_EQ(r.status, static_cast<std::int32_t>(RpcStatus::OK));
     EXPECT_TRUE(r.read_completed);
   }
-  EXPECT_EQ(server.arrivals(),
-            std::vector<std::uint32_t>(kReads, kGetCorrectionsFunctionId));
+  EXPECT_EQ(server->arrivals(),
+            std::vector<std::uint32_t>(12, kGetCorrectionsFunctionId));
   EXPECT_TRUE(result.warnings.empty());
 }
 
-TEST(CpuRoceBackend, AStreamLongerThanTheRingAcksEveryRoundInOrder) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo);
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo), /*timeout_ms=*/5000);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
+TEST_F(CpuRoceBackend, AStreamLongerThanTheRingAcksEveryRoundInOrder) {
+  connect();
   constexpr std::size_t kRounds = 3 * kRoceSlots;
   static_source src(std::vector<std::vector<std::uint8_t>>(kRounds, {1, 0, 1}));
-
-  auto sched = parse(
-      "0 stream source=0 rounds=" + std::to_string(kRounds) + "\n", {0}, 1000);
-  auto result = run(plan(sched, router, {{0, &src}}, {}));
-
+  auto result =
+      run_schedule("0 stream source=0 rounds=" + std::to_string(kRounds) + "\n",
+                   {{0, &src}});
   ASSERT_EQ(result.records.size(), 1u);
   EXPECT_EQ(result.records[0].status,
             static_cast<std::int32_t>(stream_terminate::OK));
   EXPECT_EQ(result.records[0].rounds_streamed, kRounds);
-  EXPECT_EQ(server.arrivals(),
+  EXPECT_EQ(server->arrivals(),
             std::vector<std::uint32_t>(kRounds, kEnqueueSyndromesFunctionId));
 }
 
-TEST(CpuRoceBackend, AServerThatNeverRepliesTimesOutBoundedWithAnError) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo, kDecodeTime, /*reply=*/false);
-  constexpr std::uint32_t kTimeoutMs = 80;
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo), kTimeoutMs);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
-
-  auto sched = parse("0 reset\n", {0}, 1000);
-  auto t0 = std::chrono::steady_clock::now();
-  auto result = run(plan(sched, router, {}, {}));
-  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - t0)
-                        .count();
-
-  // Same convention as udp: a client-side timeout is INTERNAL_ERROR, and the
-  // per-request sweep (not stop()'s drain) is what resolves it.
+TEST_F(CpuRoceBackend, AServerThatNeverRepliesTimesOutBoundedWithAnError) {
+  // As with udp: a client-side timeout is INTERNAL_ERROR, resolved by the
+  // per-request sweep rather than stop()'s drain.
+  connect(kDecodeTime, /*reply=*/false, /*timeout_ms=*/80);
+  const auto t0 = std::chrono::steady_clock::now();
+  auto result = run_schedule("0 reset\n");
   ASSERT_EQ(result.records.size(), 1u);
   EXPECT_EQ(result.records[0].status,
             static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR));
-  EXPECT_LT(elapsed_ms, static_cast<long long>(kTimeoutMs) + 500);
-  EXPECT_EQ(server.arrivals(),
+  EXPECT_LT(ms_since(t0), 80 + 500);
+  EXPECT_EQ(server->arrivals(),
             std::vector<std::uint32_t>{kResetDecoderFunctionId});
 }
 
-TEST(CpuRoceBackend, AFullRingBehindADeadServerStillFailsEveryRequest) {
+TEST_F(CpuRoceBackend, AFullRingBehindADeadServerStillFailsEveryRequest) {
   // 12 reads through 8 slots with no replies: the first 8 time out and free
   // their slots, the 4 queued behind them go out and time out in turn, and
   // the whole run settles within two timeouts -- stop() never adds to it.
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo, std::chrono::milliseconds(1),
-                               /*reply=*/false);
-  constexpr std::uint32_t kTimeoutMs = 80;
-  constexpr int kReads = 12;
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo), kTimeoutMs);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
-
-  std::string text;
-  for (int i = 0; i < kReads; ++i)
-    text += std::string(i ? "+0" : "0") + " get_corrections return_size=1\n";
-  auto t0 = std::chrono::steady_clock::now();
-  auto result = run(plan(parse(text, {0}, 1000), router, {}, {}));
-  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - t0)
-                        .count();
-
-  ASSERT_EQ(result.records.size(), static_cast<std::size_t>(kReads));
+  connect(std::chrono::milliseconds(1), /*reply=*/false, /*timeout_ms=*/80);
+  const auto t0 = std::chrono::steady_clock::now();
+  auto result = run_schedule(reads(12));
+  ASSERT_EQ(result.records.size(), 12u);
   for (const auto &r : result.records)
     EXPECT_EQ(r.status, static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR));
-  EXPECT_LT(elapsed_ms, 2 * static_cast<long long>(kTimeoutMs) + 500);
-  EXPECT_EQ(server.arrivals().size(), static_cast<std::size_t>(kReads));
+  EXPECT_LT(ms_since(t0), 2 * 80 + 500);
+  EXPECT_EQ(server->arrivals().size(), 12u);
 }
 
-TEST(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndPlanTrustsIt) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo);
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo));
-  ASSERT_EQ(sessions.size(), 1u);
+TEST_F(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndPlanTrustsIt) {
+  connect();
   EXPECT_EQ(sessions[0].second->max_frame_bytes, kRoceSlotSize);
-  std::unordered_map<std::uint64_t, session *> router{
-      {0, sessions[0].second.get()}};
-
-  // An enqueue frame is 24B header + 32B payload + packed bits: 2048 bits
-  // makes 312 bytes > 256.
+  // 24B header + 32B payload + 2048 packed bits = 312 bytes > 256.
   EXPECT_THROW(plan(parse("0 enqueue source=0b" + std::string(2048, '1') + "\n",
                           {0}, 1000),
                     router, {}),
                std::invalid_argument);
-  // A read's reply is 24B RPCResponse + packed bits: 2000 bits makes 274
-  // bytes > 256, so it could never come back through one slot.
+  // 24B RPCResponse + 2000 packed bits = 274 bytes: no slot brings that back.
   EXPECT_THROW(plan(parse("0 get_corrections return_size=2000\n", {0}, 1000),
                     router, {}),
                std::invalid_argument);
-  // Both fit at a quarter of that.
   EXPECT_NO_THROW(plan(parse("0 enqueue source=0b" + std::string(512, '1') +
                                  "\n0 get_corrections return_size=500\n",
                              {0}, 1000),
                        router, {}));
 }
 
-TEST(CpuRoceBackend, SendRejectsAFrameShorterThanAnRPCHeader) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  recording_roce_server server(topo);
-  auto sessions = make_cpu_roce_sessions(
-      std::unordered_map<std::uint64_t, std::string>{{0, server.endpoint()}},
-      roce_client_options(topo));
-  ASSERT_EQ(sessions.size(), 1u);
+TEST_F(CpuRoceBackend, SendRejectsAFrameShorterThanAnRPCHeader) {
+  connect();
   std::vector<std::uint8_t> short_frame(sizeof(RPCHeader) - 1, 0);
-  frame f{short_frame.data(), short_frame.size()};
-  EXPECT_THROW(sessions[0].second->send(f, {}), std::invalid_argument);
+  EXPECT_THROW(
+      sessions[0].second->send({short_frame.data(), short_frame.size()}, {}),
+      std::invalid_argument);
 }
 
-TEST(CpuRoceBackend, ARendezvousNobodyAnswersFailsAtConstructionInBoundedTime) {
-  const auto topo = roce_test_topology();
-  SKIP_WITHOUT_ROCE_TOPOLOGY(topo);
-  auto opts = roce_client_options(topo);
+TEST_F(CpuRoceBackend,
+       ARendezvousNobodyAnswersFailsAtConstructionInBoundedTime) {
   opts.connect_timeout_ms = 300;
-
-  // Nobody listening: bind-then-close a loopback TCP port.
-  std::string closed;
-  ::close(listen_loopback_tcp(closed));
-  auto t0 = std::chrono::steady_clock::now();
-  EXPECT_THROW(
-      make_cpu_roce_sessions(
-          std::unordered_map<std::uint64_t, std::string>{{0, closed}}, opts),
-      std::runtime_error);
-  auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - t0)
-                        .count();
-  EXPECT_LT(elapsed_ms, 300 + 1000);
-
-  // Listening but never completing the swap: the socket timeout must fire.
-  std::string silent;
-  const int silent_fd = listen_loopback_tcp(silent);
-  t0 = std::chrono::steady_clock::now();
-  EXPECT_THROW(
-      make_cpu_roce_sessions(
-          std::unordered_map<std::uint64_t, std::string>{{0, silent}}, opts),
-      std::runtime_error);
-  elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                   std::chrono::steady_clock::now() - t0)
-                   .count();
-  EXPECT_LT(elapsed_ms, 300 + 1000);
+  auto fails_in_time = [&](const std::string &endpoint) {
+    const auto t0 = std::chrono::steady_clock::now();
+    EXPECT_THROW(make_cpu_roce_sessions({{0, endpoint}}, opts),
+                 std::runtime_error);
+    EXPECT_LT(ms_since(t0), 300 + 1000);
+  };
+  std::string closed, silent;
+  ::close(listen_loopback_tcp(closed)); // nobody listening
+  fails_in_time(closed);
+  const int silent_fd = listen_loopback_tcp(silent); // never completes the swap
+  fails_in_time(silent);
   ::close(silent_fd);
 }
 
-TEST(CpuRoceBackend, BadRingGeometryIsRejectedBeforeAnyNetworkIO) {
+TEST(CpuRoceOptions, BadRingGeometryIsRejectedBeforeAnyNetworkIO) {
   // No device needed: options are validated before the transceiver exists.
   cpu_roce_options opts;
   opts.device = "none";
   opts.local_ip = "127.0.0.1";
   const std::unordered_map<std::uint64_t, std::string> eps{{0, "127.0.0.1:1"}};
-
   opts.num_slots = 6; // not a power of two
   EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::invalid_argument);
   opts.num_slots = 8;

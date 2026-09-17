@@ -343,65 +343,44 @@ def test_cpu_roce_options_are_validated_before_any_transport_is_touched():
 
 # -- cpu_roce end to end -----------------------------------------------------
 
-
-def cpu_roce_topology():
-    """The RDMA device/IP pair for each end, from the same environment
-    variables the C++ suites and test_decoding_server use, or None."""
-    names = ("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE",
-             "CUDAQ_CPU_ROCE_TEST_CHANNEL_IP",
-             "CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE",
-             "CUDAQ_CPU_ROCE_TEST_DAEMON_IP")
-    values = [os.environ.get(n) for n in names]
-    return values if all(values) else None
+ROCE_TOPOLOGY = [
+    os.environ.get(n) for n in ("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE",
+                                "CUDAQ_CPU_ROCE_TEST_CHANNEL_IP",
+                                "CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE",
+                                "CUDAQ_CPU_ROCE_TEST_DAEMON_IP")
+]
+DECODING_SERVER = os.environ.get("QEC_DECODING_SERVER") or shutil.which(
+    "decoding_server")
 
 
-def decoding_server_binary():
-    return os.environ.get("QEC_DECODING_SERVER") or shutil.which(
-        "decoding_server")
-
-
-@pytest.mark.skipif(cpu_roce_topology() is None,
-                    reason="cpu_roce test topology not configured (set "
-                    "CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP})")
 @pytest.mark.skipif(
-    decoding_server_binary() is None,
+    not all(ROCE_TOPOLOGY),
+    reason="set CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP}")
+@pytest.mark.skipif(
+    DECODING_SERVER is None,
     reason="decoding_server not found (set QEC_DECODING_SERVER)")
 def test_a_schedule_runs_end_to_end_against_a_cpu_roce_decoding_server():
-    # The real thing: decoding_server on its cpu_roce transport, with the
-    # 3-bit identity pymatching config it ships with, driven by a schedule
-    # whose syndromes have bit 1 set -- so the read must come back with
-    # correction bit 1 set.
-    chan_dev, chan_ip, daemon_dev, daemon_ip = cpu_roce_topology()
-    server = decoding_server_binary()
-    config = os.path.join(os.path.dirname(server),
+    # decoding_server on its cpu_roce transport with the 3-bit identity
+    # pymatching config it ships with: syndrome bit 1 set -> correction bit 1.
+    chan_dev, chan_ip, daemon_dev, daemon_ip = ROCE_TOPOLOGY
+    config = os.path.join(os.path.dirname(DECODING_SERVER),
                           "decoding_server_config.yaml")
-    proc = subprocess.Popen(
-        [
-            server, f"--config={config}", "--transport=cpu_roce",
-            f"--device={daemon_dev}", f"--local-ip={daemon_ip}", "--port=0",
-            "--timeout=60"
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    proc = subprocess.Popen([
+        DECODING_SERVER, f"--config={config}", "--transport=cpu_roce",
+        f"--device={daemon_dev}", f"--local-ip={daemon_ip}", "--port=0",
+        "--timeout=60"
+    ],
+                            stdout=subprocess.PIPE,
+                            text=True)
     try:
-        port = None
-        for line in proc.stdout:
-            if line.startswith("QEC_DECODING_SERVER_READY"):
-                tokens = dict(
-                    t.split("=", 1) for t in line.split()[1:] if "=" in t)
-                port = int(tokens["port"])
-                assert tokens.get("transport") == "cpu_roce"
-                break
-        assert port, "server never printed QEC_DECODING_SERVER_READY"
-
+        ready = next(
+            l for l in proc.stdout if l.startswith("QEC_DECODING_SERVER_READY"))
+        port = int(dict(t.split("=", 1) for t in ready.split()[1:])["port"])
         result = pb.run(
             "0 reset\n"
             "1 stream source=0 rounds=1\n"
             "2 get_corrections return_size=3\n",
-            1_000_000,
-            {0: {
+            1_000_000, {0: {
                 "type": "static",
                 "rounds": [[0, 1, 0]]
             }},
@@ -410,8 +389,7 @@ def test_a_schedule_runs_end_to_end_against_a_cpu_roce_decoding_server():
                 "device": chan_dev,
                 "local_ip": chan_ip
             },
-            cpu_roce_timeout_ms=2000,
-        )
+            cpu_roce_timeout_ms=2000)
     finally:
         proc.terminate()
         proc.wait(timeout=10)

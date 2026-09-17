@@ -144,10 +144,9 @@ make_udp_sessions(
     const std::unordered_map<std::uint64_t, std::string> &endpoints,
     std::uint32_t timeout_ms = 200);
 
-/// Everything a CPU RoCE session needs besides its endpoint. The ring
-/// geometry is part of the wire contract (a request is RDMA-written straight
-/// into the server's ring), so `num_slots`/`slot_size` must equal the
-/// server's `--num-slots`/`--slot-size`; the rendezvous does not check this.
+/// Everything a CPU RoCE session needs besides its endpoint. The ring geometry
+/// is part of the wire contract (requests are RDMA-written into the server's
+/// ring), so slots/slot_size must equal the server's --num-slots/--slot-size.
 struct cpu_roce_options {
   std::string device;   ///< RDMA device name, e.g. "mlx5_0" or "rxe0"
   std::string local_ip; ///< this end's RoCE IPv4 (selects the source GID)
@@ -156,14 +155,12 @@ struct cpu_roce_options {
   std::uint32_t connect_timeout_ms = 5000; ///< bound on the TCP rendezvous
 };
 
-/// CPU RoCE (libibverbs, RDMA over Ethernet) client session(s) to a decoding
-/// server started with `--transport=cpu_roce`. `endpoints` maps decoder_id ->
-/// "host:port" of that decoder ring's TCP rendezvous (the `port=`/`ring<id>=`
-/// values on the server's READY line); one session per decoder_id.
-/// `timeout_ms` bounds how long any one request waits for its own reply.
-/// Connects every session before returning; a failure to reach or handshake
-/// with a server is a std::runtime_error. Throws std::runtime_error when the
-/// emulator was built without the CUDA-Q CPU RoCE transport.
+/// CPU RoCE (libibverbs) client session(s) to a decoding server started with
+/// `--transport=cpu_roce`. `endpoints` maps decoder_id -> "host:port" of that
+/// ring's TCP rendezvous (the `port=`/`ring<id>=` values on the server's READY
+/// line). Connects every session before returning; failing to reach or
+/// handshake with a server, or an emulator built without the CUDA-Q CPU RoCE
+/// transport, is a std::runtime_error.
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
 make_cpu_roce_sessions(
     const std::unordered_map<std::uint64_t, std::string> &endpoints,

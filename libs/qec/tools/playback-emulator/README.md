@@ -84,34 +84,28 @@ only far enough to size a `get_corrections` reply correctly.
 
 ### `cpu_roce`
 
-Talks to a `decoding_server --transport=cpu_roce` over RDMA (RoCE v2, via
-libibverbs), using the CUDA-Q CPU RoCE ring transceiver. Built only when the
+Talks to a `decoding_server --transport=cpu_roce` over RDMA (RoCE v2 via
+libibverbs) using the CUDA-Q CPU RoCE ring transceiver. Built only when the
 CUDA-Q realtime install ships `libcudaq-realtime-cpu-roce-transport.a` and
 libibverbs is present; otherwise the factory throws.
 
 - **Endpoint.** Each decoder id maps to the `host:port` of that ring's TCP
-  rendezvous, printed on the server's `QEC_DECODING_SERVER_READY` line
-  (`port=`/`ring<id>=`). The rendezvous swaps queue-pair numbers, memory
-  keys and RoCE IPv4 addresses; the data plane is pure RDMA afterwards.
-- **Ring geometry is a wire contract.** A request is RDMA-written straight
-  into the server's receive ring, one slot per request, so the client's
-  `num_slots` (power of two) and `slot_size` must equal the server's
-  `--num-slots`/`--slot-size` (defaults 8 x 256). `slot_size` bounds every
-  request *and* reply (`max_frame_bytes`), which `plan()` enforces before t0.
-  Slots are filled in strict order and only `num_slots` requests are ever in
-  flight; further sends queue locally until a reply frees a slot, so a burst
-  behind a slow decode adds latency but never fails. The per-request timeout
-  starts when a request reaches a slot, not when it was queued (the run's
-  own latency records do include the wait).
-- **Threads.** Between `start()` and `stop()` the transceiver runs its own
-  busy-polling RX and TX threads and the session adds one worker that
-  publishes requests and collects replies -- three cores per session while
-  a run is active, unlike `udp`'s single receiver blocked in `recv()`.
-  Outside a run only the connected QP is held.
+  rendezvous (`port=`/`ring<id>=` on the server's `QEC_DECODING_SERVER_READY`
+  line), which swaps queue-pair numbers, memory keys and RoCE IPs; the data
+  plane is pure RDMA afterwards.
+- **Ring geometry is a wire contract.** Requests are RDMA-written straight
+  into the server's receive ring, so `num_slots` (power of two) and
+  `slot_size` must equal the server's `--num-slots`/`--slot-size` (8 x 256).
+  `slot_size` bounds every request *and* reply (`max_frame_bytes`, enforced
+  by `plan()`). At most `num_slots` requests are in flight; further sends
+  queue locally until a reply frees a slot, and their timeout starts only
+  once they reach one.
+- **Threads.** Between `start()` and `stop()` the transceiver's busy-polling
+  RX/TX threads and one session worker run -- three cores per session,
+  unlike `udp`'s single receiver blocked in `recv()`.
 - **Testing.** The C++ and Python RoCE tests skip unless
-  `CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP}` name the client and
-  server device/IP (the same variables `test_decoding_server` uses). On a
-  single SoftRoCE device both pairs may be identical.
+  `CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP}` are set (as for
+  `test_decoding_server`); with SoftRoCE both pairs may be identical.
 
 ## `emulator`
 

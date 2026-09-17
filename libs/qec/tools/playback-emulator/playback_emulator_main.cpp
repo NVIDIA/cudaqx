@@ -40,6 +40,15 @@ std::string read_file(const std::string &path) {
   return ss.str();
 }
 
+/// Parses an "ID:HOST:PORT" flag value into `endpoints`.
+void add_endpoint(const char *flag, const std::string &v,
+                  std::unordered_map<std::uint64_t, std::string> &endpoints) {
+  const auto colon = v.find(':');
+  if (colon == std::string::npos)
+    throw std::runtime_error(std::string(flag) + " expects ID:HOST:PORT");
+  endpoints[std::stoull(v.substr(0, colon))] = v.substr(colon + 1);
+}
+
 void print_usage() {
   std::cout
       << "Usage: playback-emulator --schedule=<file> [options]\n"
@@ -59,18 +68,14 @@ void print_usage() {
          "  --udp-endpoint=ID:HOST:PORT   repeatable; required for "
          "--backend=udp\n"
          "  --cpu-roce-endpoint=ID:HOST:PORT   repeatable; required for\n"
-         "                      --backend=cpu_roce. HOST:PORT is the decoder\n"
-         "                      ring's TCP rendezvous (the port=/ring<id>=\n"
-         "                      values on the server's READY line)\n"
-         "  --cpu-roce-device=NAME        RDMA device (e.g. mlx5_0, rxe0);\n"
-         "                      required for --backend=cpu_roce\n"
-         "  --cpu-roce-local-ip=ADDR      this end's RoCE IPv4; required for\n"
-         "                      --backend=cpu_roce\n"
-         "  --cpu-roce-slots=N  ring slots, power of two (default: 8); must\n"
-         "                      equal the server's --num-slots\n"
-         "  --cpu-roce-slot-size=N        bytes per slot (default: 256); must\n"
-         "                      equal the server's --slot-size and bounds\n"
-         "                      every request and reply\n"
+         "                      --backend=cpu_roce; HOST:PORT is the ring's\n"
+         "                      TCP rendezvous from the server's READY line\n"
+         "  --cpu-roce-device=NAME     RDMA device (e.g. mlx5_0); required\n"
+         "  --cpu-roce-local-ip=ADDR   this end's RoCE IPv4; required\n"
+         "  --cpu-roce-slots=N         ring slots (default: 8) and\n"
+         "  --cpu-roce-slot-size=N     bytes per slot (default: 256); both\n"
+         "                      must match the server's --num-slots and\n"
+         "                      --slot-size, which bound request and reply\n"
          "  --source=ID:PATH    static_source for source_id ID, one 0/1 bit\n"
          "                      string per round, one round per line in PATH\n"
          "  --stim-source=ID:key=value,...   stim_memory_source for source_id\n"
@@ -214,19 +219,9 @@ int main(int argc, char **argv) {
       } else if (starts_with(a, "--out=")) {
         out_path = a.substr(6);
       } else if (starts_with(a, "--udp-endpoint=")) {
-        const std::string v = a.substr(15);
-        const auto first_colon = v.find(':');
-        if (first_colon == std::string::npos)
-          throw std::runtime_error("--udp-endpoint expects ID:HOST:PORT");
-        const std::uint64_t id = std::stoull(v.substr(0, first_colon));
-        udp_endpoints[id] = v.substr(first_colon + 1);
+        add_endpoint("--udp-endpoint", a.substr(15), udp_endpoints);
       } else if (starts_with(a, "--cpu-roce-endpoint=")) {
-        const std::string v = a.substr(20);
-        const auto first_colon = v.find(':');
-        if (first_colon == std::string::npos)
-          throw std::runtime_error("--cpu-roce-endpoint expects ID:HOST:PORT");
-        const std::uint64_t id = std::stoull(v.substr(0, first_colon));
-        cpu_roce_endpoints[id] = v.substr(first_colon + 1);
+        add_endpoint("--cpu-roce-endpoint", a.substr(20), cpu_roce_endpoints);
       } else if (starts_with(a, "--cpu-roce-device=")) {
         roce_opts.device = a.substr(18);
       } else if (starts_with(a, "--cpu-roce-local-ip=")) {
@@ -260,13 +255,9 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    // --config's only job for `udp`/`cpu_roce` is naming decoder_ids (for
-    // schedule `session=` validation) -- the decoder itself lives on the
-    // server, not here. `--udp-endpoint=ID:...`/`--cpu-roce-endpoint=ID:...`
-    // already name every id one by one, so those backends can skip --config
-    // entirely and derive decoder_ids from that. `null`/`inproc` have no
-    // other source of ids (`inproc` also needs the full config to build the
-    // decoder itself), so --config stays required for those.
+    // For `udp`/`cpu_roce` --config only names decoder_ids (the decoder lives
+    // on the server), and the --*-endpoint= flags already do that; `null`/
+    // `inproc` have no other source of ids, so --config stays required.
     cudaq::qec::decoding::config::multi_decoder_config config;
     std::vector<std::uint64_t> decoder_ids;
     if (!config_path.empty()) {
