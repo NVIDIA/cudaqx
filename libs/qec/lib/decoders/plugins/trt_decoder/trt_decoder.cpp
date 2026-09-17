@@ -1036,8 +1036,8 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes,
                              std::to_string(syndromes.size()) + " syndromes");
   // The engine's output form and the instance's form are both fixed at
   // construction; only errors -> observables is reachable here.
-  if (emitted_output_ != get_result_type())
-    for (auto &r : results) {
+  if (results && emitted_output_ != get_result_type())
+    for (auto &r : *results) {
       if (r.result.empty())
         continue;
       std::vector<float_t> observables(get_num_observables(), 0.0);

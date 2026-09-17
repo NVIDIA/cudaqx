@@ -900,21 +900,25 @@ TEST_F(TRTDecoderTest, CompositeGlobalDecoderReceivesCancellationToken) {
 
   cudaqx::heterogeneous_map params;
   params.insert("onnx_load_path", *onnx_path);
+  params.insert("engine_output_format",
+                std::string("observables_and_residual_detectors"));
   params.insert("batch_size", std::size_t{2});
   params.insert("use_cuda_graph", false);
   params.insert("global_decoder", std::string("cancellation_probe_decoder"));
   params.insert("global_decoder_params", cudaqx::heterogeneous_map{});
-  params.insert("O", O);
 
   std::unique_ptr<decoder> trt_decoder;
   try {
-    trt_decoder = decoder::get("trt_decoder", H, params);
+    trt_decoder = decoder::get(
+        "trt_decoder",
+        decoder_init(sparse_binary_matrix(H), sparse_binary_matrix(O)),
+        decode_result_type::observables, params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to create composite TRT decoder: " << e.what();
   }
 
-  const std::vector<std::vector<float_t>> syndromes{{1.0, 1.0, 0.0},
-                                                    {0.0, 1.0, 0.0}};
+  const std::vector<std::vector<cudaq::qec::float_t>> syndromes{
+      {1.0, 1.0, 0.0}, {0.0, 1.0, 0.0}};
   cancellation_source src;
   src.request_hard_stop();
   EXPECT_FALSE(
