@@ -198,7 +198,7 @@ public:
   /// decode(syndrome), i.e. a decoder is non-cancellable unless it overrides
   /// this overload. A decoder that can poll `tok` should override this and
   /// return std::nullopt once `tok.stop_requested()` answers true (see
-  /// cancellation.h).
+  /// `cancellation_token`).
   /// @param syndrome A vector of syndrome measurements where the floating point
   /// value is the probability that the syndrome measurement is a |1>.
   /// @param tok The cancellation token to use.
