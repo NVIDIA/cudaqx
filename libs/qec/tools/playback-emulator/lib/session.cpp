@@ -199,12 +199,16 @@ make_null_sessions(const std::vector<std::uint64_t> &decoder_ids) {
   return out;
 }
 
-void route_sessions(
-    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
-        &sessions,
+void adopt_sessions(
+    std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> sessions,
+    std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> &owned,
     std::unordered_map<std::uint64_t, session *> &router) {
-  for (const auto &[id, s] : sessions)
-    router[id] = s.get();
+  for (auto &[id, s] : sessions) {
+    if (!router.emplace(id, s.get()).second)
+      throw std::invalid_argument("decoder_id " + std::to_string(id) +
+                                  " is named by more than one backend");
+    owned.emplace_back(id, std::move(s));
+  }
 }
 
 // ─── inproc_session ────────────────────────────────────────────────────────

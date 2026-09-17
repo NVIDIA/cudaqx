@@ -164,12 +164,13 @@ make_cpu_roce_sessions(
     const std::unordered_map<std::uint64_t, std::string> &endpoints,
     const cpu_roce_options &opts, std::uint32_t timeout_ms = 200);
 
-/// Points `router[id]` at each session's owning pointer, for a
-/// make_*_sessions() result the caller is keeping alive elsewhere. The
-/// shared last step of adopting any backend's sessions into a run.
-void route_sessions(
-    const std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
-        &sessions,
+/// Moves a make_*_sessions() result into `owned` and points `router[id]` at
+/// each session: the shared last step of adopting a backend into a run. Called
+/// once per backend, so a run may mix them; a decoder_id already routed (named
+/// by two backends) is a std::invalid_argument.
+void adopt_sessions(
+    std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> sessions,
+    std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>> &owned,
     std::unordered_map<std::uint64_t, session *> &router);
 
 } // namespace cudaq::qec::playback
