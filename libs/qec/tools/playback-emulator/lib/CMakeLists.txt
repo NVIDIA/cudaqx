@@ -66,8 +66,7 @@ target_link_libraries(cudaq-qec-playback-emulator
     Threads::Threads
 )
 
-# Optional `cpu_roce` backend: the CUDA-Q CPU RoCE ring transceiver (a static
-# archive over libibverbs). Without it the factory still exists but throws.
+# Optional `cpu_roce` backend (CUDA-Q's CPU RoCE transceiver over libibverbs).
 find_library(QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY
   cudaq-realtime-cpu-roce-transport
   HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR} ${CUDAQ_INSTALL_PREFIX}
@@ -75,13 +74,10 @@ find_library(QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY
 find_library(QEC_PLAYBACK_IBVERBS_LIBRARY ibverbs)
 if(QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY AND QEC_PLAYBACK_IBVERBS_LIBRARY)
   message(STATUS "playback-emulator: cpu_roce backend enabled")
-  # PUBLIC so the unit tests can build their RoCE fake server too.
   target_compile_definitions(cudaq-qec-playback-emulator PUBLIC
     CUDAQ_QEC_PLAYBACK_CPU_ROCE)
   target_link_libraries(cudaq-qec-playback-emulator PRIVATE
     ${QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY} ${QEC_PLAYBACK_IBVERBS_LIBRARY})
-else()
-  message(STATUS "playback-emulator: cpu_roce backend disabled")
 endif()
 
 set_target_properties(cudaq-qec-playback-emulator PROPERTIES

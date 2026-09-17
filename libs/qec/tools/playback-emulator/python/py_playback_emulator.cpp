@@ -101,8 +101,7 @@ std::unique_ptr<syndrome_source> make_source(const nb::dict &spec) {
   throw std::invalid_argument("unknown source type: \"" + type + "\"");
 }
 
-/// Builds cpu_roce_options from a plain spec dict: "device" and "local_ip"
-/// (required), "slots", "slot_size", "connect_timeout_ms" (optional).
+/// cpu_roce_options from a spec dict ("device", "local_ip", "slots", ...).
 cpu_roce_options make_cpu_roce_options(const std::optional<nb::dict> &spec) {
   if (!spec)
     throw std::invalid_argument(
@@ -320,11 +319,9 @@ void bindPlaybackEmulator(nb::module_ &mod) {
         "\"noise\": a cudaq.NoiseModel (optional)}). "
         "Exactly one of `decoders` (in-process decoders from a "
         "multi_decoder_config), `udp_endpoints` ({decoder_id: "
-        "\"host:port\"}), `cpu_roce_endpoints` ({decoder_id: "
-        "\"rendezvous_host:port\"}, with `cpu_roce_options` = {\"device\", "
-        "\"local_ip\", \"slots\" (8), \"slot_size\" (256), "
-        "\"connect_timeout_ms\" (5000)}; slots/slot_size must match the "
-        "server's --num-slots/--slot-size), or `null_decoder_ids` (discards "
+        "\"host:port\"}), `cpu_roce_endpoints` (same, plus `cpu_roce_options` "
+        "= {\"device\", \"local_ip\", \"slots\" (8), \"slot_size\" (256), "
+        "\"connect_timeout_ms\" (5000)}), or `null_decoder_ids` (discards "
         "everything) selects the session backend.");
 }
 

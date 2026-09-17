@@ -68,14 +68,13 @@ void print_usage() {
          "  --udp-endpoint=ID:HOST:PORT   repeatable; required for "
          "--backend=udp\n"
          "  --cpu-roce-endpoint=ID:HOST:PORT   repeatable; required for\n"
-         "                      --backend=cpu_roce; HOST:PORT is the ring's\n"
-         "                      TCP rendezvous from the server's READY line\n"
+         "                      --backend=cpu_roce (the ring's rendezvous\n"
+         "                      from the server's READY line)\n"
          "  --cpu-roce-device=NAME     RDMA device (e.g. mlx5_0); required\n"
          "  --cpu-roce-local-ip=ADDR   this end's RoCE IPv4; required\n"
-         "  --cpu-roce-slots=N         ring slots (default: 8) and\n"
-         "  --cpu-roce-slot-size=N     bytes per slot (default: 256); both\n"
-         "                      must match the server's --num-slots and\n"
-         "                      --slot-size, which bound request and reply\n"
+         "  --cpu-roce-slots=N, --cpu-roce-slot-size=N   ring geometry\n"
+         "                      (default: 8 x 256 B); must match the\n"
+         "                      server's --num-slots/--slot-size\n"
          "  --source=ID:PATH    static_source for source_id ID, one 0/1 bit\n"
          "                      string per round, one round per line in PATH\n"
          "  --stim-source=ID:key=value,...   stim_memory_source for source_id\n"
@@ -255,9 +254,8 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    // For `udp`/`cpu_roce` --config only names decoder_ids (the decoder lives
-    // on the server), and the --*-endpoint= flags already do that; `null`/
-    // `inproc` have no other source of ids, so --config stays required.
+    // For `udp`/`cpu_roce` the --*-endpoint= flags already name every
+    // decoder_id; `null`/`inproc` have no other source, so --config stays.
     cudaq::qec::decoding::config::multi_decoder_config config;
     std::vector<std::uint64_t> decoder_ids;
     if (!config_path.empty()) {

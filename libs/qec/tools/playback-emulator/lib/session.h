@@ -145,8 +145,7 @@ make_udp_sessions(
     std::uint32_t timeout_ms = 200);
 
 /// Everything a CPU RoCE session needs besides its endpoint. The ring geometry
-/// is part of the wire contract (requests are RDMA-written into the server's
-/// ring), so slots/slot_size must equal the server's --num-slots/--slot-size.
+/// is the wire contract: it must equal the server's --num-slots/--slot-size.
 struct cpu_roce_options {
   std::string device;   ///< RDMA device name, e.g. "mlx5_0" or "rxe0"
   std::string local_ip; ///< this end's RoCE IPv4 (selects the source GID)
@@ -157,10 +156,9 @@ struct cpu_roce_options {
 
 /// CPU RoCE (libibverbs) client session(s) to a decoding server started with
 /// `--transport=cpu_roce`. `endpoints` maps decoder_id -> "host:port" of that
-/// ring's TCP rendezvous (the `port=`/`ring<id>=` values on the server's READY
-/// line). Connects every session before returning; failing to reach or
-/// handshake with a server, or an emulator built without the CUDA-Q CPU RoCE
-/// transport, is a std::runtime_error.
+/// ring's TCP rendezvous (from the server's READY line). Connects every
+/// session before returning; a failed handshake, or an emulator built without
+/// the CUDA-Q CPU RoCE transport, is a std::runtime_error.
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
 make_cpu_roce_sessions(
     const std::unordered_map<std::uint64_t, std::string> &endpoints,

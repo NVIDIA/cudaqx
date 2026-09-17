@@ -8,10 +8,9 @@
 
 /// @file session.cpp
 /// @brief All session backends: `null` (discard every frame), inproc
-/// (dispatch to a decoder's own DecodingSession), UDP (a decoding server),
-/// and CPU RoCE (a decoding server over RDMA, when the CUDA-Q CPU RoCE
-/// transport is available). Concrete classes are anonymous-namespace
-/// private; the factories in session.h are the only public surface.
+/// (dispatch to a decoder's own DecodingSession), UDP and CPU RoCE (a
+/// decoding server). Concrete classes are anonymous-namespace private; the
+/// factories in session.h are the only public surface.
 
 #include "session.h"
 #include "RpcSlot.h"
@@ -19,8 +18,6 @@
 
 #ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
 #include "cudaq/realtime/cpu_transport/roce_wrapper.h"
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #endif
 
 #include <algorithm>
@@ -724,19 +721,26 @@ make_udp_sessions(
 
 // ─── cpu_roce_session ────────────────────────────────────────────────────────
 //
-// CPU RoCE (libibverbs) client to a `decoding_server --transport=cpu_roce`,
+// CPU RoCE (libibverbs) client to a `decoding_server --transport=cpu_roce`
 // speaking the CUDA-Q CpuRoceTransceiver ring protocol: a request is
 // RDMA-written into the server's rx slot of the same index and the reply is
-// Sent back into ours; slots are used in strict order, so at most `num_slots`
-// requests are in flight. Pure transport like udp: one worker publishes
-// requests into the ring and reports every reply/event_done to the collector.
-
-#ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
+// Sent back into ours, in strict slot order (at most `num_slots` in flight).
 
 namespace {
 
-using cudaq::realtime::RPC_MAGIC_RESPONSE;
-using cudaq::realtime::RPCResponse;
+void validate(const cpu_roce_options &opts) {
+  if (opts.num_slots == 0 || (opts.num_slots & (opts.num_slots - 1)) != 0)
+    throw std::invalid_argument(
+        "cpu_roce num_slots must be a non-zero power of two");
+  if (opts.slot_size < sizeof(RPCHeader) ||
+      opts.slot_size < sizeof(RPCResponse))
+    throw std::invalid_argument(
+        "cpu_roce slot_size is too small to hold an RPC header/response");
+  if (opts.device.empty() || opts.local_ip.empty())
+    throw std::invalid_argument("cpu_roce requires a device and a local_ip");
+}
+
+#ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
 
 inline void cpu_pause() {
 #if defined(__x86_64__) || defined(__i386__)
@@ -755,8 +759,8 @@ struct roce_rendezvous {
   throw std::runtime_error("playback cpu_roce: " + what);
 }
 
-/// TCP connect to the rendezvous, retrying until `deadline`. The socket
-/// timeouts are set before connect() so they bound it too, not just the swap.
+/// TCP connect to the rendezvous, retrying until `deadline`; the socket
+/// timeouts bound the swap that follows too.
 int connect_rendezvous(const std::string &host, const std::string &port,
                        std::chrono::steady_clock::time_point deadline) {
   addrinfo hints{}, *res = nullptr;
@@ -778,8 +782,6 @@ int connect_rendezvous(const std::string &host, const std::string &port,
       ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
       if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0) {
         freeaddrinfo(res);
-        const int one = 1;
-        ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
         return fd;
       }
       ::close(fd);
@@ -861,8 +863,7 @@ public:
 
   void start(run_ctx &collector) override {
     collector_ = &collector;
-    // The QP has been RTS since construction; the transceiver's busy-polling
-    // RX/TX threads only run between start() and stop().
+    // The transceiver's busy-polling RX/TX threads run from start() to stop().
     monitor_ = std::thread([this] {
       monitor_entered_.store(true, std::memory_order_release);
       cpu_roce_blocking_monitor(xcvr_);
@@ -899,15 +900,14 @@ public:
   /// Idempotent; the destructor calls it with a zero drain.
   void stop(std::chrono::nanoseconds drain) override {
     if (worker_.joinable()) {
-      giveup_ns_.store(now_steady_ns() + drain.count(),
+      giveup_ns_.store((clock::now() + drain).time_since_epoch().count(),
                        std::memory_order_release);
       ring_.reserve().kind = request_ring::entry::kStop;
       ring_.publish();
       worker_.join();
     }
-    // cpu_roce_close() racing a cpu_roce_blocking_monitor() that has not
-    // spawned its threads yet leaves them running over released ring memory,
-    // so wait for the monitor thread to be inside the call first.
+    // cpu_roce_close() must not race a cpu_roce_blocking_monitor() that has
+    // not spawned its threads yet (they would outlive the ring memory).
     while (monitor_.joinable() &&
            !monitor_entered_.load(std::memory_order_acquire))
       std::this_thread::yield();
@@ -919,8 +919,6 @@ public:
 private:
   using clock = std::chrono::steady_clock;
   static constexpr std::uint32_t kNoOwner = 0xFFFFFFFFu;
-  static constexpr std::int64_t kNever =
-      std::numeric_limits<std::int64_t>::max();
 
   /// One outstanding request. Worker-thread-only.
   struct pending {
@@ -929,10 +927,9 @@ private:
     std::uint32_t slot;
   };
 
-  static std::int64_t now_steady_ns() {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-               clock::now().time_since_epoch())
-        .count();
+  clock::time_point giveup() const {
+    return clock::time_point{
+        clock::duration(giveup_ns_.load(std::memory_order_acquire))};
   }
 
   void complete(tag t, RpcStatus status, const std::uint8_t *body,
@@ -940,13 +937,8 @@ private:
     handle_reply(*collector_, t, status, body, len, now_ns());
   }
 
-  bool past_giveup() const {
-    return now_steady_ns() >= giveup_ns_.load(std::memory_order_acquire);
-  }
-
-  /// Publish the head request into the next TX slot, in strict slot order.
-  /// False (request stays queued) while that slot's last request is
-  /// unanswered or the transport has not shipped its last frame.
+  /// Publish the head request into the next TX slot; false (it stays queued)
+  /// while that slot's last request is unanswered or still being shipped.
   bool try_publish(const request_ring::entry &e) {
     const std::uint32_t slot = rr_;
     if (slot_owner_[slot] != kNoOwner ||
@@ -1026,9 +1018,8 @@ private:
           if (try_publish(*e)) {
             ring_.pop_done();
             did_work = true;
-          } else if (past_giveup()) {
-            // stop()'s drain elapsed and the ring never freed a slot: report
-            // the unsent request like a dropped one so kStop is reached.
+          } else if (clock::now() >= giveup()) {
+            // stop()'s drain elapsed with no free slot: fail it, reach kStop.
             const tag t = e->t;
             ring_.pop_done();
             complete(t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
@@ -1044,12 +1035,10 @@ private:
           did_work = true;
           break;
         }
-        case request_ring::entry::kStop: {
+        case request_ring::entry::kStop:
           // Honor outstanding replies up to the drain deadline, fail the rest.
           ring_.pop_done();
-          const clock::time_point deadline{std::chrono::nanoseconds(
-              giveup_ns_.load(std::memory_order_acquire))};
-          while (!pending_.empty() && clock::now() < deadline)
+          while (!pending_.empty() && clock::now() < giveup())
             if (!poll_reply()) {
               sweep_stale();
               cpu_pause();
@@ -1057,7 +1046,6 @@ private:
           for (auto &[rid, p] : pending_)
             complete(p.t, RpcStatus::INTERNAL_ERROR, nullptr, 0);
           return;
-        }
         }
       }
 
@@ -1093,7 +1081,8 @@ private:
   std::vector<std::uint32_t> slot_owner_; // request_id per slot, or kNoOwner
   std::vector<std::uint8_t> reply_scratch_;
 
-  std::atomic<std::int64_t> giveup_ns_{kNever};
+  std::atomic<std::int64_t> giveup_ns_{
+      std::numeric_limits<std::int64_t>::max()};
   std::atomic<bool> monitor_entered_{false};
   request_ring ring_; // timing thread -> worker
   run_ctx *collector_ = nullptr;
@@ -1101,25 +1090,23 @@ private:
   std::thread monitor_; // runs cpu_roce_blocking_monitor
 };
 
+#endif // CUDAQ_QEC_PLAYBACK_CPU_ROCE
+
 } // namespace
 
 std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
 make_cpu_roce_sessions(
     const std::unordered_map<std::uint64_t, std::string> &endpoints,
     const cpu_roce_options &opts, std::uint32_t timeout_ms) {
-  if (opts.num_slots == 0 || (opts.num_slots & (opts.num_slots - 1)) != 0)
-    throw std::invalid_argument(
-        "cpu_roce num_slots must be a non-zero power of two");
-  if (opts.slot_size < sizeof(RPCHeader) ||
-      opts.slot_size < sizeof(RPCResponse))
-    throw std::invalid_argument(
-        "cpu_roce slot_size is too small to hold an RPC header/response");
-  if (opts.device.empty() || opts.local_ip.empty())
-    throw std::invalid_argument("cpu_roce requires a device and a local_ip");
-
-  // Connect concurrently: the decoding server accepts its rings one at a
-  // time, so a serial loop in the wrong order would deadlock; every connect
-  // retries until it is accepted, so order does not matter.
+  validate(opts);
+#ifndef CUDAQ_QEC_PLAYBACK_CPU_ROCE
+  throw std::runtime_error(
+      "playback emulator was built without CPU RoCE support "
+      "(cudaq-realtime-cpu-roce-transport / libibverbs not found at build "
+      "time)");
+#else
+  // Connect concurrently: the server accepts its rings one at a time, so a
+  // serial loop in the wrong order would deadlock.
   std::vector<std::pair<std::uint64_t, std::string>> eps(endpoints.begin(),
                                                          endpoints.end());
   std::vector<std::future<cpu_roce_transceiver_t>> connecting;
@@ -1147,19 +1134,7 @@ make_cpu_roce_sessions(
                                        xcvrs[i], opts.num_slots, opts.slot_size,
                                        std::chrono::milliseconds(timeout_ms)));
   return out;
+#endif
 }
-
-#else // CUDAQ_QEC_PLAYBACK_CPU_ROCE
-
-std::vector<std::pair<std::uint64_t, std::unique_ptr<session>>>
-make_cpu_roce_sessions(const std::unordered_map<std::uint64_t, std::string> &,
-                       const cpu_roce_options &, std::uint32_t) {
-  throw std::runtime_error(
-      "playback emulator was built without CPU RoCE support "
-      "(cudaq-realtime-cpu-roce-transport / libibverbs not found at build "
-      "time)");
-}
-
-#endif // CUDAQ_QEC_PLAYBACK_CPU_ROCE
 
 } // namespace cudaq::qec::playback

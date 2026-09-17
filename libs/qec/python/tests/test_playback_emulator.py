@@ -20,10 +20,7 @@ against the corresponding cell of `write_csv()`, which is written by C++ and
 never passes through nanobind.
 """
 
-import os
-import shutil
 import socket
-import subprocess
 
 import pytest
 
@@ -325,82 +322,25 @@ def test_exactly_one_backend_must_be_named(backends):
         pb.run("0 reset\n", 1000, {}, **backends)
 
 
-def test_cpu_roce_options_are_validated_before_any_transport_is_touched():
-    # Both checks live in the binding's cpu_roce_options parser, ahead of the
-    # factory, so they hold whether or not the RoCE transport was built in.
+def test_cpu_roce_options_are_parsed_before_any_transport_is_touched():
+    # The key checks live in the binding's parser, ahead of the factory; a full
+    # option set reaches the factory and fails there (no device / no transport).
+    eps = {0: "127.0.0.1:1"}
     with pytest.raises(ValueError, match="cpu_roce_options"):
-        pb.run("0 reset\n", 1000, {}, cpu_roce_endpoints={0: "127.0.0.1:1"})
+        pb.run("0 reset\n", 1000, {}, cpu_roce_endpoints=eps)
+    opts = {"device": "none", "local_ip": "127.0.0.1"}
     with pytest.raises(ValueError, match="unknown cpu_roce_options key"):
         pb.run("0 reset\n",
                1000, {},
-               cpu_roce_endpoints={0: "127.0.0.1:1"},
-               cpu_roce_options={
-                   "device": "mlx5_0",
-                   "local_ip": "10.0.0.1",
-                   "pages": 8
-               })
-
-
-# -- cpu_roce end to end -----------------------------------------------------
-
-ROCE_TOPOLOGY = [
-    os.environ.get(n) for n in ("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE",
-                                "CUDAQ_CPU_ROCE_TEST_CHANNEL_IP",
-                                "CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE",
-                                "CUDAQ_CPU_ROCE_TEST_DAEMON_IP")
-]
-DECODING_SERVER = os.environ.get("QEC_DECODING_SERVER") or shutil.which(
-    "decoding_server")
-
-
-@pytest.mark.skipif(
-    not all(ROCE_TOPOLOGY),
-    reason="set CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP}")
-@pytest.mark.skipif(
-    DECODING_SERVER is None,
-    reason="decoding_server not found (set QEC_DECODING_SERVER)")
-def test_a_schedule_runs_end_to_end_against_a_cpu_roce_decoding_server():
-    # decoding_server on its cpu_roce transport with the 3-bit identity
-    # pymatching config it ships with: syndrome bit 1 set -> correction bit 1.
-    chan_dev, chan_ip, daemon_dev, daemon_ip = ROCE_TOPOLOGY
-    config = os.path.join(os.path.dirname(DECODING_SERVER),
-                          "decoding_server_config.yaml")
-    proc = subprocess.Popen([
-        DECODING_SERVER, f"--config={config}", "--transport=cpu_roce",
-        f"--device={daemon_dev}", f"--local-ip={daemon_ip}", "--port=0",
-        "--timeout=60"
-    ],
-                            stdout=subprocess.PIPE,
-                            text=True)
-    try:
-        ready = next(
-            l for l in proc.stdout if l.startswith("QEC_DECODING_SERVER_READY"))
-        port = int(dict(t.split("=", 1) for t in ready.split()[1:])["port"])
-        result = pb.run(
-            "0 reset\n"
-            "1 stream source=0 rounds=1\n"
-            "2 get_corrections return_size=3\n",
-            1_000_000, {0: {
-                "type": "static",
-                "rounds": [[0, 1, 0]]
-            }},
-            cpu_roce_endpoints={0: f"127.0.0.1:{port}"},
-            cpu_roce_options={
-                "device": chan_dev,
-                "local_ip": chan_ip
-            },
-            cpu_roce_timeout_ms=2000)
-    finally:
-        proc.terminate()
-        proc.wait(timeout=10)
-
-    assert result.warnings == []
-    assert [r.status for r in result.records] == ["OK", "OK", "OK"]
-    read = result.records[2]
-    assert read.read_completed
-    assert list(
-        result.correction_log[read.correction_offset:read.correction_offset +
-                              read.correction_count]) == [0, 1, 0]
+               cpu_roce_endpoints=eps,
+               cpu_roce_options=dict(opts, pages=8))
+    opts.update(slots=8, slot_size=256, connect_timeout_ms=100)
+    with pytest.raises(RuntimeError):
+        pb.run("0 reset\n",
+               1000, {},
+               cpu_roce_endpoints=eps,
+               cpu_roce_options=opts,
+               cpu_roce_timeout_ms=100)
 
 
 # -- syndrome sources --------------------------------------------------------

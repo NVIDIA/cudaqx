@@ -295,10 +295,10 @@ plan(const schedule &sched_in,
           wire::bit_packed_bytes(return_size_for(e));
       if (max_frame_bytes != 0 && reply_bytes > max_frame_bytes)
         throw std::invalid_argument(
-            "event " + std::to_string(i) +
-            " (decoder_id=" + std::to_string(e.decoder_id) + ") expects a " +
+            "event " + std::to_string(i) + ": a " +
             std::to_string(reply_bytes) +
-            "-byte reply, exceeding the session's max_frame_bytes=" +
+            "-byte get_corrections reply exceeds the session's "
+            "max_frame_bytes=" +
             std::to_string(max_frame_bytes));
       place(build_get_corrections_frame(e.decoder_id, return_size_for(e),
                                         /*rid=*/0),

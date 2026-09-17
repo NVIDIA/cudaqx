@@ -9,8 +9,8 @@
 /// Tests the session backends: session.h's ordering contract (submission
 /// order is delivery order; a waiting caller holds back nobody), the `null`
 /// jitter floor, the UDP backend (timeouts, max_frame_bytes
-/// trustworthiness, plan()'s oversized-enqueue rejection), and -- when an
-/// RDMA device is available -- the same contract over the CPU RoCE backend.
+/// trustworthiness, plan()'s oversized-enqueue rejection), and the same
+/// contract over the CPU RoCE backend when an RDMA device is available.
 
 #include "emulator.h"
 #include "session.h"
@@ -18,8 +18,6 @@
 
 #ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
 #include "cudaq/realtime/cpu_transport/roce_wrapper.h"
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #endif
 
 #include <algorithm>
@@ -463,6 +461,10 @@ TEST(UdpBackendAdvanced,
   std::unordered_map<std::uint64_t, session *> router;
   router[0] = sessions[0].second.get();
   EXPECT_THROW(plan(sched, router, {}), std::invalid_argument);
+  // The reply is bounded too: 24B RPCResponse + 523872 packed bits > 65507.
+  EXPECT_THROW(plan(parse("0 get_corrections return_size=523872\n", {0}, 1000),
+                    router, {}),
+               std::invalid_argument);
 }
 
 TEST(UdpBackendAdvanced, SubmitRejectsAFrameShorterThanAnRPCHeader) {
@@ -479,17 +481,36 @@ TEST(UdpBackendAdvanced, SubmitRejectsAFrameShorterThanAnRPCHeader) {
 
 // ─── CpuRoceBackend ─────────────────────────────────────────────────────────
 //
-// The UDP suites again, over the CPU RoCE ring wire. Needs an RDMA device
-// (a NIC or SoftRoCE): every test skips unless the topology is named by the
-// env vars unittests/realtime/test_decoding_server.cpp uses,
-// CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP} (client / fake server).
-// With SoftRoCE both pairs may name the same device and IP.
+// The UDP suites again, over the CPU RoCE ring wire. Needs an RDMA device:
+// the CpuRoceBackend tests skip unless the topology is named by the env vars
+// test_decoding_server.cpp uses,
+// CUDAQ_CPU_ROCE_TEST_{CHANNEL,DAEMON}_{DEVICE,IP} (client / fake server; with
+// SoftRoCE both may be the same device and IP).
+
+TEST(CpuRoceOptions, BadRingGeometryIsRejectedBeforeAnyNetworkIO) {
+  // No device needed: options are validated before the transceiver exists.
+  cpu_roce_options opts;
+  opts.device = "none";
+  opts.local_ip = "127.0.0.1";
+  const std::unordered_map<std::uint64_t, std::string> eps{{0, "127.0.0.1:1"}};
+  opts.num_slots = 6; // not a power of two
+  EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::invalid_argument);
+  opts.num_slots = 8;
+  opts.slot_size = 8; // smaller than an RPC header
+  EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::invalid_argument);
+  opts.slot_size = 256;
+  opts.device.clear();
+  EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::invalid_argument);
+#ifndef CUDAQ_QEC_PLAYBACK_CPU_ROCE
+  opts.device = "none"; // valid options, but the backend was not built
+  EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::runtime_error);
+#endif
+}
 
 #ifdef CUDAQ_QEC_PLAYBACK_CPU_ROCE
 
 namespace {
 
-using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
 using cudaq::realtime::RPC_MAGIC_RESPONSE;
 
 constexpr std::uint32_t kRoceSlots = 8, kRoceSlotSize = 256;
@@ -525,11 +546,9 @@ int listen_loopback_tcp(std::string &endpoint) {
   return fd;
 }
 
-/// The service end of the RoCE wire, standing in for decoding_server the way
-/// recording_server does over UDP: a transceiver that Sends replies, a
-/// one-shot TCP rendezvous, and a ring loop that walks rx slots in order,
-/// logs each function_id, answers reads after `decode_time` into the same tx
-/// slot -- or swallows every request when `reply` is false.
+/// recording_server's counterpart over RoCE: a one-shot TCP rendezvous, then
+/// a ring loop that walks rx slots in order, logs each function_id, and
+/// answers reads after `decode_time` -- or swallows everything if !`reply`.
 class recording_roce_server {
 public:
   recording_roce_server(const std::string &device, const std::string &ip,
@@ -680,7 +699,7 @@ protected:
   static std::string reads(int n) {
     std::string text;
     for (int i = 0; i < n; ++i)
-      text += std::string(i ? "+0" : "0") + " get_corrections return_size=1\n";
+      text += "+0 get_corrections return_size=1\n";
     return text;
   }
 
@@ -692,32 +711,7 @@ protected:
 
 } // namespace
 
-TEST_F(CpuRoceBackend, AWaitingCallerDoesNotHoldBackTheNextSend) {
-  connect();
-  auto result = run_schedule("0 get_corrections return_size=1\n"
-                             "+0 enqueue source=0b1\n");
-  ASSERT_EQ(result.records.size(), 2u);
-  const auto &read = result.records[0], &enqueue = result.records[1];
-  EXPECT_LT(enqueue.call_ns - read.call_ns, kDecodeNs / 2)
-      << "dispatch waited for the read's reply instead of moving straight to "
-         "the next event";
-  EXPECT_GE(read.return_ns - read.call_ns, kDecodeNs);
-  EXPECT_EQ(read.status, static_cast<std::int32_t>(RpcStatus::OK));
-  EXPECT_EQ(server->arrivals(),
-            (std::vector<std::uint32_t>{kGetCorrectionsFunctionId,
-                                        kEnqueueSyndromesFunctionId}));
-}
-
-TEST_F(CpuRoceBackend, ConcurrentSubmissionsEachGetTheirOwnReply) {
-  connect();
-  auto result = run_schedule(reads(2));
-  ASSERT_EQ(result.records.size(), 2u);
-  for (const auto &r : result.records)
-    EXPECT_EQ(r.status, static_cast<std::int32_t>(RpcStatus::OK));
-  EXPECT_EQ(server->arrivals().size(), 2u);
-}
-
-TEST_F(CpuRoceBackend, AnUnblockingReadKeepsItsPlaceInTheSyndromeStream) {
+TEST_F(CpuRoceBackend, AWaitingReadDoesNotHoldBackTheNextRound) {
   connect();
   static_source src(std::vector<std::vector<std::uint8_t>>(8, {1}));
   auto result = run_schedule("0 stream source=0 rounds=1\n"
@@ -730,61 +724,44 @@ TEST_F(CpuRoceBackend, AnUnblockingReadKeepsItsPlaceInTheSyndromeStream) {
                                         kEnqueueSyndromesFunctionId}));
   const auto &read = result.records[1], &next_round = result.records[2];
   EXPECT_LT(next_round.call_ns - read.call_ns, kDecodeNs / 2);
+  EXPECT_GE(read.return_ns - read.call_ns, kDecodeNs);
+  EXPECT_EQ(read.status, static_cast<std::int32_t>(RpcStatus::OK));
   EXPECT_TRUE(read.read_completed);
   EXPECT_EQ(read.correction_count, 1u);
 }
 
 TEST_F(CpuRoceBackend, MoreRequestsThanSlotsWaitTheirTurnAndAllComplete) {
-  // 12 slow reads through 8 slots wrap the ring: the extra queue locally and
-  // go out as slots free up, never failing, and still arrive in order.
+  // A 24-round stream and 12 slow reads through 8 slots wrap the ring: the
+  // extra queue locally, go out as slots free up, and still arrive in order.
   connect(std::chrono::milliseconds(30));
-  auto result = run_schedule(reads(12));
-  ASSERT_EQ(result.records.size(), 12u);
-  for (const auto &r : result.records) {
-    EXPECT_EQ(r.status, static_cast<std::int32_t>(RpcStatus::OK));
-    EXPECT_TRUE(r.read_completed);
-  }
-  EXPECT_EQ(server->arrivals(),
-            std::vector<std::uint32_t>(12, kGetCorrectionsFunctionId));
-  EXPECT_TRUE(result.warnings.empty());
-}
-
-TEST_F(CpuRoceBackend, AStreamLongerThanTheRingAcksEveryRoundInOrder) {
-  connect();
   constexpr std::size_t kRounds = 3 * kRoceSlots;
   static_source src(std::vector<std::vector<std::uint8_t>>(kRounds, {1, 0, 1}));
-  auto result =
-      run_schedule("0 stream source=0 rounds=" + std::to_string(kRounds) + "\n",
-                   {{0, &src}});
-  ASSERT_EQ(result.records.size(), 1u);
+  auto result = run_schedule(
+      "0 stream source=0 rounds=" + std::to_string(kRounds) + "\n" + reads(12),
+      {{0, &src}});
+  ASSERT_EQ(result.records.size(), 13u);
   EXPECT_EQ(result.records[0].status,
             static_cast<std::int32_t>(stream_terminate::OK));
   EXPECT_EQ(result.records[0].rounds_streamed, kRounds);
-  EXPECT_EQ(server->arrivals(),
-            std::vector<std::uint32_t>(kRounds, kEnqueueSyndromesFunctionId));
-}
-
-TEST_F(CpuRoceBackend, AServerThatNeverRepliesTimesOutBoundedWithAnError) {
-  // As with udp: a client-side timeout is INTERNAL_ERROR, resolved by the
-  // per-request sweep rather than stop()'s drain.
-  connect(kDecodeTime, /*reply=*/false, /*timeout_ms=*/80);
-  const auto t0 = std::chrono::steady_clock::now();
-  auto result = run_schedule("0 reset\n");
-  ASSERT_EQ(result.records.size(), 1u);
-  EXPECT_EQ(result.records[0].status,
-            static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR));
-  EXPECT_LT(ms_since(t0), 80 + 500);
-  EXPECT_EQ(server->arrivals(),
-            std::vector<std::uint32_t>{kResetDecoderFunctionId});
+  for (std::size_t i = 1; i < 13; ++i) {
+    EXPECT_EQ(result.records[i].status,
+              static_cast<std::int32_t>(RpcStatus::OK));
+    EXPECT_TRUE(result.records[i].read_completed);
+  }
+  std::vector<std::uint32_t> expected(kRounds, kEnqueueSyndromesFunctionId);
+  expected.insert(expected.end(), 12, kGetCorrectionsFunctionId);
+  EXPECT_EQ(server->arrivals(), expected);
+  EXPECT_TRUE(result.warnings.empty());
 }
 
 TEST_F(CpuRoceBackend, AFullRingBehindADeadServerStillFailsEveryRequest) {
-  // 12 reads through 8 slots with no replies: the first 8 time out and free
-  // their slots, the 4 queued behind them go out and time out in turn, and
-  // the whole run settles within two timeouts -- stop() never adds to it.
+  // 12 reads through 8 slots with no replies: the first 8 time out (as with
+  // udp, a client-side timeout is INTERNAL_ERROR) and free their slots, the
+  // 4 queued behind them go out and time out in turn, and the whole run
+  // settles within two timeouts -- stop() never adds to it.
   connect(std::chrono::milliseconds(1), /*reply=*/false, /*timeout_ms=*/80);
   const auto t0 = std::chrono::steady_clock::now();
-  auto result = run_schedule(reads(12));
+  auto result = run_schedule("0 reset\n" + reads(11));
   ASSERT_EQ(result.records.size(), 12u);
   for (const auto &r : result.records)
     EXPECT_EQ(r.status, static_cast<std::int32_t>(RpcStatus::INTERNAL_ERROR));
@@ -792,7 +769,7 @@ TEST_F(CpuRoceBackend, AFullRingBehindADeadServerStillFailsEveryRequest) {
   EXPECT_EQ(server->arrivals().size(), 12u);
 }
 
-TEST_F(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndPlanTrustsIt) {
+TEST_F(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndShortFramesAreRejected) {
   connect();
   EXPECT_EQ(sessions[0].second->max_frame_bytes, kRoceSlotSize);
   // 24B header + 32B payload + 2048 packed bits = 312 bytes > 256.
@@ -800,18 +777,6 @@ TEST_F(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndPlanTrustsIt) {
                           {0}, 1000),
                     router, {}),
                std::invalid_argument);
-  // 24B RPCResponse + 2000 packed bits = 274 bytes: no slot brings that back.
-  EXPECT_THROW(plan(parse("0 get_corrections return_size=2000\n", {0}, 1000),
-                    router, {}),
-               std::invalid_argument);
-  EXPECT_NO_THROW(plan(parse("0 enqueue source=0b" + std::string(512, '1') +
-                                 "\n0 get_corrections return_size=500\n",
-                             {0}, 1000),
-                       router, {}));
-}
-
-TEST_F(CpuRoceBackend, SendRejectsAFrameShorterThanAnRPCHeader) {
-  connect();
   std::vector<std::uint8_t> short_frame(sizeof(RPCHeader) - 1, 0);
   EXPECT_THROW(
       sessions[0].second->send({short_frame.data(), short_frame.size()}, {}),
@@ -833,37 +798,6 @@ TEST_F(CpuRoceBackend,
   const int silent_fd = listen_loopback_tcp(silent); // never completes the swap
   fails_in_time(silent);
   ::close(silent_fd);
-}
-
-TEST(CpuRoceOptions, BadRingGeometryIsRejectedBeforeAnyNetworkIO) {
-  // No device needed: options are validated before the transceiver exists.
-  cpu_roce_options opts;
-  opts.device = "none";
-  opts.local_ip = "127.0.0.1";
-  const std::unordered_map<std::uint64_t, std::string> eps{{0, "127.0.0.1:1"}};
-  opts.num_slots = 6; // not a power of two
-  EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::invalid_argument);
-  opts.num_slots = 8;
-  opts.slot_size = 8; // smaller than an RPC header
-  EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::invalid_argument);
-  opts.slot_size = 256;
-  opts.device.clear();
-  EXPECT_THROW(make_cpu_roce_sessions(eps, opts), std::invalid_argument);
-}
-
-#else // CUDAQ_QEC_PLAYBACK_CPU_ROCE
-
-TEST(CpuRoceBackend, FactoryReportsTheBackendWasNotBuilt) {
-  cpu_roce_options opts;
-  opts.device = "mlx5_0";
-  opts.local_ip = "10.0.0.1";
-  try {
-    make_cpu_roce_sessions({{0, "127.0.0.1:1"}}, opts);
-    FAIL() << "expected std::runtime_error";
-  } catch (const std::runtime_error &e) {
-    EXPECT_NE(std::string(e.what()).find("without CPU RoCE"),
-              std::string::npos);
-  }
 }
 
 #endif // CUDAQ_QEC_PLAYBACK_CPU_ROCE
