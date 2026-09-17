@@ -48,6 +48,7 @@ class cancellation_source;
 /// state.
 class cancellation_token {
 public:
+  /// @brief A token that never reports a stop.
   cancellation_token() noexcept = default;
 
   /// @brief False if the token was default-constructed
@@ -104,10 +105,12 @@ public:
     return request(cancellation_level::hard);
   }
 
+  /// @brief The currently requested level.
   cancellation_level level() const noexcept {
     return state_->load(std::memory_order_acquire);
   }
 
+  /// @brief A token observing this source's state.
   cancellation_token get_token() const noexcept {
     return cancellation_token(state_);
   }
