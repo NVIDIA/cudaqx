@@ -11,21 +11,21 @@
 # the final "runtime" stage ships only compiled binaries, shared libraries,
 # and a runtime subset of apt dependencies. No source code is included.
 #
-# Two artifacts (the NV QLDPC decoder plugin and the cudevice archive
-# backing device_graph dispatch) aren't part of this source tree and are
-# supplied as prebuilt files via an optional build context -- the flat
-# layout `nv-qldpc-decoder-<arch>_ubuntu24.04_cuda<version>_release.tar.gz`
+# Some artifacts (prebuilt decoder plugins such as nv-qldpc and nv-fusion,
+# and the cudevice archive backing device_graph dispatch) aren't part of
+# this source tree and are supplied as prebuilt files via an optional build
+# context -- the flat layout
+# `nv-qldpc-decoder-<arch>_ubuntu24.04_cuda<version>_release.tar.gz`
 # extracts to. In CI, build_decoding_server_docker.yaml populates this
 # from a draft-release asset:
 #
 #   artifacts/
-#     libcudaq-qec-nv-qldpc-decoder.so
+#     libcudaq-qec-<name>-decoder.so   (any number of decoder plugins)
 #     libcudaq-qec-realtime-cudevice-proprietary.a
 #
-# Both are optional independently: without the cudevice archive, device_graph
+# All are optional independently: without the cudevice archive, device_graph
 # dispatch is compiled but not linked (host-dispatch decoders still work);
-# without the nv-qldpc plugin, that decoder is simply absent from
-# lib/decoder-plugins.
+# any decoder plugin not supplied is simply absent from lib/decoder-plugins.
 #
 # CUDA-Q itself is NOT built here: it is taken verbatim from the official
 # published CUDA-Q container (cudaq_image below) -- the /opt/nvidia/cudaq
@@ -82,11 +82,12 @@ ARG cudaq_image=nvcr.io/nvidia/nightly/cuda-quantum:cu13-latest
 # path, so nvq++ and MLIR linking resolve consistently.
 #
 # Only branch-suffixed floating tags exist for this image. That's fine
-# for current builds (nothing from it ships, and libs/qec requires the
-# LLVM version EXACT, so toolchain drift fails at configure time rather
-# than yielding a mismatched binary), but it makes rebuilding an old
-# release image risky: by then this tag may serve a newer toolchain than
-# that release builds against.
+# for current builds: nothing from it ships, and a drifted toolchain
+# tends to fail at build time (the qec build compiles against CUDA-Q's
+# MLIR, which tracks specific LLVM versions) rather than yielding a
+# mismatched binary. But it makes rebuilding an old release image risky:
+# by then this tag may serve a newer toolchain than that release builds
+# against.
 ARG devcontainer_image=ghcr.io/nvidia/cuda-quantum-devcontainer
 ARG devcontainer_tag_suffix=gcc12-main
 # nvidia/cuda on Docker Hub tags by full patch version (e.g.
@@ -108,7 +109,7 @@ FROM ${cudaq_image} AS cudaq-official
 # ---------------------------------------------------------------------------
 # Stage: toolchain -- RDMA/DOCA/Holoscan/TensorRT dev headers needed to
 # compile the decoding server, plus patchelf (needed at CMake configure time
-# when an nv-qldpc .so artifact is supplied).
+# when decoder plugin .so artifacts are supplied).
 # ---------------------------------------------------------------------------
 FROM ${devcontainer_image}:${TARGETARCH}-cu${CUDA_VERSION}-${devcontainer_tag_suffix} AS toolchain
 
@@ -286,7 +287,7 @@ RUN --mount=type=cache,target=/root/.ccache,sharing=locked \
 
 # cudaqx/qec itself: decoding_server, hsb_fpga_syndrome_playback, the QEC
 # and realtime libraries, and the decoder plugins (pymatching,
-# multi_error_lut, trt_decoder, plus nv-qldpc if supplied via the
+# multi_error_lut, trt_decoder, plus any prebuilt plugins supplied via the
 # artifacts context). Python bindings are off -- this is a binary runtime
 # image, not a wheel build. CUDAQX_INCLUDE_TESTS stays ON despite that
 # name: hsb_fpga_syndrome_playback is an actual deliverable that lives
@@ -296,10 +297,12 @@ RUN --mount=type=cache,target=/root/.ccache,sharing=locked \
 # runtime stage.
 #
 # The artifacts context is bind-mounted read-only, but
-# add_target_libs_to_wheel() (libs/qec/CMakeLists.txt) patchelfs the
-# nv-qldpc .so's rpath in place at configure time, so it needs a writable
-# copy first. The cudevice archive is only ever read (imported as a static
-# lib), so the read-only mount is fine for it as-is.
+# add_target_libs_to_wheel() (libs/qec/CMakeLists.txt) patchelfs each
+# decoder plugin's rpath in place at configure time, so they need writable
+# copies first. QEC_EXTERNAL_DECODERS is a CMake list; every
+# libcudaq-qec-*-decoder.so present in the artifacts context is embedded.
+# The cudevice archive is only ever read (imported as a static lib), so
+# the read-only mount is fine for it as-is.
 RUN --mount=type=bind,from=artifacts,target=/mnt/artifacts \
     --mount=type=cache,target=/root/.ccache,sharing=locked \
     set -e; \
@@ -310,13 +313,18 @@ RUN --mount=type=bind,from=artifacts,target=/mnt/artifacts \
     else \
         echo "== cudevice archive: absent (device_graph dispatch will not be linked)"; \
     fi; \
-    if [ -f /mnt/artifacts/libcudaq-qec-nv-qldpc-decoder.so ]; then \
-        mkdir -p /tmp/nv-qldpc-plugin; \
-        cp -f /mnt/artifacts/libcudaq-qec-nv-qldpc-decoder.so /tmp/nv-qldpc-plugin/; \
-        export QEC_EXTERNAL_DECODERS=/tmp/nv-qldpc-plugin/libcudaq-qec-nv-qldpc-decoder.so; \
-        echo "== nv-qldpc plugin: $QEC_EXTERNAL_DECODERS"; \
+    _plugins=""; \
+    mkdir -p /tmp/decoder-plugins; \
+    for so in /mnt/artifacts/libcudaq-qec-*-decoder.so; do \
+        [ -e "$so" ] || continue; \
+        cp -f "$so" /tmp/decoder-plugins/; \
+        _plugins="${_plugins:+$_plugins;}/tmp/decoder-plugins/$(basename "$so")"; \
+    done; \
+    if [ -n "$_plugins" ]; then \
+        export QEC_EXTERNAL_DECODERS="$_plugins"; \
+        echo "== external decoder plugins: $QEC_EXTERNAL_DECODERS"; \
     else \
-        echo "== nv-qldpc plugin: absent (nv-qldpc-decoder will not be available)"; \
+        echo "== external decoder plugins: none supplied"; \
     fi; \
     cmake -S libs/qec -B build \
         -DCMAKE_BUILD_TYPE=Release \
@@ -390,7 +398,7 @@ RUN set -e; \
 # CUDA-Q (the official container's install, shipped verbatim) +
 # cudaq-realtime + cudaqx/qec runtime trees, at the SAME absolute paths
 # used in the builder stage (load-bearing for decoding_server's baked-in
-# RPATH). The nv-qldpc plugin (if supplied) is already inside
+# RPATH). Supplied decoder plugins are already inside
 # CUDAQX_INSTALL_PREFIX, rpath-patched, via `cmake --install`; the cudevice
 # archive (if supplied) is already statically linked into the
 # decoding_server binary itself -- neither artifact needs a separate COPY

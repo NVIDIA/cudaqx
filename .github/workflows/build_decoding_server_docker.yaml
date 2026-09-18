@@ -86,13 +86,15 @@ jobs:
           # stderr is left alone so auth/network failures are still visible.
           gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}" > /dev/null
 
-          # nv-qldpc-decoder-<arch>_ubuntu24.04_cuda<version>_py3.<pyver>_release.tar.gz --
-          # per-Python-version variants (verified: the .so differs by
-          # build, not just incidentally). decoding_server dlopens this as
-          # a plugin and never touches Python, so any variant should be
-          # functionally equivalent; py3.12 picked for consistency with
-          # the dev image's own default interpreter.
-          tar -C artifacts -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_py3.12_release.tar.gz
+          # Expects a docker-files-<run> draft release (assets extracted
+          # from the L0_MergeRequest build's installed_files.zip -- the
+          # native Ubuntu 24.04 install tree this image also builds in),
+          # NOT a wheels-<run> release: those carry per-Python
+          # (_py3.<ver>_) variants of the .so extracted from the cudaq_qec
+          # wheels, built under the manylinux toolchain for the wheel
+          # layout. decoding_server dlopens the plugin from C++, so the
+          # native build is the matching artifact.
+          tar -C artifacts -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_release.tar.gz
           test -f artifacts/libcudaq-qec-nv-qldpc-decoder.so
           # The cudevice archive is NOT bundled in this tarball (verified
           # against both docker-files-* and wheels-* releases) -- it's a
@@ -197,16 +199,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Tag with the short commit SHA (traceable to an exact commit)
-          # and with the release version when built from a
-          # releases/vX.Y.Z branch. All tags point at the same
+          # Two tags per build, plus the release version when built from a
+          # releases/vX.Y.Z branch (cu<ver>- prefix first, matching the
+          # official CUDA-Q image convention, and date before SHA so tags
+          # sort chronologically): the date+SHA tag is the immutable
+          # handle for pinning a specific build (the SHA alone wouldn't
+          # determine the contents -- the consumed CUDA-Q nightly floats,
+          # so commit and build date together identify an image), and
+          # cu<ver>-latest is the moving pointer to the most recent build
+          # for that CUDA version. All tags from one run point at the same
           # multi-platform manifest.
           short_sha="${GITHUB_SHA:0:8}"
-          tag_suffixes=("${short_sha}-cu${CUDA_VERSION}")
+          build_date=$(date -u +%Y%m%d)
+          cuda_major="${CUDA_VERSION%%.*}"
+          tag_suffixes=(
+            "cu${cuda_major}-${build_date}-${short_sha}"
+            "cu${cuda_major}-latest"
+          )
 
           if [[ "$GIT_REF_NAME" == releases/* ]]; then
             release_version=$(echo "$GIT_REF_NAME" | grep -Eo '([0-9]+\.)+[0-9]+')
-            tag_suffixes+=("${release_version}-cu${CUDA_VERSION}")
+            tag_suffixes+=("cu${cuda_major}-${release_version}")
           fi
 
           tags=()
