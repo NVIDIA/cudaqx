@@ -511,6 +511,7 @@ TEST(CpuRoceOptions, BadRingGeometryIsRejectedBeforeAnyNetworkIO) {
 
 namespace {
 
+using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
 using cudaq::realtime::RPC_MAGIC_RESPONSE;
 
 constexpr std::uint32_t kRoceSlots = 8, kRoceSlotSize = 256;
@@ -548,12 +549,14 @@ int listen_loopback_tcp(std::string &endpoint) {
 
 /// recording_server's counterpart over RoCE: a one-shot TCP rendezvous, then
 /// a ring loop that walks rx slots in order, logs each function_id, and
-/// answers reads after `decode_time` -- or swallows everything if !`reply`.
+/// answers reads after `decode_time` (then idles `settle` before the next
+/// slot) -- or swallows everything if !`reply`.
 class recording_roce_server {
 public:
   recording_roce_server(const std::string &device, const std::string &ip,
-                        std::chrono::milliseconds decode_time, bool reply)
-      : decode_time_(decode_time), reply_(reply), ip_(ip) {
+                        std::chrono::milliseconds decode_time, bool reply,
+                        std::chrono::milliseconds settle)
+      : decode_time_(decode_time), settle_(settle), reply_(reply), ip_(ip) {
     xcvr_ = cpu_roce_create_transceiver(
         device.c_str(), 1, 0u, kRoceSlotSize, kRoceSlotSize, kRoceSlots,
         "0.0.0.0", 0, 0, 0, 0, CPU_ROCE_TX_MODE_RDMA_SEND, 0, 0);
@@ -645,6 +648,8 @@ private:
                          __ATOMIC_RELEASE);
       }
       __atomic_store_n(&rx_flags[slot], 0ull, __ATOMIC_RELEASE);
+      if (is_read)
+        std::this_thread::sleep_for(settle_);
       slot = (slot + 1) % kRoceSlots;
     }
   }
@@ -652,7 +657,7 @@ private:
   cpu_roce_transceiver_t xcvr_ = nullptr;
   int listen_fd_ = -1;
   std::string endpoint_;
-  std::chrono::milliseconds decode_time_;
+  std::chrono::milliseconds decode_time_, settle_;
   bool reply_;
   std::string ip_;
   mutable std::mutex mu_;
@@ -680,10 +685,12 @@ protected:
   }
 
   void connect(std::chrono::milliseconds decode_time = kDecodeTime,
-               bool reply = true, std::uint32_t timeout_ms = 5000) {
+               bool reply = true, std::uint32_t timeout_ms = 5000,
+               std::chrono::milliseconds settle = {}) {
     server = std::make_unique<recording_roce_server>(
         env_or_empty("CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE"),
-        env_or_empty("CUDAQ_CPU_ROCE_TEST_DAEMON_IP"), decode_time, reply);
+        env_or_empty("CUDAQ_CPU_ROCE_TEST_DAEMON_IP"), decode_time, reply,
+        settle);
     sessions =
         make_cpu_roce_sessions({{0, server->endpoint()}}, opts, timeout_ms);
     router = {{0, sessions[0].second.get()}};
@@ -769,9 +776,35 @@ TEST_F(CpuRoceBackend, AFullRingBehindADeadServerStillFailsEveryRequest) {
   EXPECT_EQ(server->arrivals().size(), 12u);
 }
 
-TEST_F(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndShortFramesAreRejected) {
+TEST_F(CpuRoceBackend, ALateReplyAfterATimeoutAndRingWrapFreesNoOtherSlot) {
+  // A read answered at 300ms behind a 200ms timeout, with 16 resets queued
+  // behind it. At 200ms the read and the first 7 resets (stuck behind it on
+  // the server) time out and free slots 0-7; resets 8-15 take them and the
+  // 16th queues behind slot 0, now owned by reset 8. The read's late reply
+  // lands at RX slot 0 first: it must not release slot 0, or the 16th reset
+  // overwrites the 8th in the server's ring during the server's 50ms pause
+  // and the 8th is never answered.
+  connect(std::chrono::milliseconds(300), /*reply=*/true,
+          /*timeout_ms=*/200, std::chrono::milliseconds(50));
+  std::string text = "0 get_corrections return_size=1\n";
+  for (int i = 0; i < 16; ++i)
+    text += "+0 reset\n";
+  auto result = run_schedule(text);
+  ASSERT_EQ(result.records.size(), 17u);
+  for (std::size_t i = 0; i < 17; ++i)
+    EXPECT_EQ(result.records[i].status,
+              static_cast<std::int32_t>(i < 8 ? RpcStatus::INTERNAL_ERROR
+                                              : RpcStatus::OK))
+        << "record " << i;
+}
+
+TEST_F(CpuRoceBackend, MaxFrameBytesIsTheSlotSizeAndBadFramesAreRejected) {
   connect();
   EXPECT_EQ(sessions[0].second->max_frame_bytes, kRoceSlotSize);
+  // The session owns the slot bound itself, not just via plan().
+  std::vector<std::uint8_t> too_big(kRoceSlotSize + 1, 0);
+  EXPECT_THROW(sessions[0].second->send({too_big.data(), too_big.size()}, {}),
+               std::invalid_argument);
   // 24B header + 32B payload + 2048 packed bits = 312 bytes > 256.
   EXPECT_THROW(plan(parse("0 enqueue source=0b" + std::string(2048, '1') + "\n",
                           {0}, 1000),

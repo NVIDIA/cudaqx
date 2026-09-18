@@ -879,6 +879,9 @@ public:
     if (f.size < sizeof(RPCHeader))
       throw std::invalid_argument(
           "cpu_roce_session::send: frame is smaller than RPCHeader");
+    if (f.size > stride_) 
+      throw std::invalid_argument(
+          "cpu_roce_session::send: frame exceeds the slot size");
     auto &e = ring_.reserve();
     e.kind = request_ring::entry::kRequest;
     e.t = t;
@@ -961,8 +964,10 @@ private:
     return true;
   }
 
-  /// Collect the reply at the RX cursor, if any. Replies land in slot order
-  /// (Sends consume our recv WQEs FIFO) but are matched by request_id.
+  /// Collect the reply at the RX cursor, if any. Replies land in arrival
+  /// order (Sends consume our recv WQEs FIFO), which drifts from TX slot
+  /// order once a request has timed out and its slot was reused, so the TX
+  /// slot is released by the matched request_id, never by RX position.
   bool poll_reply() {
     const std::uint32_t slot = cursor_;
     if (__atomic_load_n(&rx_flags_[slot], __ATOMIC_ACQUIRE) == 0)
@@ -971,7 +976,6 @@ private:
                 rx_data_ + static_cast<std::size_t>(slot) * stride_, stride_);
     __atomic_store_n(&rx_flags_[slot], 0ull, __ATOMIC_RELEASE); // re-arm
     cursor_ = (cursor_ + 1) & slot_mask_;
-    slot_owner_[slot] = kNoOwner;
 
     const auto *resp =
         reinterpret_cast<const RPCResponse *>(reply_scratch_.data());
@@ -979,11 +983,13 @@ private:
                   ? pending_.find(resp->request_id)
                   : pending_.end();
     if (it == pending_.end())
-      return true; // garbage, or a stale reply nobody waits for any more
-    const tag t = it->second.t;
+      return true; // garbage, or a late reply whose request already timed out
+    const pending p = it->second;
     pending_.erase(it);
+    if (slot_owner_[p.slot] == resp->request_id)
+      slot_owner_[p.slot] = kNoOwner;
     complete(
-        t, static_cast<RpcStatus>(resp->status),
+        p.t, static_cast<RpcStatus>(resp->status),
         reply_scratch_.data() + sizeof(RPCResponse),
         std::min<std::size_t>(resp->result_len, stride_ - sizeof(RPCResponse)));
     return true;
