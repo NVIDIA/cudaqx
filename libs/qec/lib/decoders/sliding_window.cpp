@@ -342,6 +342,8 @@ sliding_window::decode_batch(const std::vector<std::vector<float_t>> &syndromes,
 
 void sliding_window::reset_stream() {
   window_rounds.clear();
+  rw_results.clear();
+  syndrome_mods.clear();
   rounds_since_last_reset = 0;
   num_windows_decoded = 0;
 }
