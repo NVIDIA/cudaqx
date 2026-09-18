@@ -7,7 +7,8 @@
 # ============================================================================ #
 
 # The playback emulator core: parser, timing loop, dispatch (polling streams),
-# the three required session backends, syndrome sources, and the downstream
+# the session backends (null, inproc, udp, and cpu_roce when the CUDA-Q CPU
+# RoCE transport is installed), syndrome sources, and the downstream
 # CSV analyzer. This file is the one place that reaches outside this tool's
 # own directory, for pieces it borrows rather than owns a copy of: the
 # existing decoding-server (RpcSlot.h et al.) and core (heterogeneous_map).
@@ -64,6 +65,34 @@ target_link_libraries(cudaq-qec-playback-emulator
     libstim
     Threads::Threads
 )
+
+# Optional `cpu_roce` backend (CUDA-Q's CPU RoCE transceiver over libibverbs).
+# Defaults to ON exactly when both are found; forcing it ON without them fails.
+find_library(QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY
+  cudaq-realtime-cpu-roce-transport
+  HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR} ${CUDAQ_INSTALL_PREFIX}
+  PATH_SUFFIXES lib)
+find_library(QEC_PLAYBACK_IBVERBS_LIBRARY ibverbs)
+set(_cpu_roce_found OFF)
+if(QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY AND QEC_PLAYBACK_IBVERBS_LIBRARY)
+  set(_cpu_roce_found ON)
+endif()
+option(CUDAQ_QEC_PLAYBACK_CPU_ROCE
+  "Build the playback emulator's cpu_roce backend (needs the CUDA-Q cpu-roce transport and libibverbs)"
+  ${_cpu_roce_found})
+message(STATUS
+  "playback-emulator: CUDAQ_QEC_PLAYBACK_CPU_ROCE=${CUDAQ_QEC_PLAYBACK_CPU_ROCE}")
+if(CUDAQ_QEC_PLAYBACK_CPU_ROCE)
+  if(NOT _cpu_roce_found)
+    message(FATAL_ERROR "CUDAQ_QEC_PLAYBACK_CPU_ROCE=ON but "
+      "cudaq-realtime-cpu-roce-transport or libibverbs was not found")
+  endif()
+  # PUBLIC: the unit tests' fake RoCE server is compiled under the same guard.
+  target_compile_definitions(cudaq-qec-playback-emulator PUBLIC
+    CUDAQ_QEC_PLAYBACK_CPU_ROCE)
+  target_link_libraries(cudaq-qec-playback-emulator PRIVATE
+    ${QEC_PLAYBACK_CPU_ROCE_TRANSPORT_LIBRARY} ${QEC_PLAYBACK_IBVERBS_LIBRARY})
+endif()
 
 set_target_properties(cudaq-qec-playback-emulator PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
