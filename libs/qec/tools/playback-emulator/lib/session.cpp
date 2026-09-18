@@ -879,7 +879,7 @@ public:
     if (f.size < sizeof(RPCHeader))
       throw std::invalid_argument(
           "cpu_roce_session::send: frame is smaller than RPCHeader");
-    if (f.size > stride_) 
+    if (f.size > stride_)
       throw std::invalid_argument(
           "cpu_roce_session::send: frame exceeds the slot size");
     auto &e = ring_.reserve();
