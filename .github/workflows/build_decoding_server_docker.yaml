@@ -129,7 +129,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: docker/decoding-server/Dockerfile
+          file: docker/release/Dockerfile.decoding-server
           platforms: linux/${{ matrix.platform }}
           build-contexts: |
             artifacts=./artifacts

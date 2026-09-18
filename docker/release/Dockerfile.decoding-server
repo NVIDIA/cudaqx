@@ -50,7 +50,7 @@
 # ABI breakage would be expected to surface.
 #
 # Build (from the repo root):
-#   DOCKER_BUILDKIT=1 docker build -f docker/decoding-server/Dockerfile \
+#   DOCKER_BUILDKIT=1 docker build -f docker/release/Dockerfile.decoding-server \
 #     --build-arg CUDA_VERSION=13.0 \
 #     --build-arg cuda_native_arch=90 \
 #     --build-context artifacts=./path/to/artifacts \
