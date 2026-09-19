@@ -55,8 +55,8 @@ ARG TARGETARCH
 # is consumed at build time and shipped verbatim in the final image.
 #   nightly (tracks cuda-quantum main): nvcr.io/nvidia/nightly/cuda-quantum:cu<major>-latest
 #   releases (retained, versioned):     nvcr.io/nvidia/quantum/cuda-quantum:cu<major>-<version>
-# Release builds should pin a versioned release image. Releases up to and
-# including 0.15.1 predate in-container realtime support and cannot be used.
+# Release builds should pin a versioned release image. 0.16.0 is the first
+# release with in-container realtime support; earlier releases cannot be used.
 ARG cudaq_image=nvcr.io/nvidia/nightly/cuda-quantum:cu13-latest
 # Toolchain for compiling cudaq-realtime and cudaqx/qec: gcc-12, CUDA
 # toolkit, and the LLVM/MLIR dev install CUDA-Q builds against, from the
@@ -64,7 +64,7 @@ ARG cudaq_image=nvcr.io/nvidia/nightly/cuda-quantum:cu13-latest
 # floating tags exist for this image; fine for current builds (nothing
 # from it ships, and toolchain drift tends to fail at build time rather
 # than yielding a mismatched binary), but it makes rebuilding an old
-# release image risky: by then this tag may serve a newer toolchain than
+# release image tricky: by then this tag may serve a newer toolchain than
 # that release builds against.
 ARG devcontainer_image=ghcr.io/nvidia/cuda-quantum-devcontainer
 ARG devcontainer_tag_suffix=gcc12-main
@@ -217,12 +217,13 @@ COPY . .
 # co-developed dispatch/RPC protocol, so the pair must come from the same
 # commit.
 #
-# TODO: once release builds pin a realtime-enabled versioned cudaq_image,
-# consider replacing this rebuild with the official prebuilt realtime
-# installer from the same release (install_cuda_quantum_realtime_*).
-# Needs verification that device-linking its dispatch archive (built for
-# CUDA archs "80-real;90" only) into our cuda_native_arch-targeted link
-# works on sm_100/sm_121 targets.
+# TODO: for builds pinning a versioned cudaq_image (0.16.0+), the same
+# release also ships a prebuilt HSB-enabled realtime installer
+# (install_cuda_quantum_realtime_*) that could stand in for this rebuild.
+# Not adopted (yet): nightly builds have no paired installer, so the
+# rebuild path must remain regardless, and the installer's dispatch
+# archive is built for CUDA archs "80-real;90" only -- unverified against
+# our sm_100/sm_121 targets.
 RUN --mount=type=cache,target=/root/.ccache,sharing=locked \
     set -e; \
     . scripts/cudaq_realtime_cmake_flags.sh; \

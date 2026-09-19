@@ -13,7 +13,7 @@ on:
         description: >-
           Official CUDA-Q container to consume, without a tag. Use
           nvcr.io/nvidia/quantum/cuda-quantum for release builds (versioned
-          tags are retained there) once a realtime-enabled release exists.
+          tags are retained there; 0.16.0 is the first usable release).
         default: nvcr.io/nvidia/nightly/cuda-quantum
         required: false
       cudaq_image_version:
@@ -21,7 +21,7 @@ on:
         description: >-
           Version segment of the CUDA-Q container tag (full tag becomes
           cu<major>-<version>): "latest" for nightly, or a release version
-          like "0.15.2".
+          like "0.16.0".
         default: latest
         required: false
       assets_repo:
