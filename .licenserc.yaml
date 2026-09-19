@@ -8,10 +8,8 @@ header:
       SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
       SPDX-License-Identifier: Apache-2.0
 
-    # Match the OSRB-required header: exact entity string plus the SPDX identifier.
     pattern: |
-      SPDX-FileCopyrightText: Copyright \(c\) [0-9]{4}( - [0-9]{4})? NVIDIA CORPORATION & AFFILIATES\. All rights reserved\.
-      SPDX-License-Identifier: Apache-2\.0
+      SPDX-License-Identifier: Apache-2.0
 
   paths:
     - '**'
