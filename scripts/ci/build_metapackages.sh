@@ -14,7 +14,7 @@ set -e
 # Note, you must run this script from the root of the repository.
 TOP_DIR=$(pwd)
 
-if [ ! -e Contributor_License_Agreement.md ]; then
+if [ ! -e LICENSE ] || [ ! -d libs/qec/python/metapackages ]; then
   echo "You must run this script from the root of the repository."
   exit 1
 fi
